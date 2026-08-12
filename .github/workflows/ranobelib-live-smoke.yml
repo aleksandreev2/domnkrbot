@@ -1,0 +1,15 @@
+name: RanobeLib live smoke
+
+on:
+  pull_request:
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm run sync:ranobelib:spike -- --limit 3 --state /tmp/ranobelib-sync-state.json
