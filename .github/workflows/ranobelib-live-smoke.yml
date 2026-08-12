@@ -11,28 +11,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Inspect team route calls
+      - name: Inspect catalog filter implementation
         run: |
           node --input-type=module <<'NODE'
-          const url = 'https://ranobelib.me/build/assets/team-_IkRvLmj.js';
+          const url = 'https://ranobelib.me/build/assets/common-BLGqP_xm.js';
           const js = await (await fetch(url)).text();
-          console.log('team chunk bytes', js.length);
-          const calls = [...new Set([...js.matchAll(/(?:get|post|update|delete)\((['"])(\/[^'"]+)\1/g)].map((m) => m[2]))];
-          console.log('API call strings:');
-          console.log(calls.join('\n'));
-          for (const needle of ['api-endpoint', 'TeamTitles', 'team-show', 'teams/{', 'requestHandler']) {
+          for (const needle of ['target_model','target_id','default-filters','defaultFilters','/manga?', 'get("/manga"', 'get("/media"', 'get("/titles"']) {
             console.log(`\nCONTEXT ${needle}`);
             let pos = 0, count = 0;
-            while (count < 20) {
+            while (count < 30) {
               const i = js.indexOf(needle, pos);
               if (i < 0) break;
-              console.log(js.slice(Math.max(0, i - 600), Math.min(js.length, i + needle.length + 1200)).replace(/\s+/g, ' '));
+              console.log('INDEX', i, js.slice(Math.max(0, i - 900), Math.min(js.length, i + needle.length + 1800)).replace(/\s+/g, ' '));
               pos = i + needle.length;
               count += 1;
             }
           }
           NODE
-      - name: Probe current RanobeLib API
+      - name: Probe team title catalog filters
         run: |
           node --input-type=module <<'NODE'
           const base = 'https://api.cdnlibs.org/api';
@@ -44,23 +40,20 @@ jobs:
             origin: 'https://ranobelib.me',
             referer: 'https://ranobelib.me/'
           };
-          const urls = [
-            `${base}/teams/11969--dom-nekromanta`,
-            `${base}/teams/11969`,
-            `${base}/teams/11969/chapters`,
-            `${base}/teams/11969/manga`,
-            `${base}/teams/11969/titles`,
-            `${base}/manga/62387--pokemon-master-of-tactics`,
-            `${base}/manga/62387--pokemon-master-of-tactics/chapters`
+          const qs = new URLSearchParams({ target_id: '11969', target_model: 'team' }).toString();
+          const candidates = [
+            `${base}/manga?${qs}`,
+            `${base}/media?${qs}`,
+            `${base}/titles?${qs}`,
+            `${base}/catalog?${qs}`,
+            `${base}/manga?target_id=11969&target_model=team&site_id=3`,
+            `${base}/manga?target_id=11969&target_model=team&limit=100`,
+            `${base}/teams/11969/chapters?limit=100`
           ];
-          for (const url of urls) {
-            try {
-              const response = await fetch(url, { headers });
-              const text = await response.text();
-              console.log('\nURL', url, 'STATUS', response.status, 'TYPE', response.headers.get('content-type'), 'BYTES', text.length);
-              console.log(text.slice(0, 5000).replace(/\s+/g, ' '));
-            } catch (error) {
-              console.log('\nURL', url, 'ERROR', error?.message ?? String(error));
-            }
+          for (const url of candidates) {
+            const response = await fetch(url, { headers });
+            const text = await response.text();
+            console.log('\nURL', url, 'STATUS', response.status, 'BYTES', text.length, 'TYPE', response.headers.get('content-type'));
+            console.log(text.slice(0, 4000).replace(/\s+/g, ' '));
           }
           NODE
