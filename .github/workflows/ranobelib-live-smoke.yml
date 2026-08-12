@@ -12,4 +12,39 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      - name: Probe live team page
+        run: |
+          node --input-type=module <<'NODE'
+          const url = 'https://ranobelib.me/ru/team/11969--dom-nekromanta';
+          const response = await fetch(url, { headers: { accept: 'text/html,application/xhtml+xml', 'accept-language': 'ru,en;q=0.7' } });
+          const html = await response.text();
+          console.log('status', response.status, 'url', response.url, 'content-type', response.headers.get('content-type'), 'length', html.length);
+          console.log('book refs in raw HTML', [...html.matchAll(/\/ru\/book\/(\d+--[^?"'<>\\s&]+)/gi)].length);
+          console.log('scripts', [...html.matchAll(/<script[^>]+src=["']([^"']+)/gi)].map((m) => m[1]).slice(-20));
+          console.log('team/api hints', [...new Set([...html.matchAll(/[^"'<>\\s]{0,80}(?:api|team)[^"'<>\\s]{0,120}/gi)].map((m) => m[0]))].slice(0, 40));
+          console.log('tail', html.slice(-3000));
+          NODE
+      - name: Probe likely API endpoints
+        run: |
+          node --input-type=module <<'NODE'
+          const urls = [
+            'https://api2.mangalib.me/api/team/11969',
+            'https://api2.mangalib.me/api/teams/11969',
+            'https://api2.mangalib.me/api/team/11969/manga',
+            'https://api2.mangalib.me/api/manga?team_id=11969',
+            'https://api2.mangalib.me/api/manga?teams[]=11969',
+            'https://api2.mangalib.me/api/manga/62387--pokemon-master-of-tactics',
+            'https://api2.mangalib.me/api/manga/62387--pokemon-master-of-tactics/chapters'
+          ];
+          for (const url of urls) {
+            try {
+              const response = await fetch(url, { headers: { accept: 'application/json,text/plain,*/*' } });
+              const text = await response.text();
+              console.log('\nURL', url, 'STATUS', response.status, 'TYPE', response.headers.get('content-type'), 'LEN', text.length);
+              console.log(text.slice(0, 700));
+            } catch (error) {
+              console.log('\nURL', url, 'ERROR', error?.message ?? String(error));
+            }
+          }
+          NODE
       - run: npm run sync:ranobelib:spike -- --limit 3 --state /tmp/ranobelib-sync-state.json
