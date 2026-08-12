@@ -11,36 +11,23 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Probe current same-origin RanobeLib API
+      - name: Inspect API client configuration
         run: |
           node --input-type=module <<'NODE'
-          const urls = [
-            'https://ranobelib.me/api/teams/11969--dom-nekromanta',
-            'https://ranobelib.me/api/teams/11969',
-            'https://ranobelib.me/api/manga/62387--pokemon-master-of-tactics',
-            'https://ranobelib.me/api/manga/62387--pokemon-master-of-tactics/chapters'
+          const url = 'https://ranobelib.me/build/assets/common-BLGqP_xm.js';
+          const js = await (await fetch(url)).text();
+          const needles = [
+            'baseURL','baseUrl','apiUrl','api_url','API_URL','location.hostname','location.host',
+            'location.origin','hostname','api.','cdnlibs.org','new URL(','.params2=', 'params2(',
+            'parseUrl(', 'axios.create', 'new URLSearchParams'
           ];
-          for (const url of urls) {
-            const response = await fetch(url, { headers: { accept: 'application/json', 'accept-language': 'ru,en;q=0.7', referer: 'https://ranobelib.me/' } });
-            const text = await response.text();
-            console.log('\nURL', url, 'STATUS', response.status, 'TYPE', response.headers.get('content-type'), 'BYTES', text.length);
-            console.log(text.slice(0, 1600).replace(/\s+/g, ' '));
-          }
-          NODE
-      - name: Inspect team page frontend chunk
-        run: |
-          node --input-type=module <<'NODE'
-          const url = 'https://ranobelib.me/build/assets/team-_IkRvLmj.js';
-          const response = await fetch(url);
-          const js = await response.text();
-          console.log('status', response.status, 'type', response.headers.get('content-type'), 'bytes', js.length);
-          for (const needle of ['/teams/', '/manga', 'fetchTeam', 'media', 'chapters', 'slug_url']) {
+          for (const needle of needles) {
             console.log('\nNEEDLE', needle);
             let pos = 0, shown = 0;
             while (shown < 20) {
               const i = js.indexOf(needle, pos);
               if (i < 0) break;
-              console.log(js.slice(Math.max(0, i - 400), Math.min(js.length, i + needle.length + 900)).replace(/\s+/g, ' '));
+              console.log('INDEX', i, js.slice(Math.max(0, i - 700), Math.min(js.length, i + needle.length + 1400)).replace(/\s+/g, ' '));
               pos = i + needle.length;
               shown += 1;
             }
