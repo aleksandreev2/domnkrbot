@@ -12,39 +12,51 @@ jobs:
         with:
           node-version: 22
       - run: npm install
-      - name: Probe live team page
+      - name: Inspect live RanobeLib frontend bundle
         run: |
           node --input-type=module <<'NODE'
-          const url = 'https://ranobelib.me/ru/team/11969--dom-nekromanta';
-          const response = await fetch(url, { headers: { accept: 'text/html,application/xhtml+xml', 'accept-language': 'ru,en;q=0.7' } });
-          const html = await response.text();
-          console.log('status', response.status, 'url', response.url, 'content-type', response.headers.get('content-type'), 'length', html.length);
-          console.log('book refs in raw HTML', [...html.matchAll(/\/ru\/book\/(\d+--[^?"'<>\\s&]+)/gi)].length);
-          console.log('scripts', [...html.matchAll(/<script[^>]+src=["']([^"']+)/gi)].map((m) => m[1]).slice(-20));
-          console.log('team/api hints', [...new Set([...html.matchAll(/[^"'<>\\s]{0,80}(?:api|team)[^"'<>\\s]{0,120}/gi)].map((m) => m[0]))].slice(0, 40));
-          console.log('tail', html.slice(-3000));
+          const pageUrl = 'https://ranobelib.me/ru/team/11969--dom-nekromanta';
+          const page = await fetch(pageUrl, { headers: { accept: 'text/html', 'accept-language': 'ru,en;q=0.7' } });
+          const html = await page.text();
+          const scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map((m) => new URL(m[1], pageUrl).href);
+          const appScript = scripts.find((url) => /\/build\/assets\/main-[^/]+\.js(?:\?|$)/.test(url));
+          console.log('page', page.status, 'bytes', html.length, 'appScript', appScript);
+          if (!appScript) throw new Error('main frontend bundle not found');
+
+          const jsResponse = await fetch(appScript, { headers: { accept: 'application/javascript,*/*;q=0.8' } });
+          const js = await jsResponse.text();
+          console.log('bundle', jsResponse.status, jsResponse.headers.get('content-type'), 'bytes', js.length);
+
+          const urlStrings = [...new Set([...js.matchAll(/https?:\\?\/\\?\/[^"'`\\s)]+/g)].map((m) => m[0].replaceAll('\\/', '/')))];
+          console.log('\nURL STRINGS');
+          for (const value of urlStrings.filter((x) => /api|manga|ranobe|lib\.social/i.test(x)).slice(0, 150)) console.log(value.slice(0, 500));
+
+          const needles = ['api2', 'api.lib', '/team/', '/teams/', 'team_id', 'teams[]', 'teamId', 'manga?', '/manga/', 'branches', 'chapters'];
+          for (const needle of needles) {
+            console.log(`\nCONTEXT ${needle}`);
+            let start = 0;
+            let shown = 0;
+            while (shown < 25) {
+              const index = js.indexOf(needle, start);
+              if (index < 0) break;
+              console.log(js.slice(Math.max(0, index - 280), Math.min(js.length, index + needle.length + 500)).replace(/\s+/g, ' '));
+              start = index + needle.length;
+              shown += 1;
+            }
+            console.log('shown', shown);
+          }
           NODE
-      - name: Probe likely API endpoints
+      - name: Probe individual title through public page and API
         run: |
           node --input-type=module <<'NODE'
           const urls = [
-            'https://api2.mangalib.me/api/team/11969',
-            'https://api2.mangalib.me/api/teams/11969',
-            'https://api2.mangalib.me/api/team/11969/manga',
-            'https://api2.mangalib.me/api/manga?team_id=11969',
-            'https://api2.mangalib.me/api/manga?teams[]=11969',
+            'https://ranobelib.me/ru/book/62387--pokemon-master-of-tactics',
             'https://api2.mangalib.me/api/manga/62387--pokemon-master-of-tactics',
             'https://api2.mangalib.me/api/manga/62387--pokemon-master-of-tactics/chapters'
           ];
           for (const url of urls) {
-            try {
-              const response = await fetch(url, { headers: { accept: 'application/json,text/plain,*/*' } });
-              const text = await response.text();
-              console.log('\nURL', url, 'STATUS', response.status, 'TYPE', response.headers.get('content-type'), 'LEN', text.length);
-              console.log(text.slice(0, 700));
-            } catch (error) {
-              console.log('\nURL', url, 'ERROR', error?.message ?? String(error));
-            }
+            const response = await fetch(url, { headers: { accept: '*/*', referer: 'https://ranobelib.me/', origin: 'https://ranobelib.me', 'user-agent': 'Mozilla/5.0' } });
+            const text = await response.text();
+            console.log('\n', url, response.status, response.url, response.headers.get('content-type'), text.length, text.slice(0, 300).replace(/\s+/g, ' '));
           }
           NODE
-      - run: npm run sync:ranobelib:spike -- --limit 3 --state /tmp/ranobelib-sync-state.json
