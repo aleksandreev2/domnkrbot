@@ -11,24 +11,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Inspect catalog filter implementation
-        run: |
-          node --input-type=module <<'NODE'
-          const url = 'https://ranobelib.me/build/assets/common-BLGqP_xm.js';
-          const js = await (await fetch(url)).text();
-          for (const needle of ['target_model','target_id','default-filters','defaultFilters','/manga?', 'get("/manga"', 'get("/media"', 'get("/titles"']) {
-            console.log(`\nCONTEXT ${needle}`);
-            let pos = 0, count = 0;
-            while (count < 30) {
-              const i = js.indexOf(needle, pos);
-              if (i < 0) break;
-              console.log('INDEX', i, js.slice(Math.max(0, i - 900), Math.min(js.length, i + needle.length + 1800)).replace(/\s+/g, ' '));
-              pos = i + needle.length;
-              count += 1;
-            }
-          }
-          NODE
-      - name: Probe team title catalog filters
+      - name: Inspect team catalog pagination and chapter ownership
         run: |
           node --input-type=module <<'NODE'
           const base = 'https://api.cdnlibs.org/api';
@@ -40,20 +23,28 @@ jobs:
             origin: 'https://ranobelib.me',
             referer: 'https://ranobelib.me/'
           };
-          const qs = new URLSearchParams({ target_id: '11969', target_model: 'team' }).toString();
-          const candidates = [
-            `${base}/manga?${qs}`,
-            `${base}/media?${qs}`,
-            `${base}/titles?${qs}`,
-            `${base}/catalog?${qs}`,
-            `${base}/manga?target_id=11969&target_model=team&site_id=3`,
-            `${base}/manga?target_id=11969&target_model=team&limit=100`,
-            `${base}/teams/11969/chapters?limit=100`
-          ];
-          for (const url of candidates) {
+
+          for (const page of [1, 2, 3, 4]) {
+            const url = `${base}/manga?target_id=11969&target_model=team&page=${page}`;
             const response = await fetch(url, { headers });
-            const text = await response.text();
-            console.log('\nURL', url, 'STATUS', response.status, 'BYTES', text.length, 'TYPE', response.headers.get('content-type'));
-            console.log(text.slice(0, 4000).replace(/\s+/g, ' '));
+            const json = await response.json();
+            console.log('\nPAGE', page, 'STATUS', response.status, 'COUNT', json.data?.length ?? null);
+            console.log('META', JSON.stringify(json.meta ?? null));
+            console.log('LINKS', JSON.stringify(json.links ?? null));
+            console.log('REFS', (json.data ?? []).map((x) => x.slug_url).join('|'));
           }
+
+          const chaptersUrl = `${base}/manga/62387--pokemon-master-of-tactics/chapters`;
+          const chapters = await (await fetch(chaptersUrl, { headers })).json();
+          const owned = [];
+          for (const item of chapters.data ?? []) {
+            for (const branch of item.branches ?? []) {
+              if ((branch.teams ?? []).some((team) => team.id === 11969)) {
+                owned.push({ branch_id: branch.id, volume: item.volume, number: item.number, created_at: branch.created_at, top_id: item.id });
+              }
+            }
+          }
+          console.log('\nPOKEMON TOTAL ITEMS', chapters.data?.length ?? null, 'DOMNKR BRANCHES', owned.length);
+          console.log('FIRST OWNED', JSON.stringify(owned.slice(0, 5)));
+          console.log('LAST OWNED', JSON.stringify(owned.slice(-10)));
           NODE
