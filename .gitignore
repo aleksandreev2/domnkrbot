@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.ranobelib-sync-state.json
+.dev.vars
