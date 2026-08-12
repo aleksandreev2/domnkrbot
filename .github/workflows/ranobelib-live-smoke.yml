@@ -11,19 +11,33 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: List frontend chunk references
+      - name: Inspect current RanobeLib common chunk
         run: |
           node --input-type=module <<'NODE'
-          const url = 'https://ranobelib.me/build/assets/main-Qg5Y60Oc.js';
+          const url = 'https://ranobelib.me/build/assets/common-BLGqP_xm.js';
           const response = await fetch(url);
           const js = await response.text();
-          console.log('status', response.status, 'bytes', js.length);
-          const refs = [...new Set([...js.matchAll(/[A-Za-z0-9_.$@~()+-]+-[A-Za-z0-9_-]+\.js/g)].map((m) => m[0]))];
-          console.log('js refs', refs.length);
-          console.log(refs.join('\n'));
-          for (const needle of ['__vite__mapDeps','build/assets','import(']) {
-            const i = js.indexOf(needle);
-            console.log('\nneedle', needle, 'at', i);
-            if (i >= 0) console.log(js.slice(Math.max(0, i - 1000), i + 6000));
+          console.log('status', response.status, 'type', response.headers.get('content-type'), 'bytes', js.length);
+
+          const needles = [
+            'api2.mangalib.me', 'api.lib.social', 'lib.social',
+            '/api/', '/team', 'team/', 'teams', 'team_id', 'teamId',
+            '/manga', 'manga?', '/chapters', 'chapters', 'branches'
+          ];
+          for (const needle of needles) {
+            let pos = 0;
+            let shown = 0;
+            console.log('\nNEEDLE', needle);
+            while (shown < 15) {
+              const i = js.indexOf(needle, pos);
+              if (i < 0) break;
+              console.log(js.slice(Math.max(0, i - 320), Math.min(js.length, i + needle.length + 700)).replace(/\s+/g, ' '));
+              pos = i + needle.length;
+              shown += 1;
+            }
+            console.log('shown', shown);
           }
+
+          const hosts = [...new Set([...js.matchAll(/https?:\\?\/\\?\/([A-Za-z0-9.-]+)/g)].map((m) => m[1]))].sort();
+          console.log('\nHOSTS\n' + hosts.join('\n'));
           NODE
