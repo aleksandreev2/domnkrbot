@@ -1,0 +1,15 @@
+{
+  "name": "domnkrbot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build:spike": "tsc -p tsconfig.build.json",
+    "test": "npm run build:spike && node --test tests/ranobelib-sync.test.mjs",
+    "sync:ranobelib:spike": "npm run build:spike && node scripts/ranobelib-sync-spike.mjs"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  }
+}
