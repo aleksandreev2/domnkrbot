@@ -11,33 +11,39 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Inspect current RanobeLib common chunk
+      - name: Probe current same-origin RanobeLib API
         run: |
           node --input-type=module <<'NODE'
-          const url = 'https://ranobelib.me/build/assets/common-BLGqP_xm.js';
+          const urls = [
+            'https://ranobelib.me/api/teams/11969--dom-nekromanta',
+            'https://ranobelib.me/api/teams/11969',
+            'https://ranobelib.me/api/manga/62387--pokemon-master-of-tactics',
+            'https://ranobelib.me/api/manga/62387--pokemon-master-of-tactics/chapters'
+          ];
+          for (const url of urls) {
+            const response = await fetch(url, { headers: { accept: 'application/json', 'accept-language': 'ru,en;q=0.7', referer: 'https://ranobelib.me/' } });
+            const text = await response.text();
+            console.log('\nURL', url, 'STATUS', response.status, 'TYPE', response.headers.get('content-type'), 'BYTES', text.length);
+            console.log(text.slice(0, 1600).replace(/\s+/g, ' '));
+          }
+          NODE
+      - name: Inspect team page frontend chunk
+        run: |
+          node --input-type=module <<'NODE'
+          const url = 'https://ranobelib.me/build/assets/team-_IkRvLmj.js';
           const response = await fetch(url);
           const js = await response.text();
           console.log('status', response.status, 'type', response.headers.get('content-type'), 'bytes', js.length);
-
-          const needles = [
-            'api2.mangalib.me', 'api.lib.social', 'lib.social',
-            '/api/', '/team', 'team/', 'teams', 'team_id', 'teamId',
-            '/manga', 'manga?', '/chapters', 'chapters', 'branches'
-          ];
-          for (const needle of needles) {
-            let pos = 0;
-            let shown = 0;
+          for (const needle of ['/teams/', '/manga', 'fetchTeam', 'media', 'chapters', 'slug_url']) {
             console.log('\nNEEDLE', needle);
-            while (shown < 15) {
+            let pos = 0, shown = 0;
+            while (shown < 20) {
               const i = js.indexOf(needle, pos);
               if (i < 0) break;
-              console.log(js.slice(Math.max(0, i - 320), Math.min(js.length, i + needle.length + 700)).replace(/\s+/g, ' '));
+              console.log(js.slice(Math.max(0, i - 400), Math.min(js.length, i + needle.length + 900)).replace(/\s+/g, ' '));
               pos = i + needle.length;
               shown += 1;
             }
             console.log('shown', shown);
           }
-
-          const hosts = [...new Set([...js.matchAll(/https?:\\?\/\\?\/([A-Za-z0-9.-]+)/g)].map((m) => m[1]))].sort();
-          console.log('\nHOSTS\n' + hosts.join('\n'));
           NODE
