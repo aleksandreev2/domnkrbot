@@ -18,76 +18,107 @@ Telegram Mini App для команды переводов «Дом Некром
 - проверка Telegram Mini App `initData` на сервере;
 - существующий read-only RanobeLib sync spike сохранён в `src/integrations/ranobelib` и будет подключён к D1 следующим этапом.
 
-## Первый запуск с нуля
+## Рекомендуемый production setup: GitHub → Cloudflare Workers Builds
 
-### 1. Установить зависимости
+Для production не нужно вручную запускать `wrangler deploy` после каждого изменения. Подключите репозиторий `aleksandreev2/domnkrbot` к Cloudflare Workers Builds, и Cloudflare будет автоматически собирать и деплоить `main` после каждого push/merge.
 
-```bash
-npm install
-```
+### 1. Импортировать GitHub-репозиторий в Cloudflare
 
-### 2. Войти в Cloudflare
+Cloudflare Dashboard → **Workers & Pages → Create application → Import a repository**.
 
-```bash
-npx wrangler login
-npx wrangler whoami
-```
-
-### 3. Создать D1
-
-```bash
-npx wrangler d1 create domnkrbot-db
-```
-
-Wrangler выведет `database_id`. Вставьте его в `wrangler.jsonc` вместо:
+Выберите:
 
 ```text
-REPLACE_WITH_D1_DATABASE_ID
+aleksandreev2/domnkrbot
 ```
 
-### 4. Добавить production secrets
+Production branch:
 
-Токен берётся у `@BotFather` для `@domnekromanta_bot`.
+```text
+main
+```
+
+Worker name должен быть:
+
+```text
+domnkrbot
+```
+
+Он уже совпадает с `name` в `wrangler.jsonc`.
+
+D1 binding `DB` описан без `database_id`, поэтому Wrangler/Cloudflare может автоматически provision'ить `domnkrbot-db`. Ручное копирование UUID базы в GitHub не требуется.
+
+### 2. Настроить Workers Builds
+
+В **Settings → Builds** используйте:
+
+Build command:
 
 ```bash
-npx wrangler secret put TELEGRAM_BOT_TOKEN
-npx wrangler secret put TELEGRAM_WEBHOOK_SECRET
-npx wrangler secret put ADMIN_TELEGRAM_IDS
+npm test
 ```
 
-Для `TELEGRAM_WEBHOOK_SECRET` используйте длинную случайную строку. Для `ADMIN_TELEGRAM_IDS` укажите один или несколько numeric Telegram ID через запятую.
-
-### 5. Применить миграции и задеплоить
+Deploy command:
 
 ```bash
-npm run db:remote
-npx wrangler deploy
+npm run deploy
 ```
 
-После deploy Wrangler покажет адрес вида:
+`npm run deploy` сначала делает TypeScript check, затем применяет неприменённые D1 migrations к remote DB и только после этого запускает `wrangler deploy`.
+
+После этого каждый merge в `main` автоматически обновляет production Worker.
+
+### 3. Добавить Cloudflare secrets
+
+В Worker → **Settings → Variables and Secrets** добавьте encrypted secrets:
+
+```text
+TELEGRAM_BOT_TOKEN
+TELEGRAM_WEBHOOK_SECRET
+ADMIN_TELEGRAM_IDS
+```
+
+`TELEGRAM_BOT_TOKEN` — токен `@domnekromanta_bot` из `@BotFather`.
+
+`TELEGRAM_WEBHOOK_SECRET` — длинная случайная строка.
+
+`ADMIN_TELEGRAM_IDS` — numeric Telegram ID одного или нескольких администраторов через запятую.
+
+Секреты не должны храниться в GitHub.
+
+### 4. Первый deploy
+
+После сохранения Git integration и secrets запустите первый build из Cloudflare или сделайте merge/push в `main`.
+
+Cloudflare выдаст адрес вида:
 
 ```text
 https://domnkrbot.<account>.workers.dev
 ```
 
-### 6. Подготовить локальный `.dev.vars` для настройки Telegram
+### 5. Один раз привязать `@domnekromanta_bot`
+
+Webhook и Menu Button Telegram нужно настроить один раз после появления production URL.
+
+Локально:
 
 ```bash
+npm install
 cp .dev.vars.example .dev.vars
 ```
 
-На Windows можно просто скопировать файл вручную. Заполните:
+На Windows можно просто скопировать `.dev.vars.example` в `.dev.vars`.
+
+Заполните:
 
 ```text
 TELEGRAM_BOT_TOKEN=<тот же токен @domnekromanta_bot>
-TELEGRAM_WEBHOOK_SECRET=<тот же webhook secret>
+TELEGRAM_WEBHOOK_SECRET=<тот же webhook secret из Cloudflare>
 ADMIN_TELEGRAM_IDS=<numeric Telegram ID админа>
 WEBHOOK_URL=https://domnkrbot.<account>.workers.dev
 ```
 
-`.dev.vars` находится в `.gitignore` и не должен коммититься.
-
-### 7. Привязать `@domnekromanta_bot`
+Затем:
 
 ```bash
 npm run configure-bot
@@ -105,6 +136,16 @@ npm run configure-bot
 - выведет итоговый `getWebhookInfo`.
 
 После этого отправьте боту `/start` — должна появиться кнопка **«☠️ Открыть Дом Некроманта»**.
+
+## Ручной deploy (только как fallback)
+
+Если Git integration временно отключена:
+
+```bash
+npm install
+npx wrangler login
+npm run deploy
+```
 
 ## Локальная разработка
 
