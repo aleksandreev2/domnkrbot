@@ -15,7 +15,7 @@
         <div class="brand-mark">N</div>
         <div>
           <strong>Дом Некроманта</strong>
-          <span>переводы сообщества</span>
+          <span id="syncMiniStatus">переводы сообщества</span>
         </div>
       </div>
       <button id="profileButton" class="avatar-button" aria-label="Профиль">?</button>
@@ -27,8 +27,13 @@
           <div class="hero-copy">
             <span class="eyebrow">СООБЩЕСТВО ВЫБИРАЕТ</span>
             <h1>Что переводим дальше?</h1>
-            <p>Предложи новый тайтл или конкретные главы. Заявка попадёт в общую очередь и будет видна команде.</p>
+            <p>Следи за свежими главами команды, активными переводами и предлагай новые тайтлы или конкретные главы.</p>
             <button id="openProposalHero" class="primary-button">Предложить перевод</button>
+            <div class="hero-stats">
+              <div><strong id="statTitles">—</strong><span>тайтлов</span></div>
+              <div><strong id="statSynced">—</strong><span>в синхронизации</span></div>
+              <div><strong id="statReleases">—</strong><span>релизов поймано</span></div>
+            </div>
           </div>
           <div class="hero-symbol">☠</div>
         </section>
@@ -37,24 +42,12 @@
           <div><span class="section-kicker">СВЕЖЕЕ</span><h2>Новые главы</h2></div>
           <button class="ghost-link" data-nav="translations">Все переводы</button>
         </div>
-        <section class="empty-card compact">
-          <div class="empty-icon">↻</div>
-          <div><strong>RanobeLib-синхронизация готовится</strong><p>После подключения релизы команды будут появляться здесь автоматически.</p></div>
-        </section>
+        <div id="releaseList" class="release-list"></div>
 
         <div class="section-heading">
           <div><span class="section-kicker">В РАБОТЕ</span><h2>Активные переводы</h2></div>
         </div>
-        <div class="work-grid">
-          <article class="work-card work-card--placeholder">
-            <div class="work-cover"></div>
-            <div><span class="status-chip">Скоро</span><h3>Каталог переводов</h3><p>Подключим реальные тайтлы команды из RanobeLib.</p></div>
-          </article>
-          <article class="work-card work-card--placeholder">
-            <div class="work-cover work-cover--alt"></div>
-            <div><span class="status-chip status-chip--muted">План</span><h3>Очередь работ</h3><p>Статусы «запланировано», «в работе» и «готово».</p></div>
-          </article>
-        </div>
+        <div id="homeTranslationList" class="work-grid"></div>
 
         <div class="section-heading">
           <div><span class="section-kicker">ГОЛОС СООБЩЕСТВА</span><h2>Предложения</h2></div>
@@ -64,8 +57,13 @@
       </section>
 
       <section id="translationsView" class="view">
-        <div class="page-title"><span class="section-kicker">БИБЛИОТЕКА</span><h1>Переводы</h1><p>Тут появятся реальные проекты команды после подключения RanobeLib к D1.</p></div>
-        <section class="empty-card"><div class="empty-icon">⌁</div><div><strong>Каталог ещё не синхронизирован</strong><p>Сам RanobeLib-клиент уже есть в репозитории. Следующий этап — перенести его состояние в D1 и запускать по Cron.</p></div></section>
+        <div class="page-title">
+          <span class="section-kicker">БИБЛИОТЕКА</span>
+          <h1>Переводы</h1>
+          <p>Реальные тайтлы команды «Дом Некроманта» из RanobeLib. Каталог обновляется автоматически.</p>
+          <div id="syncStatus" class="sync-status">Проверяем RanobeLib…</div>
+        </div>
+        <div id="translationList" class="translation-grid"></div>
       </section>
 
       <section id="proposalsView" class="view">
