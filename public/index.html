@@ -7,6 +7,7 @@
   <title>Дом Некроманта</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/live.css" />
+  <link rel="stylesheet" href="/community.css" />
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
 <body>
@@ -50,11 +51,16 @@
         </div>
         <div id="homeTranslationList" class="work-grid"></div>
 
-        <div class="section-heading">
-          <div><span class="section-kicker">ГОЛОС СООБЩЕСТВА</span><h2>Предложения</h2></div>
+        <div class="section-heading community-heading">
+          <div>
+            <span class="section-kicker">ГОЛОС СООБЩЕСТВА</span>
+            <h2>Что хотят читатели</h2>
+            <div id="communityStats" class="community-stats"></div>
+          </div>
           <button class="ghost-link" data-nav="proposals">Смотреть все</button>
         </div>
-        <div id="homeProposalList" class="proposal-list"></div>
+        <div id="communityHomeProposalList" class="community-list"></div>
+        <div id="homeProposalList" class="proposal-list legacy-community-list" aria-hidden="true"></div>
       </section>
 
       <section id="translationsView" class="view">
@@ -68,15 +74,24 @@
       </section>
 
       <section id="proposalsView" class="view">
-        <div class="page-title page-title--row"><div><span class="section-kicker">СООБЩЕСТВО</span><h1>Предложения</h1><p>Новые тайтлы и диапазоны глав, которые пользователи хотят увидеть в переводе.</p></div><button id="openProposalTop" class="primary-button small">+ Предложить</button></div>
-        <div class="filter-row">
-          <button class="filter-chip is-active" data-filter="all">Все</button>
-          <button class="filter-chip" data-filter="pending">Новые</button>
-          <button class="filter-chip" data-filter="planned">Запланировано</button>
-          <button class="filter-chip" data-filter="in_progress">В работе</button>
-          <button class="filter-chip" data-filter="done">Готово</button>
+        <div class="page-title page-title--row">
+          <div>
+            <span class="section-kicker">СООБЩЕСТВО</span>
+            <h1>Предложения</h1>
+            <p>Поддерживай тайтлы и главы, которые хочешь увидеть в переводе. Один аккаунт — один голос за заявку.</p>
+          </div>
+          <button id="openProposalTop" class="primary-button small">+ Предложить</button>
         </div>
-        <div id="proposalList" class="proposal-list proposal-list--full"></div>
+        <div class="filter-row community-filter-row">
+          <button class="filter-chip is-active" data-community-filter="popular">Популярные</button>
+          <button class="filter-chip" data-community-filter="all">Все</button>
+          <button class="filter-chip" data-community-filter="pending">Новые</button>
+          <button class="filter-chip" data-community-filter="planned">Запланировано</button>
+          <button class="filter-chip" data-community-filter="in_progress">В работе</button>
+          <button class="filter-chip" data-community-filter="done">Готово</button>
+        </div>
+        <div id="communityProposalList" class="community-list community-list--full"></div>
+        <div id="proposalList" class="proposal-list proposal-list--full legacy-community-list" aria-hidden="true"></div>
       </section>
 
       <section id="profileView" class="view">
@@ -84,13 +99,60 @@
           <div id="profileAvatar" class="profile-avatar">?</div>
           <div><span class="section-kicker">ПРОФИЛЬ</span><h1 id="profileName">Гость</h1><p id="profileUsername">Откройте приложение через Telegram</p></div>
         </div>
+        <section id="communityAdminShortcut" class="profile-panel admin-shortcut-panel is-hidden">
+          <div>
+            <span class="section-kicker">УПРАВЛЕНИЕ</span>
+            <h2>Админ-центр</h2>
+            <p>Модерация заявок, голоса сообщества и состояние RanobeLib в одном месте.</p>
+          </div>
+          <button id="openAdminCenter" class="primary-button small">Открыть админ-центр</button>
+        </section>
         <section class="profile-panel">
           <div class="section-heading no-margin"><div><span class="section-kicker">МОИ ЗАЯВКИ</span><h2>Предложенные переводы</h2></div></div>
           <div id="myProposalList" class="proposal-list"></div>
         </section>
-        <section id="adminPanel" class="profile-panel is-hidden">
+        <section id="adminPanel" class="profile-panel is-hidden legacy-admin-panel">
           <div class="section-heading no-margin"><div><span class="section-kicker">АДМИНИСТРАТОР</span><h2>Очередь модерации</h2></div></div>
           <div id="adminProposalList" class="proposal-list"></div>
+        </section>
+      </section>
+
+      <section id="adminView" class="view">
+        <div class="page-title page-title--row admin-title-row">
+          <div>
+            <span class="section-kicker">ДОМ НЕКРОМАНТА · ADMIN</span>
+            <h1>Админ-центр</h1>
+            <p>Очередь переводов, приоритет сообщества и контроль синхронизации.</p>
+          </div>
+          <div class="admin-title-actions">
+            <button id="adminBack" class="secondary-button">← Профиль</button>
+            <button id="adminRefresh" class="secondary-button">Обновить</button>
+          </div>
+        </div>
+
+        <div id="adminMetrics" class="admin-metrics"></div>
+
+        <section class="admin-section admin-sync-card">
+          <div class="admin-section-heading">
+            <div><span class="section-kicker">RANOBELIB</span><h2>Синхронизация</h2></div>
+            <button id="adminRunSync" class="primary-button small">Синхронизировать сейчас</button>
+          </div>
+          <div id="adminSyncStatus" class="admin-sync-status">Загрузка…</div>
+          <div id="adminSyncResult" class="admin-sync-result"></div>
+        </section>
+
+        <section class="admin-section">
+          <div class="admin-section-heading">
+            <div><span class="section-kicker">ПРИОРИТЕТ</span><h2>Топ сообщества</h2></div>
+          </div>
+          <div id="adminTopProposals" class="community-list"></div>
+        </section>
+
+        <section class="admin-section">
+          <div class="admin-section-heading">
+            <div><span class="section-kicker">МОДЕРАЦИЯ</span><h2>Все заявки</h2></div>
+          </div>
+          <div id="adminModerationList" class="community-list community-list--full"></div>
         </section>
       </section>
     </main>
@@ -128,5 +190,6 @@
   </div>
 
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/community.js"></script>
 </body>
 </html>
