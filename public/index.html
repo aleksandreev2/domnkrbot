@@ -5,20 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#fcfbf8" />
   <title>Дом Некроманта</title>
-  <link rel="stylesheet" href="/styles.css" />
-  <link rel="stylesheet" href="/live.css" />
-  <link rel="stylesheet" href="/community.css" />
-  <link rel="stylesheet" href="/dollartl-theme.css?v=20260814-ui1" />
+  <link rel="stylesheet" href="/styles.css?v=20260814-hotfix1" />
+  <link rel="stylesheet" href="/live.css?v=20260814-hotfix1" />
+  <link rel="stylesheet" href="/community.css?v=20260814-hotfix1" />
+  <link rel="stylesheet" href="/dollartl-theme.css?v=20260814-hotfix1" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    (() => {
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (!tg) return;
+      try { tg.ready(); } catch (_) {}
+      try { tg.expand(); } catch (_) {}
+      try { tg.setHeaderColor('#fcfbf8'); } catch (_) {}
+      try { tg.setBackgroundColor('#fcfbf8'); } catch (_) {}
+    })();
+  </script>
 </head>
 <body>
   <div id="app" class="app-shell">
     <header class="topbar">
       <button class="brand" type="button" data-nav="home" aria-label="Дом Некроманта — главная">
         <span class="brand-mark" aria-hidden="true"><i data-lucide="book-open-text"></i></span>
-        <span class="brand-copy">
-          <strong>Дом Некроманта</strong>
-          <small id="syncMiniStatus">ПЕРЕВОДЫ СООБЩЕСТВА</small>
-        </span>
+        <span class="brand-copy"><strong>Дом Некроманта</strong><small id="syncMiniStatus">ПЕРЕВОДЫ СООБЩЕСТВА</small></span>
       </button>
       <button id="profileButton" class="avatar-button" type="button" aria-label="Профиль"><i data-lucide="user-round"></i></button>
     </header>
@@ -34,15 +42,9 @@
         <section class="premium-card hero-card">
           <div class="hero-copy">
             <div class="hero-icon"><i data-lucide="sparkles"></i></div>
-            <div>
-              <span class="premium-label">ПРЕДЛОЖИТЬ ПЕРЕВОД</span>
-              <h2>Что переводим дальше?</h2>
-              <p>Предложи новый тайтл или конкретный диапазон глав. Другие читатели смогут поддержать заявку.</p>
-            </div>
+            <div><span class="premium-label">ПРЕДЛОЖИТЬ ПЕРЕВОД</span><h2>Что переводим дальше?</h2><p>Предложи новый тайтл или конкретный диапазон глав. Другие читатели смогут поддержать заявку.</p></div>
           </div>
-          <button id="openProposalHero" class="primary-button wide-button" type="button">
-            <i data-lucide="book-plus"></i><span>Предложить перевод</span><i class="button-tail" data-lucide="chevron-right"></i>
-          </button>
+          <button id="openProposalHero" class="primary-button wide-button" type="button"><i data-lucide="book-plus"></i><span>Предложить перевод</span><i class="button-tail" data-lucide="chevron-right"></i></button>
           <div class="hero-stats" aria-label="Статистика каталога">
             <div><i data-lucide="library"></i><span><strong id="statTitles">—</strong><small>тайтлов</small></span></div>
             <div><i data-lucide="refresh-cw"></i><span><strong id="statSynced">—</strong><small>синхронизировано</small></span></div>
@@ -51,10 +53,7 @@
         </section>
 
         <section class="section">
-          <div class="section-header">
-            <div><p class="eyebrow">СВЕЖЕЕ</p><h2>Новые главы</h2></div>
-            <button class="link-button" data-nav="translations" type="button">Все переводы <i data-lucide="chevron-right"></i></button>
-          </div>
+          <div class="section-header"><div><p class="eyebrow">СВЕЖЕЕ</p><h2>Новые главы</h2></div><button class="link-button" data-nav="translations" type="button">Все переводы <i data-lucide="chevron-right"></i></button></div>
           <div id="releaseList" class="release-list"></div>
         </section>
 
@@ -65,11 +64,7 @@
 
         <section class="section community-heading-wrap">
           <div class="section-header community-heading">
-            <div>
-              <p class="eyebrow">ГОЛОС СООБЩЕСТВА</p>
-              <h2>Что хотят читатели</h2>
-              <div id="communityStats" class="community-stats"></div>
-            </div>
+            <div><p class="eyebrow">ГОЛОС СООБЩЕСТВА</p><h2>Что хотят читатели</h2><div id="communityStats" class="community-stats"></div></div>
             <button class="link-button" data-nav="proposals" type="button">Смотреть все <i data-lucide="chevron-right"></i></button>
           </div>
           <div id="communityHomeProposalList" class="community-list"></div>
@@ -78,22 +73,13 @@
       </section>
 
       <section id="translationsView" class="view page">
-        <div class="page-heading">
-          <p class="eyebrow">БИБЛИОТЕКА</p>
-          <h1>Переводы</h1>
-          <p class="subtitle">Проекты команды «Дом Некроманта» из RanobeLib. Каталог обновляется автоматически.</p>
-          <div id="syncStatus" class="sync-status"><i data-lucide="refresh-cw"></i><span>Проверяем RanobeLib…</span></div>
-        </div>
+        <div class="page-heading"><p class="eyebrow">БИБЛИОТЕКА</p><h1>Переводы</h1><p class="subtitle">Проекты команды «Дом Некроманта» из RanobeLib. Каталог обновляется автоматически.</p><div id="syncStatus" class="sync-status"><i data-lucide="refresh-cw"></i><span>Проверяем RanobeLib…</span></div></div>
         <div id="translationList" class="translation-grid"></div>
       </section>
 
       <section id="proposalsView" class="view page">
         <div class="page-heading page-heading--actions">
-          <div>
-            <p class="eyebrow">СООБЩЕСТВО</p>
-            <h1>Предложения</h1>
-            <p class="subtitle">Поддерживай тайтлы и главы, которые хочешь увидеть в переводе. Один аккаунт — один голос.</p>
-          </div>
+          <div><p class="eyebrow">СООБЩЕСТВО</p><h1>Предложения</h1><p class="subtitle">Поддерживай тайтлы и главы, которые хочешь увидеть в переводе. Один аккаунт — один голос.</p></div>
           <button id="openProposalTop" class="secondary-button compact-button" type="button"><i data-lucide="plus"></i>Предложить</button>
         </div>
         <div class="filter-row community-filter-row" role="tablist" aria-label="Фильтр предложений">
@@ -109,62 +95,18 @@
       </section>
 
       <section id="profileView" class="view page">
-        <div class="profile-hero surface-card">
-          <div id="profileAvatar" class="profile-avatar"><i data-lucide="user-round"></i></div>
-          <div><p class="eyebrow">ПРОФИЛЬ</p><h1 id="profileName">Гость</h1><p id="profileUsername" class="subtitle">Откройте приложение через Telegram</p></div>
-        </div>
-        <section id="communityAdminShortcut" class="profile-panel surface-card admin-shortcut-panel is-hidden">
-          <div class="panel-icon"><i data-lucide="shield-cog"></i></div>
-          <div class="panel-copy">
-            <p class="eyebrow">УПРАВЛЕНИЕ</p>
-            <h2>Админ-центр</h2>
-            <p>Модерация заявок, приоритет сообщества и состояние RanobeLib.</p>
-          </div>
-          <button id="openAdminCenter" class="secondary-button compact-button" type="button">Открыть <i data-lucide="chevron-right"></i></button>
-        </section>
-        <section class="profile-panel surface-card">
-          <div class="section-header no-margin"><div><p class="eyebrow">МОИ ЗАЯВКИ</p><h2>Предложенные переводы</h2></div></div>
-          <div id="myProposalList" class="proposal-list"></div>
-        </section>
-        <section id="adminPanel" class="profile-panel is-hidden legacy-admin-panel">
-          <div class="section-header no-margin"><div><p class="eyebrow">АДМИНИСТРАТОР</p><h2>Очередь модерации</h2></div></div>
-          <div id="adminProposalList" class="proposal-list"></div>
-        </section>
+        <div class="profile-hero surface-card"><div id="profileAvatar" class="profile-avatar"><i data-lucide="user-round"></i></div><div><p class="eyebrow">ПРОФИЛЬ</p><h1 id="profileName">Гость</h1><p id="profileUsername" class="subtitle">Откройте приложение через Telegram</p></div></div>
+        <section id="communityAdminShortcut" class="profile-panel surface-card admin-shortcut-panel is-hidden"><div class="panel-icon"><i data-lucide="shield-cog"></i></div><div class="panel-copy"><p class="eyebrow">УПРАВЛЕНИЕ</p><h2>Админ-центр</h2><p>Модерация заявок, приоритет сообщества и состояние RanobeLib.</p></div><button id="openAdminCenter" class="secondary-button compact-button" type="button">Открыть <i data-lucide="chevron-right"></i></button></section>
+        <section class="profile-panel surface-card"><div class="section-header no-margin"><div><p class="eyebrow">МОИ ЗАЯВКИ</p><h2>Предложенные переводы</h2></div></div><div id="myProposalList" class="proposal-list"></div></section>
+        <section id="adminPanel" class="profile-panel is-hidden legacy-admin-panel"><div class="section-header no-margin"><div><p class="eyebrow">АДМИНИСТРАТОР</p><h2>Очередь модерации</h2></div></div><div id="adminProposalList" class="proposal-list"></div></section>
       </section>
 
       <section id="adminView" class="view page">
-        <div class="page-heading page-heading--actions admin-title-row">
-          <div>
-            <p class="eyebrow">ДОМ НЕКРОМАНТА · ADMIN</p>
-            <h1>Админ-центр</h1>
-            <p class="subtitle">Очередь переводов, приоритет сообщества и контроль синхронизации.</p>
-          </div>
-          <div class="admin-title-actions">
-            <button id="adminBack" class="secondary-button compact-button" type="button"><i data-lucide="chevron-left"></i>Профиль</button>
-            <button id="adminRefresh" class="secondary-button compact-button" type="button"><i data-lucide="refresh-cw"></i>Обновить</button>
-          </div>
-        </div>
-
+        <div class="page-heading page-heading--actions admin-title-row"><div><p class="eyebrow">ДОМ НЕКРОМАНТА · ADMIN</p><h1>Админ-центр</h1><p class="subtitle">Очередь переводов, приоритет сообщества и контроль синхронизации.</p></div><div class="admin-title-actions"><button id="adminBack" class="secondary-button compact-button" type="button"><i data-lucide="chevron-left"></i>Профиль</button><button id="adminRefresh" class="secondary-button compact-button" type="button"><i data-lucide="refresh-cw"></i>Обновить</button></div></div>
         <div id="adminMetrics" class="admin-metrics"></div>
-
-        <section class="admin-section surface-card admin-sync-card">
-          <div class="admin-section-heading">
-            <div><p class="eyebrow">RANOBELIB</p><h2>Синхронизация</h2></div>
-            <button id="adminRunSync" class="secondary-button compact-button" type="button"><i data-lucide="refresh-cw"></i>Синхронизировать</button>
-          </div>
-          <div id="adminSyncStatus" class="admin-sync-status">Загрузка…</div>
-          <div id="adminSyncResult" class="admin-sync-result"></div>
-        </section>
-
-        <section class="admin-section surface-card">
-          <div class="admin-section-heading"><div><p class="eyebrow">ПРИОРИТЕТ</p><h2>Топ сообщества</h2></div></div>
-          <div id="adminTopProposals" class="community-list"></div>
-        </section>
-
-        <section class="admin-section surface-card">
-          <div class="admin-section-heading"><div><p class="eyebrow">МОДЕРАЦИЯ</p><h2>Все заявки</h2></div></div>
-          <div id="adminModerationList" class="community-list community-list--full"></div>
-        </section>
+        <section class="admin-section surface-card admin-sync-card"><div class="admin-section-heading"><div><p class="eyebrow">RANOBELIB</p><h2>Синхронизация</h2></div><button id="adminRunSync" class="secondary-button compact-button" type="button"><i data-lucide="refresh-cw"></i>Синхронизировать</button></div><div id="adminSyncStatus" class="admin-sync-status">Загрузка…</div><div id="adminSyncResult" class="admin-sync-result"></div></section>
+        <section class="admin-section surface-card"><div class="admin-section-heading"><div><p class="eyebrow">ПРИОРИТЕТ</p><h2>Топ сообщества</h2></div></div><div id="adminTopProposals" class="community-list"></div></section>
+        <section class="admin-section surface-card"><div class="admin-section-heading"><div><p class="eyebrow">МОДЕРАЦИЯ</p><h2>Все заявки</h2></div></div><div id="adminModerationList" class="community-list community-list--full"></div></section>
       </section>
     </main>
 
@@ -180,22 +122,13 @@
   <div id="proposalModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true" aria-labelledby="proposalTitle">
     <div class="sheet surface-card">
       <div class="sheet-handle"></div>
-      <div class="sheet-header">
-        <div><p class="eyebrow">НОВАЯ ЗАЯВКА</p><h2 id="proposalTitle">Предложить перевод</h2></div>
-        <button id="closeProposal" class="icon-button close-button" type="button" aria-label="Закрыть"><i data-lucide="x"></i></button>
-      </div>
-      <div class="segmented">
-        <button class="is-active" data-type="title" type="button"><i data-lucide="book-open"></i>Новый тайтл</button>
-        <button data-type="chapters" type="button"><i data-lucide="list-ordered"></i>Конкретные главы</button>
-      </div>
+      <div class="sheet-header"><div><p class="eyebrow">НОВАЯ ЗАЯВКА</p><h2 id="proposalTitle">Предложить перевод</h2></div><button id="closeProposal" class="icon-button close-button" type="button" aria-label="Закрыть"><i data-lucide="x"></i></button></div>
+      <div class="segmented"><button class="is-active" data-type="title" type="button"><i data-lucide="book-open"></i>Новый тайтл</button><button data-type="chapters" type="button"><i data-lucide="list-ordered"></i>Конкретные главы</button></div>
       <form id="proposalForm">
         <input type="hidden" id="proposalType" value="title" />
         <label>Название тайтла<input id="titleInput" maxlength="180" required placeholder="Название новеллы" /></label>
         <label>Ссылка на источник / RanobeLib<input id="sourceUrlInput" maxlength="500" type="url" placeholder="https://ranobelib.me/..." /></label>
-        <div id="chapterRange" class="range-grid is-hidden">
-          <label>С главы<input id="chapterFromInput" inputmode="decimal" placeholder="1" /></label>
-          <label>По главу<input id="chapterToInput" inputmode="decimal" placeholder="10" /></label>
-        </div>
+        <div id="chapterRange" class="range-grid is-hidden"><label>С главы<input id="chapterFromInput" inputmode="decimal" placeholder="1" /></label><label>По главу<input id="chapterToInput" inputmode="decimal" placeholder="10" /></label></div>
         <label>Комментарий<textarea id="commentInput" maxlength="1500" rows="4" placeholder="Почему стоит перевести, где остановился другой перевод, важные детали…"></textarea></label>
         <div id="formMessage" class="form-message"></div>
         <button id="submitProposal" class="primary-button wide-button" type="submit"><i data-lucide="send"></i>Отправить предложение</button>
@@ -203,10 +136,9 @@
     </div>
   </div>
 
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
-  <script src="/vendor/lucide.min.js?v=1.27.0"></script>
-  <script type="module" src="/app.js"></script>
-  <script type="module" src="/community.js"></script>
-  <script src="/icons.js?v=20260814-ui1"></script>
+  <script src="/vendor/lucide.min.js?v=1.27.0-hotfix1"></script>
+  <script type="module" src="/app.js?v=20260814-hotfix1"></script>
+  <script type="module" src="/community.js?v=20260814-hotfix1"></script>
+  <script src="/icons.js?v=20260814-hotfix1"></script>
 </body>
 </html>
