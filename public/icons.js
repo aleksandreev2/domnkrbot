@@ -1,6 +1,14 @@
 (() => {
   const tg = window.Telegram?.WebApp;
 
+  if (!document.querySelector('link[data-dollartl-parity]')) {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = '/dollartl-parity.css?v=20260814-ui1';
+    link.dataset.dollartlParity = '1';
+    document.head.append(link);
+  }
+
   const emptyIconMap = new Map([
     ['◇', 'sparkles'],
     ['＋', 'plus'],
