@@ -40,6 +40,11 @@
     el.append(icon(name));
   }
 
+  function ensureLeadingIcon(el, name, className = 'inline-icon') {
+    if (!el || el.querySelector(`.${className},svg,[data-lucide]`)) return;
+    el.prepend(icon(name, className));
+  }
+
   function replaceTrailingArrow(el) {
     if (!el || el.querySelector('svg,[data-lucide]')) return;
     const text = (el.textContent || '').trim();
@@ -79,6 +84,10 @@
       metric.prepend(icon(name, 'metric-icon'));
     });
 
+    ensureLeadingIcon(document.getElementById('syncStatus'), 'refresh-cw', 'sync-icon');
+    ensureLeadingIcon(document.getElementById('submitProposal'), 'send', 'button-icon');
+    ensureLeadingIcon(document.getElementById('adminRunSync'), 'refresh-cw', 'button-icon');
+
     window.lucide?.createIcons?.({ attrs: { 'stroke-width': 1.8, 'aria-hidden': 'true' } });
   }
 
@@ -93,5 +102,5 @@
   }
 
   upgradeGeneratedUi();
-  new MutationObserver(scheduleUpgrade).observe(document.body, { childList: true, subtree: true });
+  new MutationObserver(scheduleUpgrade).observe(document.body, { childList: true, subtree: true, characterData: true });
 })();
