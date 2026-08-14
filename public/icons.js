@@ -1,9 +1,5 @@
 (() => {
   const tg = window.Telegram?.WebApp;
-  if (tg) {
-    try { tg.setHeaderColor('#fcfbf8'); } catch {}
-    try { tg.setBackgroundColor('#fcfbf8'); } catch {}
-  }
 
   const emptyIconMap = new Map([
     ['◇', 'sparkles'],
@@ -23,6 +19,12 @@
     done: 'circle-check-big',
     rejected: 'circle-x',
   };
+
+  function applyTelegramTheme() {
+    if (!tg) return;
+    try { tg.setHeaderColor('#fcfbf8'); } catch {}
+    try { tg.setBackgroundColor('#fcfbf8'); } catch {}
+  }
 
   function icon(name, className = '') {
     const node = document.createElement('i');
@@ -47,6 +49,8 @@
   }
 
   function upgradeGeneratedUi() {
+    applyTelegramTheme();
+
     document.querySelectorAll('.empty-icon').forEach((el) => {
       const name = emptyIconMap.get((el.textContent || '').trim());
       if (name) replaceExact(el, name);
