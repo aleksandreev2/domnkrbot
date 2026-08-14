@@ -4,22 +4,41 @@ const attempts = Number(process.env.ATTEMPTS || 6);
 const delayMs = Number(process.env.DELAY_MS || 10000);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const fetchText = async (path) => {
+  const response = await fetch(`${origin}${path}${path.includes('?') ? '&' : '?'}smoke=${Date.now()}`, {
+    headers: { 'cache-control': 'no-cache' },
+    redirect: 'follow',
+  });
+  return { response, text: await response.text() };
+};
 
 let last = null;
 for (let attempt = 1; attempt <= attempts; attempt += 1) {
   try {
-    const response = await fetch(`${origin}/build.txt?smoke=${Date.now()}`, {
-      headers: { 'cache-control': 'no-cache' },
-      redirect: 'follow',
-    });
-    const text = await response.text();
-    last = { status: response.status, text: text.slice(0, 600) };
-    console.log(`production smoke attempt ${attempt}/${attempts}: HTTP ${response.status}`);
-    if (response.ok && text.includes(marker)) {
-      console.log(`PASS: production serves marker ${marker}`);
+    const build = await fetchText('/build.txt');
+    const shell = await fetchText('/');
+    const theme = await fetchText('/dollartl-theme.css?v=20260814-hotfix1');
+    const app = await fetchText('/app.js?v=20260814-hotfix1');
+
+    last = {
+      build: build.response.status,
+      shell: shell.response.status,
+      theme: theme.response.status,
+      app: app.response.status,
+      shellType: shell.response.headers.get('content-type'),
+      shellPrefix: shell.text.slice(0, 120),
+    };
+
+    const ok = build.response.ok && build.text.includes(marker)
+      && shell.response.ok && shell.text.includes('Переводы, которые выбирает сообщество')
+      && theme.response.ok && theme.text.includes('--bg:#fcfbf8')
+      && app.response.ok && app.text.includes('void bootstrap()');
+
+    console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
+    if (ok) {
+      console.log(`PASS: production shell/assets are current (${marker})`);
       process.exit(0);
     }
-    console.log(`marker ${marker} not present yet; body=${JSON.stringify(text.slice(0, 120))}`);
   } catch (error) {
     last = { error: error instanceof Error ? error.message : String(error) };
     console.log(`production smoke attempt ${attempt}/${attempts} failed: ${last.error}`);
@@ -27,6 +46,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: production did not serve the expected build marker.');
+console.error('FAIL: production shell/assets are not current or not reachable.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
