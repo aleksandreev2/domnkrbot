@@ -5,19 +5,51 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#fcfbf8" />
   <title>Дом Некроманта</title>
-  <link rel="stylesheet" href="/styles.css?v=20260814-hotfix1" />
-  <link rel="stylesheet" href="/live.css?v=20260814-hotfix1" />
-  <link rel="stylesheet" href="/community.css?v=20260814-hotfix1" />
-  <link rel="stylesheet" href="/dollartl-theme.css?v=20260814-hotfix1" />
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>html,body{margin:0;min-height:100%;background:#fcfbf8;color:#171717}</style>
+  <link rel="stylesheet" href="/styles.css?v=20260814-bridge1" />
+  <link rel="stylesheet" href="/live.css?v=20260814-bridge1" />
+  <link rel="stylesheet" href="/community.css?v=20260814-bridge1" />
+  <link rel="stylesheet" href="/dollartl-theme.css?v=20260814-bridge1" />
   <script>
     (() => {
-      const tg = window.Telegram && window.Telegram.WebApp;
-      if (!tg) return;
-      try { tg.ready(); } catch (_) {}
-      try { tg.expand(); } catch (_) {}
-      try { tg.setHeaderColor('#fcfbf8'); } catch (_) {}
-      try { tg.setBackgroundColor('#fcfbf8'); } catch (_) {}
+      let attempts = 0;
+      let timer = 0;
+
+      const nativePost = (eventType, eventData = '') => {
+        try {
+          if (window.TelegramWebviewProxy && typeof window.TelegramWebviewProxy.postEvent === 'function') {
+            window.TelegramWebviewProxy.postEvent(eventType, eventData);
+            return true;
+          }
+        } catch (_) {}
+        try {
+          if (window.external && typeof window.external.notify === 'function') {
+            window.external.notify(JSON.stringify({ eventType, eventData }));
+            return true;
+          }
+        } catch (_) {}
+        return false;
+      };
+
+      const signalReady = () => {
+        nativePost('web_app_ready', '');
+        const tg = window.Telegram && window.Telegram.WebApp;
+        if (tg) {
+          try { tg.ready(); } catch (_) {}
+          try { tg.expand(); } catch (_) {}
+          try { tg.setHeaderColor('#fcfbf8'); } catch (_) {}
+          try { tg.setBackgroundColor('#fcfbf8'); } catch (_) {}
+        }
+        attempts += 1;
+        if (attempts < 120) timer = window.setTimeout(signalReady, 50);
+      };
+
+      window.__domnkrSignalTelegramReady = signalReady;
+      signalReady();
+      document.addEventListener('DOMContentLoaded', signalReady, { once: true });
+      window.addEventListener('load', signalReady, { once: true });
+      window.addEventListener('pageshow', signalReady);
+      window.addEventListener('beforeunload', () => window.clearTimeout(timer), { once: true });
     })();
   </script>
 </head>
@@ -136,9 +168,22 @@
     </div>
   </div>
 
-  <script src="/vendor/lucide.min.js?v=1.27.0-hotfix1"></script>
-  <script type="module" src="/app.js?v=20260814-hotfix1"></script>
-  <script type="module" src="/community.js?v=20260814-hotfix1"></script>
-  <script src="/icons.js?v=20260814-hotfix1"></script>
+  <script src="/vendor/lucide.min.js?v=1.27.0-bridge1"></script>
+  <script type="module" src="/app.js?v=20260814-bridge1"></script>
+  <script type="module" src="/community.js?v=20260814-bridge1"></script>
+  <script src="/icons.js?v=20260814-bridge1"></script>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <script>
+    (() => {
+      const tg = window.Telegram && window.Telegram.WebApp;
+      if (tg) {
+        try { tg.ready(); } catch (_) {}
+        try { tg.expand(); } catch (_) {}
+        try { tg.setHeaderColor('#fcfbf8'); } catch (_) {}
+        try { tg.setBackgroundColor('#fcfbf8'); } catch (_) {}
+      }
+      if (typeof window.__domnkrSignalTelegramReady === 'function') window.__domnkrSignalTelegramReady();
+    })();
+  </script>
 </body>
 </html>
