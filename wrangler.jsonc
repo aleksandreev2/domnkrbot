@@ -26,7 +26,6 @@
     {
       "binding": "DB",
       "database_name": "domnkrbot-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
       "migrations_dir": "migrations"
     }
   ]
