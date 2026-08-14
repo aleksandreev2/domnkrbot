@@ -1,15 +1,22 @@
 {
   "name": "domnkrbot",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build:spike": "tsc -p tsconfig.build.json",
     "test": "npm run build:spike && node --test tests/ranobelib-sync.test.mjs",
-    "sync:ranobelib:spike": "npm run build:spike && node scripts/ranobelib-sync-spike.mjs"
+    "sync:ranobelib:spike": "npm run build:spike && node scripts/ranobelib-sync-spike.mjs",
+    "dev": "wrangler dev",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "db:remote": "wrangler d1 migrations apply DB --remote",
+    "deploy": "npm run typecheck && npm run db:remote && wrangler deploy",
+    "configure-bot": "node scripts/configure-bot.mjs"
   },
   "devDependencies": {
-    "typescript": "^5.8.0"
+    "@cloudflare/workers-types": "^4.20260814.0",
+    "typescript": "^5.8.0",
+    "wrangler": "^4.30.0"
   }
 }
