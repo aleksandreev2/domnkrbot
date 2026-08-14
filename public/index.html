@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#10100f" />
+  <title>Дом Некроманта</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">N</div>
+        <div>
+          <strong>Дом Некроманта</strong>
+          <span>переводы сообщества</span>
+        </div>
+      </div>
+      <button id="profileButton" class="avatar-button" aria-label="Профиль">?</button>
+    </header>
+
+    <main>
+      <section id="homeView" class="view is-active">
+        <section class="hero-card">
+          <div class="hero-copy">
+            <span class="eyebrow">СООБЩЕСТВО ВЫБИРАЕТ</span>
+            <h1>Что переводим дальше?</h1>
+            <p>Предложи новый тайтл или конкретные главы. Заявка попадёт в общую очередь и будет видна команде.</p>
+            <button id="openProposalHero" class="primary-button">Предложить перевод</button>
+          </div>
+          <div class="hero-symbol">☠</div>
+        </section>
+
+        <div class="section-heading">
+          <div><span class="section-kicker">СВЕЖЕЕ</span><h2>Новые главы</h2></div>
+          <button class="ghost-link" data-nav="translations">Все переводы</button>
+        </div>
+        <section class="empty-card compact">
+          <div class="empty-icon">↻</div>
+          <div><strong>RanobeLib-синхронизация готовится</strong><p>После подключения релизы команды будут появляться здесь автоматически.</p></div>
+        </section>
+
+        <div class="section-heading">
+          <div><span class="section-kicker">В РАБОТЕ</span><h2>Активные переводы</h2></div>
+        </div>
+        <div class="work-grid">
+          <article class="work-card work-card--placeholder">
+            <div class="work-cover"></div>
+            <div><span class="status-chip">Скоро</span><h3>Каталог переводов</h3><p>Подключим реальные тайтлы команды из RanobeLib.</p></div>
+          </article>
+          <article class="work-card work-card--placeholder">
+            <div class="work-cover work-cover--alt"></div>
+            <div><span class="status-chip status-chip--muted">План</span><h3>Очередь работ</h3><p>Статусы «запланировано», «в работе» и «готово».</p></div>
+          </article>
+        </div>
+
+        <div class="section-heading">
+          <div><span class="section-kicker">ГОЛОС СООБЩЕСТВА</span><h2>Предложения</h2></div>
+          <button class="ghost-link" data-nav="proposals">Смотреть все</button>
+        </div>
+        <div id="homeProposalList" class="proposal-list"></div>
+      </section>
+
+      <section id="translationsView" class="view">
+        <div class="page-title"><span class="section-kicker">БИБЛИОТЕКА</span><h1>Переводы</h1><p>Тут появятся реальные проекты команды после подключения RanobeLib к D1.</p></div>
+        <section class="empty-card"><div class="empty-icon">⌁</div><div><strong>Каталог ещё не синхронизирован</strong><p>Сам RanobeLib-клиент уже есть в репозитории. Следующий этап — перенести его состояние в D1 и запускать по Cron.</p></div></section>
+      </section>
+
+      <section id="proposalsView" class="view">
+        <div class="page-title page-title--row"><div><span class="section-kicker">СООБЩЕСТВО</span><h1>Предложения</h1><p>Новые тайтлы и диапазоны глав, которые пользователи хотят увидеть в переводе.</p></div><button id="openProposalTop" class="primary-button small">+ Предложить</button></div>
+        <div class="filter-row">
+          <button class="filter-chip is-active" data-filter="all">Все</button>
+          <button class="filter-chip" data-filter="pending">Новые</button>
+          <button class="filter-chip" data-filter="planned">Запланировано</button>
+          <button class="filter-chip" data-filter="in_progress">В работе</button>
+          <button class="filter-chip" data-filter="done">Готово</button>
+        </div>
+        <div id="proposalList" class="proposal-list proposal-list--full"></div>
+      </section>
+
+      <section id="profileView" class="view">
+        <div class="profile-hero">
+          <div id="profileAvatar" class="profile-avatar">?</div>
+          <div><span class="section-kicker">ПРОФИЛЬ</span><h1 id="profileName">Гость</h1><p id="profileUsername">Откройте приложение через Telegram</p></div>
+        </div>
+        <section class="profile-panel">
+          <div class="section-heading no-margin"><div><span class="section-kicker">МОИ ЗАЯВКИ</span><h2>Предложенные переводы</h2></div></div>
+          <div id="myProposalList" class="proposal-list"></div>
+        </section>
+        <section id="adminPanel" class="profile-panel is-hidden">
+          <div class="section-heading no-margin"><div><span class="section-kicker">АДМИНИСТРАТОР</span><h2>Очередь модерации</h2></div></div>
+          <div id="adminProposalList" class="proposal-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <button class="nav-item is-active" data-nav="home"><span>⌂</span><small>Главная</small></button>
+      <button class="nav-item" data-nav="translations"><span>▤</span><small>Переводы</small></button>
+      <button class="nav-item nav-item--main" id="openProposalNav"><span>＋</span><small>Предложить</small></button>
+      <button class="nav-item" data-nav="proposals"><span>◇</span><small>Заявки</small></button>
+      <button class="nav-item" data-nav="profile"><span>○</span><small>Профиль</small></button>
+    </nav>
+  </div>
+
+  <div id="proposalModal" class="modal-backdrop is-hidden" role="dialog" aria-modal="true">
+    <div class="sheet">
+      <div class="sheet-handle"></div>
+      <div class="sheet-header"><div><span class="section-kicker">НОВАЯ ЗАЯВКА</span><h2>Предложить перевод</h2></div><button id="closeProposal" class="close-button">×</button></div>
+      <div class="segmented">
+        <button class="is-active" data-type="title">Новый тайтл</button>
+        <button data-type="chapters">Конкретные главы</button>
+      </div>
+      <form id="proposalForm">
+        <input type="hidden" id="proposalType" value="title" />
+        <label>Название тайтла<input id="titleInput" maxlength="180" required placeholder="Например: The Novel I Want Translated" /></label>
+        <label>Ссылка на источник / RanobeLib<input id="sourceUrlInput" maxlength="500" type="url" placeholder="https://ranobelib.me/..." /></label>
+        <div id="chapterRange" class="range-grid is-hidden">
+          <label>С главы<input id="chapterFromInput" inputmode="decimal" placeholder="1" /></label>
+          <label>По главу<input id="chapterToInput" inputmode="decimal" placeholder="10" /></label>
+        </div>
+        <label>Комментарий<textarea id="commentInput" maxlength="1500" rows="4" placeholder="Почему стоит перевести, где остановился другой перевод, важные детали…"></textarea></label>
+        <div id="formMessage" class="form-message"></div>
+        <button id="submitProposal" class="primary-button full" type="submit">Отправить предложение</button>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
