@@ -1,5 +1,10 @@
 import appEntry from './entry';
 import {
+  authorizeAdminRequest,
+  ensureCommunitySchema,
+  handleCommunityApi,
+} from './community-runtime.js';
+import {
   ensureRanobeLibSchema,
   getRanobeLibHome,
   shouldKickRanobeLibSync,
@@ -36,9 +41,35 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 }
 
+async function handleManualRanobeSync(request: Request, env: Env): Promise<Response> {
+  await ensureCommunitySchema(env);
+  const admin = await authorizeAdminRequest(request, env);
+  if (!admin) return json({ error: 'Admin access required.' }, 403);
+
+  try {
+    await ensureRanobeLibSchema(env);
+    const result = await syncRanobeLib(env);
+    const home = await getRanobeLibHome(env);
+    return json({ ok: true, result, sync: home.sync, stats: home.stats });
+  } catch (error) {
+    console.error('Manual RanobeLib sync failed', error);
+    return json({
+      error: error instanceof Error ? error.message : 'RanobeLib sync failed',
+    }, 500);
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === '/api/community/admin/ranobelib/sync') {
+      if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+      return handleManualRanobeSync(request, env);
+    }
+
+    const communityResponse = await handleCommunityApi(request, env);
+    if (communityResponse) return communityResponse;
 
     if (url.pathname === '/api/ranobelib') {
       if (request.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
