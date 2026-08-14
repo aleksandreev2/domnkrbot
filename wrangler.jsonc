@@ -1,7 +1,7 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "domnkrbot",
-  "main": "src/entry.ts",
+  "main": "src/live-entry.ts",
   "compatibility_date": "2026-08-14",
   "keep_vars": true,
   "workers_dev": true,
@@ -11,12 +11,17 @@
     "head_sampling_rate": 1
   },
   "vars": {
-    "BOT_USERNAME": "domnekromanta_bot"
+    "BOT_USERNAME": "domnekromanta_bot",
+    "RANOBELIB_TEAM_REF": "11969--dom-nekromanta",
+    "RANOBELIB_SYNC_BATCH_SIZE": "16"
   },
   "secrets": {
     "required": [
       "TELEGRAM_BOT_TOKEN"
     ]
+  },
+  "triggers": {
+    "crons": ["*/10 * * * *"]
   },
   "assets": {
     "directory": "./public",

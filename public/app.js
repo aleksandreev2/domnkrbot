@@ -11,6 +11,8 @@ const state = {
   isAdmin: false,
   proposals: [],
   filter: 'all',
+  ranobelib: null,
+  ranobePollCount: 0,
 };
 
 const statusLabels = {
@@ -54,6 +56,12 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(date);
+}
+
+function compactText(value, max = 150) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  if (text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}…`;
 }
 
 function authorLabel(proposal) {
@@ -112,6 +120,137 @@ function renderPublicProposals() {
   const empty = `<section class="empty-card compact"><div class="empty-icon">＋</div><div><strong>Пока пусто</strong><p>Станьте первым, кто предложит перевод.</p></div></section>`;
   full.innerHTML = filtered.length ? filtered.map((proposal) => proposalCard(proposal)).join('') : empty;
   home.innerHTML = state.proposals.length ? state.proposals.slice(0, 4).map((proposal) => proposalCard(proposal)).join('') : empty;
+}
+
+function chapterLabel(volume, number) {
+  if (!number) return 'Главы пока не найдены';
+  const normalizedVolume = String(volume || '').trim();
+  if (normalizedVolume && normalizedVolume !== '0' && normalizedVolume !== '1') {
+    return `Том ${normalizedVolume} · Глава ${number}`;
+  }
+  return `Глава ${number}`;
+}
+
+function coverMarkup(item, extraClass = '') {
+  const title = escapeHtml(item.title || 'Обложка');
+  if (item.cover_url) {
+    return `<div class="live-cover ${extraClass}"><img src="${escapeHtml(item.cover_url)}" alt="${title}" loading="lazy" /></div>`;
+  }
+  return `<div class="live-cover live-cover--fallback ${extraClass}"><span>ДН</span></div>`;
+}
+
+function releaseCard(release) {
+  const range = release.chapter_count > 1
+    ? `Главы ${release.first_number}–${release.last_number}`
+    : chapterLabel(release.last_volume, release.last_number);
+  return `
+    <a class="release-card" href="${escapeHtml(release.url)}" target="_blank" rel="noopener noreferrer">
+      ${coverMarkup(release, 'release-cover')}
+      <div class="release-card__body">
+        <div class="release-card__top"><span class="status-chip">Новый релиз</span><time>${escapeHtml(formatDate(release.created_at))}</time></div>
+        <h3>${escapeHtml(release.title)}</h3>
+        <strong>${escapeHtml(range)}</strong>
+        <p>${escapeHtml(release.summary)}</p>
+      </div>
+      <span class="card-arrow">↗</span>
+    </a>`;
+}
+
+function latestSnapshotCard(title) {
+  return `
+    <a class="release-card release-card--snapshot" href="${escapeHtml(title.url)}" target="_blank" rel="noopener noreferrer">
+      ${coverMarkup(title, 'release-cover')}
+      <div class="release-card__body">
+        <div class="release-card__top"><span class="status-chip status-chip--muted">Последняя доступная</span><time>${escapeHtml(formatDate(title.last_synced_at))}</time></div>
+        <h3>${escapeHtml(title.title)}</h3>
+        <strong>${escapeHtml(chapterLabel(title.latest_volume, title.latest_number))}</strong>
+        ${title.latest_name ? `<p>${escapeHtml(compactText(title.latest_name, 100))}</p>` : ''}
+      </div>
+      <span class="card-arrow">↗</span>
+    </a>`;
+}
+
+function titleCard(title, compact = false) {
+  const description = compactText(title.summary || title.latest_name || 'Перевод команды «Дом Некроманта».', compact ? 92 : 180);
+  return `
+    <a class="work-card live-title-card${compact ? ' live-title-card--compact' : ''}" href="${escapeHtml(title.url)}" target="_blank" rel="noopener noreferrer">
+      ${coverMarkup(title)}
+      <div class="live-title-card__body">
+        <div class="title-card-meta"><span class="status-chip">Активно</span><span>${Number(title.chapter_count || 0)} гл.</span></div>
+        <h3>${escapeHtml(title.title)}</h3>
+        <strong class="latest-chapter">${escapeHtml(chapterLabel(title.latest_volume, title.latest_number))}</strong>
+        <p>${escapeHtml(description)}</p>
+      </div>
+      <span class="card-arrow">↗</span>
+    </a>`;
+}
+
+function ranobeEmpty() {
+  return `<section class="empty-card compact"><div class="empty-icon">↻</div><div><strong>Синхронизируем RanobeLib</strong><p>Первый импорт уже запущен. Тайтлы появятся здесь автоматически.</p></div></section>`;
+}
+
+function renderRanobeLib() {
+  const data = state.ranobelib;
+  const releaseList = document.getElementById('releaseList');
+  const homeTranslations = document.getElementById('homeTranslationList');
+  const translations = document.getElementById('translationList');
+  const syncStatus = document.getElementById('syncStatus');
+  const miniStatus = document.getElementById('syncMiniStatus');
+
+  if (!data) {
+    releaseList.innerHTML = ranobeEmpty();
+    homeTranslations.innerHTML = ranobeEmpty();
+    translations.innerHTML = ranobeEmpty();
+    return;
+  }
+
+  document.getElementById('statTitles').textContent = String(data.stats?.activeTitles ?? 0);
+  document.getElementById('statSynced').textContent = String(data.stats?.syncedTitles ?? 0);
+  document.getElementById('statReleases').textContent = String(data.stats?.releases ?? 0);
+
+  const titles = Array.isArray(data.titles) ? data.titles : [];
+  const releases = Array.isArray(data.releases) ? data.releases : [];
+  const isSyncing = Boolean(data.sync?.syncing) || titles.length === 0;
+  const syncText = data.sync?.lastSyncAt
+    ? `Обновлено ${formatDate(data.sync.lastSyncAt)}${isSyncing ? ' · проверяем дальше' : ''}`
+    : 'Первичная синхронизация…';
+  syncStatus.textContent = data.sync?.lastError ? `${syncText} · часть запросов с ошибкой` : syncText;
+  syncStatus.classList.toggle('sync-status--warning', Boolean(data.sync?.lastError));
+  miniStatus.textContent = isSyncing ? 'RanobeLib синхронизируется…' : `${data.stats?.syncedTitles ?? 0} активных переводов`;
+
+  if (releases.length) {
+    releaseList.innerHTML = releases.slice(0, 6).map(releaseCard).join('');
+  } else if (titles.length) {
+    releaseList.innerHTML = titles.slice(0, 6).map(latestSnapshotCard).join('');
+  } else {
+    releaseList.innerHTML = ranobeEmpty();
+  }
+
+  homeTranslations.innerHTML = titles.length
+    ? titles.slice(0, 4).map((title) => titleCard(title, true)).join('')
+    : ranobeEmpty();
+  translations.innerHTML = titles.length
+    ? titles.map((title) => titleCard(title)).join('')
+    : ranobeEmpty();
+}
+
+async function refreshRanobeLib() {
+  try {
+    state.ranobelib = await api('/api/ranobelib');
+    renderRanobeLib();
+    const needsPoll = state.ranobelib?.sync?.syncing && (state.ranobelib?.titles?.length || 0) === 0;
+    if (needsPoll && state.ranobePollCount < 8) {
+      state.ranobePollCount += 1;
+      window.setTimeout(() => void refreshRanobeLib(), 4500);
+    }
+  } catch (error) {
+    console.error('RanobeLib load failed', error);
+    const message = `<section class="empty-card compact"><div class="empty-icon">!</div><div><strong>RanobeLib временно недоступен</strong><p>${escapeHtml(error.message)}</p></div></section>`;
+    document.getElementById('releaseList').innerHTML = message;
+    document.getElementById('homeTranslationList').innerHTML = message;
+    document.getElementById('translationList').innerHTML = message;
+    document.getElementById('syncStatus').textContent = 'Не удалось получить данные RanobeLib';
+  }
 }
 
 function updateProfile() {
@@ -281,18 +420,23 @@ function bindUi() {
 
 async function bootstrap() {
   bindUi();
-  try {
-    const data = await api('/api/bootstrap');
+  renderRanobeLib();
+  const [appResult] = await Promise.allSettled([
+    api('/api/bootstrap'),
+    refreshRanobeLib(),
+  ]);
+
+  if (appResult.status === 'fulfilled') {
+    const data = appResult.value;
     state.user = data.user || null;
     state.isAdmin = Boolean(data.isAdmin);
     state.proposals = data.proposals || [];
-    updateProfile();
-    renderPublicProposals();
-  } catch (error) {
-    console.error('Bootstrap failed', error);
-    updateProfile();
-    renderPublicProposals();
+  } else {
+    console.error('Bootstrap failed', appResult.reason);
   }
+
+  updateProfile();
+  renderPublicProposals();
 }
 
 void bootstrap();
