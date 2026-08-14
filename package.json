@@ -4,17 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare:vendor": "node scripts/prepare-vendor.mjs",
     "typecheck": "tsc --noEmit",
     "build:spike": "tsc -p tsconfig.build.json",
-    "test": "npm run build:spike && node --test tests/ranobelib-sync.test.mjs",
+    "test": "npm run prepare:vendor && npm run build:spike && node --test tests/ranobelib-sync.test.mjs",
     "sync:ranobelib:spike": "npm run build:spike && node scripts/ranobelib-sync-spike.mjs",
-    "dev": "wrangler dev",
+    "dev": "npm run prepare:vendor && wrangler dev",
     "db:local": "wrangler d1 migrations apply DB --local",
     "db:remote": "wrangler d1 migrations apply DB --remote",
-    "deploy": "npm run typecheck && npm run db:remote && wrangler deploy",
+    "deploy": "npm run prepare:vendor && npm run typecheck && npm run db:remote && wrangler deploy",
     "configure-bot": "node scripts/configure-bot.mjs"
   },
   "devDependencies": {
+    "lucide": "1.27.0",
     "typescript": "^5.8.0",
     "wrangler": "4.120.0"
   }

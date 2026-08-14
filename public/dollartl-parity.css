@@ -1,0 +1,87 @@
+/* Final parity layer: keep navigation and interaction behavior aligned with Dollar TL. */
+.app-shell{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+.bottom-nav{
+  left:50%!important;
+  bottom:0!important;
+  transform:translateX(-50%)!important;
+  width:min(100%,760px)!important;
+  min-height:calc(70px + env(safe-area-inset-bottom,0px))!important;
+  padding:7px 8px max(7px,env(safe-area-inset-bottom,0px))!important;
+  border:0!important;
+  border-top:1px solid var(--line)!important;
+  border-radius:0!important;
+  background:rgba(252,251,248,.94)!important;
+  backdrop-filter:blur(18px)!important;
+  box-shadow:none!important;
+}
+.nav-item{
+  min-width:0!important;
+  min-height:0!important;
+  border:0!important;
+  background:transparent!important;
+  display:grid!important;
+  justify-items:center!important;
+  align-content:center!important;
+  gap:3px!important;
+  color:#696963!important;
+  position:relative!important;
+  padding:4px 1px!important;
+  border-radius:0!important;
+}
+.nav-item::before{
+  content:"";
+  position:absolute;
+  top:-8px;
+  width:40px;
+  height:3px;
+  border-radius:999px;
+  background:var(--gold);
+  transform:scaleX(0);
+  opacity:0;
+  transition:transform 220ms var(--ease),opacity 180ms var(--ease);
+}
+.nav-item .nav-icon{
+  width:27px!important;
+  height:27px!important;
+  display:grid!important;
+  place-items:center!important;
+  color:inherit!important;
+  background:transparent!important;
+  border-radius:0!important;
+  box-shadow:none!important;
+  transition:transform 220ms var(--ease),color 180ms var(--ease);
+}
+.nav-item svg{width:22px!important;height:22px!important;stroke-width:1.8!important}
+.nav-item small{font-size:9px!important;font-weight:500!important;color:inherit!important}
+.nav-item.is-active{color:var(--gold-strong)!important;font-weight:700!important;background:transparent!important}
+.nav-item.is-active::before{transform:scaleX(1);opacity:1}
+.nav-item.is-active .nav-icon{transform:translateY(-2px)}
+.nav-item:active .nav-icon{transform:scale(.9)}
+.nav-item--main .nav-icon{width:27px!important;height:27px!important;background:transparent!important;color:inherit!important;box-shadow:none!important}
+.nav-item--main small{margin-top:0!important}
+
+.filter-chip{
+  min-height:40px!important;
+  border-radius:13px!important;
+  padding:0 16px!important;
+  border:1px solid var(--line)!important;
+  background:rgba(255,255,255,.72)!important;
+  color:var(--text-soft)!important;
+  transition:color 180ms var(--ease),background 180ms var(--ease),border-color 180ms var(--ease),transform 120ms var(--ease)!important;
+}
+.filter-chip.is-active{
+  color:#fff!important;
+  background:linear-gradient(120deg,#dba33e,#c48424)!important;
+  border-color:transparent!important;
+}
+.filter-chip:active{transform:scale(.97)}
+
+.metric-icon{width:20px;height:20px;color:var(--gold-strong);margin-bottom:7px;stroke-width:1.8}
+.inline-icon,.button-icon,.sync-icon,.admin-action-icon{width:15px;height:15px;display:inline-block;vertical-align:-2px;stroke-width:1.8}
+.admin-status-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;gap:6px!important}
+.admin-status-button .admin-action-icon{flex:none}
+.community-source .inline-icon,.proposal-link .inline-icon{margin-left:2px}
+
+@media(max-width:660px){
+  .bottom-nav{width:100%!important}
+}
