@@ -26,8 +26,8 @@ class MockStatement{
   }
 }
 class MockDB{
-  constructor({thanked=true}={}){
-    this.thanked=thanked;
+  constructor({thanked=true,returningReader=false}={}){
+    this.thanked=thanked;this.returningReader=returningReader;
     this.publication={id:7,status:'published',internal_title:'Глава 10',channel_message_id:123,discussion_message_id:null,gate_status:null,gate_message_id:null};
     this.assets=[{id:11,publication_id:7,file_name:'chapter.epub',mime_type:'application/epub+zip',r2_key:'publications/7/files/chapter.epub',size_bytes:1234,telegram_file_id:'telegram-cached-file',sort_order:0}];
     this.operations=[];this.reads=[];this.batchCalls=[];
@@ -37,6 +37,7 @@ class MockDB{
     this.batchCalls.push(statements.map((statement)=>({query:statement.query,values:[...statement.values]})));
     return statements.map((statement)=>{
       const q=statement.query;
+      if(q.includes("source='bot'")&&q.includes("event_type IN ('download_open','delivery_success')"))return{success:true,results:this.returningReader?[{active:1}]:[]};
       if(q.includes('FROM publications p LEFT JOIN publication_comment_gates')&&q.includes('WHERE p.id=?'))return{success:true,results:[{...this.publication,gate_status:'sent',gate_message_id:77}]};
       if(q.includes('FROM publication_assets WHERE publication_id=?'))return{success:true,results:this.assets.map((row)=>({...row}))};
       if(q.includes('FROM publication_thanks WHERE publication_id=?'))return{success:true,results:this.thanked?[{publication_id:7}]:[]};
@@ -48,7 +49,7 @@ class MockDB{
 }
 function env(db){return{DB:db,TELEGRAM_BOT_TOKEN:'123:test',TELEGRAM_WEBHOOK_SECRET:'secret',BOT_USERNAME:'domnekromanta_bot',PUBLISH_CHANNEL_ID:'@domnekromanta'};}
 function ctx(){return{promises:[],waitUntil(promise){this.promises.push(promise);}};}
-async function flush(execution){for(let i=0;i<4;i+=1){const pending=[...execution.promises];if(!pending.length)return;await Promise.all(pending);}}
+async function flush(execution){let consumed=0;for(let i=0;i<8;i+=1){const pending=execution.promises.slice(consumed);consumed=execution.promises.length;if(!pending.length)return;await Promise.all(pending);}}
 
 async function withTelegramMock(fn){
   const original=globalThis.fetch;const calls=[];let messageId=100;
@@ -80,7 +81,7 @@ test('new automatic forward creates one thank-you gate comment and no public doc
   });
 });
 
-test('thank gate stores grant before redirecting user to bot',async()=>{
+test('thank gate stores grant before redirecting first-time user to bot',async()=>{
   const db=new MockDB();const execution=ctx();
   await withTelegramMock(async(calls)=>{
     const response=await handlePublicationReaderDeliveryWebhook(webhook({callback_query:{id:'cb-1',from:{id:4242,first_name:'Reader',username:'reader'},data:'gate-thanks:7',message:{message_id:77,chat:{id:-200,type:'supergroup'}}}}),env(db),execution);
@@ -88,6 +89,18 @@ test('thank gate stores grant before redirecting user to bot',async()=>{
     assert.ok(db.batchCalls.some((batch)=>batch.some((row)=>row.query.startsWith('INSERT OR IGNORE INTO publication_thanks'))));
     const answer=calls.find((call)=>call.url.endsWith('/answerCallbackQuery'));assert.ok(answer);
     const payload=JSON.parse(String(answer.options.body));assert.match(payload.url,/start=dl_7/);
+    assert.equal(calls.some((call)=>call.url.endsWith('/sendDocument')),false);
+  });
+});
+
+test('returning reader starts file delivery immediately after thank-you click',async()=>{
+  const db=new MockDB({returningReader:true});const execution=ctx();
+  await withTelegramMock(async(calls)=>{
+    const response=await handlePublicationReaderDeliveryWebhook(webhook({callback_query:{id:'cb-fast',from:{id:4242,first_name:'Reader',username:'reader'},data:'gate-thanks:7',message:{message_id:77,chat:{id:-200,type:'supergroup'}}}}),env(db),execution);
+    assert.ok(response);await flush(execution);
+    assert.ok(calls.some((call)=>call.url.endsWith('/getChatMember')));
+    assert.ok(calls.some((call)=>call.url.endsWith('/sendDocument')));
+    assert.ok(db.batchCalls.some((batch)=>batch.some((row)=>row.query.includes('delivery_success'))));
   });
 });
 
