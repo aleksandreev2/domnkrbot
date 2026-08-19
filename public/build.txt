@@ -1,1 +1,1 @@
-domnkr-build-20260819-admin-cockpit1
+domnkr-build-20260819-publish-editor1
