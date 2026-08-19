@@ -15,6 +15,7 @@ import {
   handlePublishingDefaultBootstrap,
   handlePublishingSettingsGuard,
 } from './publishing-settings-guard.js';
+import { handleTitleProposalPolicy } from './title-proposal-policy.js';
 import { requireAdminSession } from './web-auth.js';
 
 interface AssetFetcher { fetch(request: Request): Promise<Response> }
@@ -107,6 +108,9 @@ export default {
     }
 
     kickPublishingDefaults(env, ctx);
+
+    const titleProposalPolicyResponse = await handleTitleProposalPolicy(request);
+    if (titleProposalPolicyResponse) return titleProposalPolicyResponse;
 
     const publishingDiagnosticsResponse = await handlePublishingDiagnostics(request, env);
     if (publishingDiagnosticsResponse) return publishingDiagnosticsResponse;
