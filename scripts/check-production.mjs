@@ -1,5 +1,5 @@
 const origin = (process.env.PRODUCTION_URL || 'https://domnkrbot.sashahumortele2.workers.dev').replace(/\/+$/, '');
-const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260819-reader1';
+const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260819-publishing-ops1';
 const attempts = Number(process.env.ATTEMPTS || 6);
 const delayMs = Number(process.env.DELAY_MS || 10000);
 
@@ -44,6 +44,8 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const admin = await fetchText('/admin/');
     const adminJs = await fetchText('/admin/admin.js?v=20260819-admin1');
     const adminRaw = await fetchText('/admin/proposal-raw.js?v=20260819-raw1');
+    const adminStats = await fetchText('/admin/publishing-analytics.js?v=20260819-ops1');
+    const adminStatsCss = await fetchText('/admin/publishing-analytics.css?v=20260819-ops1');
     const health = await fetchText('/api/health');
 
     last = {
@@ -53,7 +55,8 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       reader: reader.response.status, readerJs: readerJs.response.status,
       rawUnauthed: rawAuth.response.status, logo: logo.response.status, logoBytes: logo.bytes,
       icons: icons.response.status, lucide: lucide.response.status, admin: admin.response.status,
-      adminRaw: adminRaw.response.status, health: health.response.status,
+      adminRaw: adminRaw.response.status, adminStats: adminStats.response.status, adminStatsCss: adminStatsCss.response.status,
+      health: health.response.status,
       premiumHomepage: shell.text.includes('Последние обновления') && shell.text.includes('Наши переводы'),
       rawUploadPage: propose.text.includes('id="rawDrop"') && propose.text.includes('Загрузить файл'),
       titlePage: title.text.includes('id="titleApp"') && title.text.includes('Список глав'),
@@ -63,6 +66,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
         && icons.text.includes("removeAttribute('data-domnkr-lucide')"),
       storageReady: health.text.includes('"storageReady":true'),
       publishingChannelReady: health.text.includes('"publishingChannelReady":true'),
+      publicationDeliveryReady: health.text.includes('"publicationDeliveryReady":true'),
     };
 
     const ok = build.response.ok && build.text.includes(marker)
@@ -80,15 +84,21 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && icons.response.ok && icons.text.includes("querySelectorAll('i[data-lucide]')")
       && icons.text.includes("nameAttr:'data-domnkr-lucide'") && icons.text.includes("removeAttribute('data-domnkr-lucide')")
       && lucide.response.ok && lucide.text.length > 10000
-      && admin.response.ok && admin.text.includes('ADMIN CONSOLE') && admin.text.includes('/admin/proposal-raw.js?v=20260819-raw1')
+      && admin.response.ok && admin.text.includes('ADMIN CONSOLE')
+      && admin.text.includes('/admin/proposal-raw.js?v=20260819-raw1')
+      && admin.text.includes('/admin/publishing-analytics.js?v=20260819-ops1')
       && adminJs.response.ok && adminJs.text.includes('Publishing Center')
       && adminRaw.response.ok && adminRaw.text.includes('/api/admin/proposal-raw')
+      && adminStats.response.ok && adminStats.text.includes('/api/admin/publishing-analytics')
+      && adminStats.text.includes('Сказали «Спасибо»') && adminStats.text.includes('Поддержка')
+      && adminStatsCss.response.ok && adminStatsCss.text.includes('.publishing-kpis')
       && health.response.ok && health.text.includes('"service":"domnkrbot"')
-      && health.text.includes('"storageReady":true') && health.text.includes('"publishingChannelReady":true');
+      && health.text.includes('"storageReady":true') && health.text.includes('"publishingChannelReady":true')
+      && health.text.includes('"publicationDeliveryReady":true');
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: premium homepage, RAW multipart proposal flow, title page, reader shell and existing production services are ready (${marker})`);
+      console.log(`PASS: publishing bot delivery, analytics admin, reader assets and existing production services are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -98,6 +108,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: premium reader assets are stale, RAW auth boundary failed, or existing R2/publishing readiness regressed.');
+console.error('FAIL: publishing delivery/analytics assets are stale, publication delivery schema is not ready, or existing R2/publishing readiness regressed.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
