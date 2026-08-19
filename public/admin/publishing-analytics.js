@@ -6,6 +6,8 @@
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
   const ECHARTS_URL='https://cdn.jsdelivr.net/npm/echarts@6.1.0/dist/echarts.min.js';
   const PERIODS=[[7,'7 дней'],[30,'30 дней'],[90,'90 дней'],[365,'Год'],[0,'Всё время']];
+  const COMMENT_HELP_TEXT='Один download/support комментарий в discussion thread.';
+  const INSTALL_SELECTOR='.publisher-editor,#publicationList,.publication-row,[data-route],.admin-side-nav,.admin-mobile-nav';
   let days=30;
   let active=false;
   let loading=false;
@@ -28,17 +30,19 @@
 
   function installNavigation(){
     const app=$('#adminApp');if(!app)return;
+    let added=false;
     for(const nav of $$('.admin-side-nav,.admin-mobile-nav')){
       if(nav.querySelector('[data-ops-route="statistics"]'))continue;
       const button=document.createElement('button');button.type='button';button.dataset.opsRoute='statistics';button.innerHTML=`<span class="nav-icon">${icon('chart-no-axes-combined')}</span><span>Статистика</span>`;
       const publishing=nav.querySelector('[data-route="publishing"]');if(publishing)publishing.after(button);else nav.append(button);
       button.addEventListener('click',()=>void openStatistics());
+      added=true;
     }
     $$('[data-route],[data-cockpit-route]').forEach((button)=>{
       if(button.dataset.opsStatsBound)return;button.dataset.opsStatsBound='1';
       button.addEventListener('click',deactivate);
     });
-    refreshIcons();
+    if(added)refreshIcons();
   }
 
   function deactivate(){
@@ -206,21 +210,22 @@
 
   function installPublicationReconcile(){
     const list=$('#publicationList');if(!list)return;
+    let added=false;
     $$('.publication-row',list).forEach((row)=>{
       const badge=$('.admin-badge.published',row);if(!badge)return;
       const meta=$('.publication-copy span',row)?.textContent||'';const match=/#(\d+)/.exec(meta);if(!match)return;
       const id=match[1],actions=$('.publication-actions',row);if(!actions||actions.querySelector(`[data-reconcile-inline="${id}"]`))return;
       const button=document.createElement('button');button.type='button';button.className='comment-gate-reconcile';button.dataset.reconcileInline=id;button.innerHTML=`${icon('message-circle-reply')} Вынести CTA в комментарии`;
-      actions.append(button);
+      actions.append(button);added=true;
     });
-    bindReconcileButtons(list);refreshIcons();
+    bindReconcileButtons(list);if(added)refreshIcons();
   }
 
   function installPublishingGuide(){
     const body=$('#publishingBody');if(!body)return;
     const editor=body.querySelector('.publisher-editor');if(!editor)return;
     const commentHelp=$('#pubBotComment',editor)?.closest('label')?.querySelector('small');
-    if(commentHelp)commentHelp.textContent='Один download/support комментарий в discussion thread.';
+    if(commentHelp&&commentHelp.textContent!==COMMENT_HELP_TEXT)commentHelp.textContent=COMMENT_HELP_TEXT;
     if(editor.querySelector('[data-delivery-guide]'))return;
     const guide=document.createElement('section');guide.className='delivery-auto-guide';guide.dataset.deliveryGuide='1';
     guide.innerHTML=`<div class="delivery-guide-head"><span>${icon('messages-square')}</span><div><strong>Выдача через комментарии</strong><p>Как в DollarTL: сам пост канала остаётся чистым, а служебный gate появляется ответом на automatic forward Telegram.</p></div></div><div class="delivery-flow-preview"><div class="delivery-flow-post"><small>ПОСТ В КАНАЛЕ</small><strong>Текст + изображение</strong><span>Без «Скачать», без Boosty-кнопок.</span></div><span class="delivery-flow-arrow">${icon('arrow-down')}</span><div class="delivery-flow-comment"><small>ОДИН КОММЕНТАРИЙ БОТА</small><p>📥 Файлы — через бота в личке.<br>❤️ Поддержать переводчика.</p><div><span>${icon('download')} Скачать</span><span>${icon('heart-handshake')} Поддержать</span></div></div></div><ul><li>Telegram создаёт automatic forward поста в связанную discussion group.</li><li>Бот отвечает на этот forward одним служебным комментарием.</li><li>Файлы в комментарии не публикуются: выдача идёт приватно через <code>/start dl_…</code>.</li><li>Перед выдачей проверяется подписка; после выдачи действует 7-дневный контроль.</li><li>Повторная выдача использует сохранённый Telegram <code>file_id</code>, R2 остаётся fallback.</li></ul>`;
@@ -270,7 +275,21 @@
   function dateTime(value){if(!value)return'—';const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'}):String(value);}
   function shortDay(value){const date=new Date(`${value}T00:00:00Z`);return Number.isFinite(date.getTime())?date.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'}):String(value);}
 
-  const observer=new MutationObserver(()=>queueMicrotask(()=>{installNavigation();installPublishingGuide();installPublicationReconcile();bindReconcileButtons();}));
+  function mutationNeedsInstall(records){
+    for(const record of records){
+      for(const node of record.addedNodes){
+        if(node.nodeType!==Node.ELEMENT_NODE)continue;
+        const element=node;
+        if(element.matches?.(INSTALL_SELECTOR)||element.querySelector?.(INSTALL_SELECTOR))return true;
+      }
+    }
+    return false;
+  }
+
+  const observer=new MutationObserver((records)=>{
+    if(!mutationNeedsInstall(records))return;
+    queueMicrotask(()=>{installNavigation();installPublishingGuide();installPublicationReconcile();bindReconcileButtons();});
+  });
   document.addEventListener('DOMContentLoaded',()=>{
     const app=$('#adminApp');if(app)observer.observe(app,{childList:true,subtree:true});
     installNavigation();installPublishingGuide();installPublicationReconcile();bindReconcileButtons();
