@@ -11,6 +11,7 @@ interface D1PreparedStatementLike {
 }
 interface D1DatabaseLike { prepare(query: string): D1PreparedStatementLike }
 interface R2ObjectLike {
+  size: number;
   httpMetadata?: { contentType?: string };
   arrayBuffer(): Promise<ArrayBuffer>;
 }
