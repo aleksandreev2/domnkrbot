@@ -39,6 +39,7 @@ jobs:
           node --check scripts/configure-bot.mjs
           node --check scripts/check-production.mjs
           test -s public/brand/team-logo.webp
+          grep -Fq 'domnkr-build-20260820-membership1' public/build.txt
           grep -Fq 'id="rawDrop"' public/propose/index.html
           grep -Fq '/api/proposal-raw/init' public/propose.js
           grep -Fq '/api/title-proposals' public/propose.js
@@ -81,8 +82,9 @@ jobs:
           grep -Fq 'publication_comment_gates' migrations/0009_publication_comment_gate.sql
           grep -Fq 'publication_asset_cache_locks' migrations/0010_telegram_file_cache_lock.sql
           grep -Fq 'getChatMember' src/channel-membership-access.ts
-          grep -Fq 'left_within_7d_of_download' src/channel-membership-access.ts
-          grep -Fq 'ENFORCEMENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000' src/channel-membership-access.ts
+          grep -Fq "const BLACKLIST_REASON = 'left_channel'" src/channel-membership-access.ts
+          grep -Fq 'storedStatusWasMember' src/channel-membership-access.ts
+          grep -Fq "last_status IN ('creator','administrator','member','restricted')" src/channel-membership-access.ts
           grep -Fq "allowed_updates: ['message', 'callback_query', 'chat_member']" scripts/configure-bot.mjs
           grep -Fq '"main": "src/live-entry-v2.ts"' wrangler.jsonc
           grep -Fq 'handlePublicationCommentGateWebhook' src/live-entry-v2.ts
@@ -137,4 +139,4 @@ jobs:
         with:
           node-version: 22
       - name: Verify workers.dev serves current build
-        run: node scripts/check-production.mjs
+        run: EXPECTED_MARKER=domnkr-build-20260820-membership1 node scripts/check-production.mjs
