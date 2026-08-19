@@ -11,13 +11,24 @@ const fetchText = async (path) => {
   });
   return { response, text: await response.text() };
 };
+const fetchAsset = async (path) => {
+  const response = await fetch(`${origin}${path}${path.includes('?') ? '&' : '?'}smoke=${Date.now()}`, {
+    headers: { 'cache-control': 'no-cache' },
+    redirect: 'follow',
+  });
+  const bytes = await response.arrayBuffer();
+  return { response, bytes: bytes.byteLength };
+};
 
 let last = null;
 for (let attempt = 1; attempt <= attempts; attempt += 1) {
   try {
     const build = await fetchText('/build.txt');
     const shell = await fetchText('/');
-    const site = await fetchText('/site.js?v=20260819-web4');
+    const site = await fetchText('/site.js?v=20260819-web5');
+    const propose = await fetchText('/propose/');
+    const proposeJs = await fetchText('/propose.js?v=20260819-propose1');
+    const logo = await fetchAsset('/brand/team-logo.webp');
     const icons = await fetchText('/ui-icons.js?v=20260819-icons2');
     const lucide = await fetchText('/vendor/lucide.min.js?v=1.27.0');
     const admin = await fetchText('/admin/');
@@ -29,14 +40,19 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       build: build.response.status,
       shell: shell.response.status,
       site: site.response.status,
+      propose: propose.response.status,
+      proposeJs: proposeJs.response.status,
+      logo: logo.response.status,
+      logoBytes: logo.bytes,
       icons: icons.response.status,
       lucide: lucide.response.status,
       admin: admin.response.status,
       adminJs: adminJs.response.status,
       adminPolish: adminPolish.response.status,
       health: health.response.status,
-      editorialHomepage: shell.text.includes('Истории, которые стоят перевода') && shell.text.includes('id="proposalDialog"'),
-      adminEntryVisible: shell.text.includes('id="adminLink"'),
+      readerShell: shell.text.includes('Своя читалка') && shell.text.includes('href="/propose/"'),
+      adminHiddenByDefault: shell.text.includes('id="adminLink" class="utility-admin hidden"'),
+      titleRawPage: propose.text.includes('RAW ОБЯЗАТЕЛЕН') && propose.text.includes('id="proposalRaw"'),
       safeIconRuntime: icons.text.includes("querySelectorAll('i[data-lucide]')")
         && icons.text.includes("nameAttr:'data-domnkr-lucide'")
         && icons.text.includes("removeAttribute('data-domnkr-lucide')"),
@@ -46,12 +62,17 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     };
 
     const ok = build.response.ok && build.text.includes(marker)
-      && shell.response.ok && shell.text.includes('Истории, которые стоят перевода')
-      && shell.text.includes('id="proposalDialog"')
-      && shell.text.includes('id="adminLink"')
-      && shell.text.includes('/ui-icons.js?v=20260819-icons2')
-      && site.response.ok && site.text.includes('openProposalDialog')
-      && site.text.includes('/auth/telegram/callback')
+      && shell.response.ok && shell.text.includes('Своя читалка')
+      && shell.text.includes('href="/propose/"')
+      && shell.text.includes('id="adminLink" class="utility-admin hidden"')
+      && shell.text.includes('/brand/team-logo.webp')
+      && site.response.ok && site.text.includes('state.bootstrap?.isAdmin')
+      && site.text.includes('restorePostLoginRoute')
+      && propose.response.ok && propose.text.includes('RAW ОБЯЗАТЕЛЕН')
+      && propose.text.includes('id="proposalRaw"')
+      && proposeJs.response.ok && proposeJs.text.includes("proposalType:'title'")
+      && proposeJs.text.includes('sourceUrl:raw')
+      && logo.response.ok && logo.bytes > 1000
       && icons.response.ok
       && icons.text.includes("querySelectorAll('i[data-lucide]')")
       && icons.text.includes("nameAttr:'data-domnkr-lucide'")
@@ -68,7 +89,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: editorial website/admin, safe Lucide runtime, R2 FILES binding and publishing channel are ready (${marker})`);
+      console.log(`PASS: reader-oriented website, separate RAW proposal page, admin visibility gate and existing production services are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -78,6 +99,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: production assets are stale, editorial homepage or safe Lucide runtime is missing, R2 FILES is missing, publishing channel is not ready, or the Worker is unreachable.');
+console.error('FAIL: production assets are stale, reader shell/proposal page/admin gate is missing, or existing storage/publishing readiness regressed.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
