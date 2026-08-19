@@ -31,6 +31,7 @@ jobs:
           node --check public/admin/publication-lifecycle.js
           node --check public/admin/publishing-diagnostics.js
           node --check public/admin/proposal-raw.js
+          node --check public/admin/publishing-analytics.js
           node --check scripts/configure-bot.mjs
           node --check scripts/check-production.mjs
           test -s public/brand/team-logo.webp
@@ -42,6 +43,10 @@ jobs:
           grep -Fq 'id="titleApp"' public/title/index.html
           grep -Fq 'id="readerSettings"' public/reader/index.html
           grep -Fq 'id="adminLink" class="admin-entry hidden"' public/index.html
+          grep -Fq 'publishing-analytics.js?v=20260819-ops1' public/admin/index.html
+          grep -Fq 'Поддержать переводчика' src/publication-ops.ts
+          grep -Fq 'boosty.to/domnekromanta/single-payment/donation/818248/target?share=target_link' src/publication-ops.ts
+          grep -Fq 'publication_reader_events' migrations/0006_publication_delivery_analytics.sql
           grep -Fq "querySelectorAll('i[data-lucide]')" public/ui-icons.js
           grep -Fq "nameAttr:'data-domnkr-lucide'" public/ui-icons.js
           grep -Fq "removeAttribute('data-domnkr-lucide')" public/ui-icons.js
