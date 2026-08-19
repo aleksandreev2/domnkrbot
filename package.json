@@ -7,7 +7,7 @@
     "prepare:vendor": "node scripts/prepare-vendor.mjs",
     "typecheck": "tsc --noEmit",
     "build:spike": "tsc -p tsconfig.build.json",
-    "test": "npm run prepare:vendor && npm run build:spike && node --test tests/ranobelib-sync.test.mjs",
+    "test": "npm run prepare:vendor && npm run build:spike && node --experimental-strip-types --test tests/ranobelib-sync.test.mjs tests/web-auth.test.mjs",
     "sync:ranobelib:spike": "npm run build:spike && node scripts/ranobelib-sync-spike.mjs",
     "dev": "npm run prepare:vendor && wrangler dev",
     "db:local": "wrangler d1 migrations apply DB --local",
