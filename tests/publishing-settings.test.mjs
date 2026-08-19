@@ -3,6 +3,8 @@ import test from 'node:test';
 import { createHash, createHmac } from 'node:crypto';
 import { handleWebAuth } from '../dist-runtime/web-auth.js';
 import {
+  ensurePublishingDefaults,
+  getPublishingReadiness,
   handlePublishingDefaultBootstrap,
   handlePublishingSettingsGuard,
 } from '../dist-runtime/publishing-settings-guard.js';
@@ -203,6 +205,20 @@ test('production publishing channel bootstraps from Worker config once', async (
   const second = await handlePublishingDefaultBootstrap(await adminPublishingGet(), env(db));
   assert.equal(second, null);
   assert.equal(calls.length, callsAfterBootstrap, 'configured target must not be revalidated on every admin request');
+});
+
+test('server bootstrap exposes channel and discussion readiness without admin session', async (t) => {
+  const db = new MockDB();
+  installTelegramPublishingMock(t, '@domnekromanta');
+
+  const configured = await ensurePublishingDefaults(env(db));
+  assert.ok(configured);
+  assert.equal(configured.settings.publishChannelId, '-100111');
+  assert.equal(configured.settings.discussionChatId, '-100222');
+  assert.deepEqual(await getPublishingReadiness(env(db)), {
+    channelReady: true,
+    discussionReady: true,
+  });
 });
 
 test('production bootstrap stays fail-closed when bot lacks channel rights', async (t) => {

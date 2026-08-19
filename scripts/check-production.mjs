@@ -30,6 +30,8 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       adminJs: adminJs.response.status,
       health: health.response.status,
       storageReady: health.text.includes('"storageReady":true'),
+      publishingChannelReady: health.text.includes('"publishingChannelReady":true'),
+      publishingDiscussionReady: health.text.includes('"publishingDiscussionReady":true'),
     };
 
     const ok = build.response.ok && build.text.includes(marker)
@@ -38,11 +40,12 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && admin.response.ok && admin.text.includes('ADMIN CONSOLE')
       && adminJs.response.ok && adminJs.text.includes('Publishing Center')
       && health.response.ok && health.text.includes('"service":"domnkrbot"')
-      && health.text.includes('"storageReady":true');
+      && health.text.includes('"storageReady":true')
+      && health.text.includes('"publishingChannelReady":true');
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: production website/admin assets and R2 FILES binding are current (${marker})`);
+      console.log(`PASS: production website/admin assets, R2 FILES binding and publishing channel are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -52,6 +55,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: production website/admin assets are not current, R2 FILES is missing, or the Worker is unreachable.');
+console.error('FAIL: production website/admin assets are stale, R2 FILES is missing, publishing channel is not ready, or the Worker is unreachable.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
