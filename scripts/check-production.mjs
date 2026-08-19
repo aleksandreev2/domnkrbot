@@ -29,6 +29,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       admin: admin.response.status,
       adminJs: adminJs.response.status,
       health: health.response.status,
+      storageReady: health.text.includes('"storageReady":true'),
     };
 
     const ok = build.response.ok && build.text.includes(marker)
@@ -36,11 +37,12 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && site.response.ok && site.text.includes('/auth/telegram/callback')
       && admin.response.ok && admin.text.includes('ADMIN CONSOLE')
       && adminJs.response.ok && adminJs.text.includes('Publishing Center')
-      && health.response.ok && health.text.includes('"service":"domnkrbot"');
+      && health.response.ok && health.text.includes('"service":"domnkrbot"')
+      && health.text.includes('"storageReady":true');
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: production website/admin assets are current (${marker})`);
+      console.log(`PASS: production website/admin assets and R2 FILES binding are current (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -50,6 +52,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: production website/admin assets are not current or not reachable.');
+console.error('FAIL: production website/admin assets are not current, R2 FILES is missing, or the Worker is unreachable.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
