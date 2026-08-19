@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101718">
+  <title>Читалка · Дом Некроманта</title>
+  <meta name="description" content="Спокойная собственная читалка команды «Дом Некроманта».">
+  <link rel="stylesheet" href="/site.css?v=20260819-reader1">
+  <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
+  <script defer src="/ui-icons.js?v=20260819-icons2"></script>
+  <script defer src="/reader.js?v=20260819-reader1"></script>
+</head>
+<body class="reader-body">
+  <main class="reader-shell">
+    <article class="reader-paper">
+      <header class="reader-toolbar">
+        <div class="reader-breadcrumb"><a id="readerBack" href="/"><i data-lucide="arrow-left"></i></a><span id="readerBookTitle">Загрузка…</span><span>·</span><span id="readerChapterShort">Глава</span></div>
+        <div class="reader-tools"><button id="contentsButton" type="button"><i data-lucide="list"></i><span>Содержание</span></button><button id="settingsButton" type="button"><i data-lucide="settings"></i><span>Настройки</span></button></div>
+      </header>
+      <div class="reader-progress"><span id="readerProgress"></span></div>
+
+      <aside id="readerSettings" class="reader-settings hidden" aria-label="Настройки чтения">
+        <div class="settings-head"><strong>Настройки чтения</strong><button id="settingsClose" type="button" aria-label="Закрыть"><i data-lucide="x"></i></button></div>
+        <div class="settings-group"><span>Тема</span><div class="theme-options"><label class="theme-option light"><button type="button" data-theme="light" aria-label="Светлая тема"></button>Светлая</label><label class="theme-option sepia"><button type="button" data-theme="sepia" aria-label="Сепия"></button>Сепия</label><label class="theme-option dark"><button type="button" data-theme="dark" aria-label="Тёмная тема"></button>Тёмная</label></div></div>
+        <div class="settings-group"><span>Размер текста</span><div class="font-size-controls"><button id="fontDown" type="button">A−</button><span id="fontValue">100%</span><button id="fontUp" type="button">A+</button></div></div>
+        <div class="settings-group"><span>Ширина текста</span><div class="setting-options"><button type="button" data-width="narrow">Узкая</button><button type="button" data-width="medium">Средняя</button><button type="button" data-width="wide">Широкая</button></div></div>
+        <div class="settings-group"><span>Межстрочный интервал</span><div class="setting-options"><button type="button" data-line="compact"><i data-lucide="align-justify"></i></button><button type="button" data-line="normal"><i data-lucide="align-justify"></i></button><button type="button" data-line="loose"><i data-lucide="align-justify"></i></button></div></div>
+        <div class="settings-group"><span>Шрифт</span><div class="setting-options"><button type="button" data-font="serif">Serif</button><button type="button" data-font="sans">Sans</button></div></div>
+      </aside>
+
+      <div class="reading-column">
+        <header class="reader-heading"><small id="readerVolume">Том</small><h1 id="readerTitle">Загрузка главы…</h1><div id="readerChapterTitle" class="chapter-title"></div></header>
+        <section id="readerContent" class="reader-content"><div class="reader-unavailable"><h2>Загружаем текст</h2><p>Получаем главу из собственной библиотеки.</p></div></section>
+      </div>
+      <nav class="reader-nav"><a id="readerPrevious" href="#"><i data-lucide="arrow-left"></i><span>Предыдущая глава</span></a><span id="readerContentsLabel">Содержание</span><a id="readerNext" href="#"><span>Следующая глава</span><i data-lucide="arrow-right"></i></a></nav>
+    </article>
+  </main>
+</body>
+</html>
