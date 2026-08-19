@@ -10,6 +10,7 @@
     "src/publication-lifecycle.ts",
     "src/publication-archive-guard.ts",
     "src/publishing-runtime.ts",
-    "src/publishing-settings-guard.ts"
+    "src/publishing-settings-guard.ts",
+    "src/publishing-diagnostics.ts"
   ]
 }

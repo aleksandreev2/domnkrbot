@@ -8,6 +8,7 @@ import {
 } from './ranobelib-runtime.js';
 import { handlePublicationArchiveGuard } from './publication-archive-guard.js';
 import { handlePublicationLifecycleApi } from './publication-lifecycle.js';
+import { handlePublishingDiagnostics } from './publishing-diagnostics.js';
 import {
   ensurePublishingDefaults,
   getPublishingReadiness,
@@ -106,6 +107,9 @@ export default {
     }
 
     kickPublishingDefaults(env, ctx);
+
+    const publishingDiagnosticsResponse = await handlePublishingDiagnostics(request, env);
+    if (publishingDiagnosticsResponse) return publishingDiagnosticsResponse;
 
     const publishingSettingsResponse = await handlePublishingSettingsGuard(request, env);
     if (publishingSettingsResponse) return publishingSettingsResponse;
