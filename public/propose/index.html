@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#1c1e24">
+  <title>Предложить тайтл · Дом Некроманта</title>
+  <meta name="description" content="Предложить новый тайтл команде «Дом Некроманта». Для заявки обязательна ссылка на RAW.">
+  <link rel="stylesheet" href="/site.css?v=20260819-web5">
+  <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
+  <script defer src="/ui-icons.js?v=20260819-icons2"></script>
+  <script defer src="/propose.js?v=20260819-propose1"></script>
+</head>
+<body>
+  <div class="utility-bar"><div class="wrap utility-inner"><a class="utility-back" href="/"><i data-lucide="arrow-left"></i> НА ГЛАВНУЮ</a><div class="utility-actions"><a id="adminLink" class="utility-admin hidden" href="/admin/"><i data-lucide="shield-cog"></i><span>ADMIN</span></a><span id="proposalAccount" class="proposal-account">LOGIN</span><button id="logoutButton" class="utility-icon hidden" type="button" aria-label="Выйти"><i data-lucide="log-out"></i></button></div></div></div>
+
+  <header class="site-head"><div class="wrap nav-shell"><a class="brand" href="/"><img src="/brand/team-logo.webp" alt="" width="62" height="62"><span class="brand-copy"><strong>ДОМ НЕКРОМАНТА</strong><small>ПЕРЕВОДЫ СООБЩЕСТВА</small></span></a><nav class="main-nav"><a href="/#reader">ЧИТАТЬ</a><a href="/#releases">РЕЛИЗЫ</a><a class="active" href="/propose/">ПРЕДЛОЖИТЬ ТАЙТЛ</a><a href="/#community">СООБЩЕСТВО</a></nav><div class="nav-icons"><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer" aria-label="Telegram"><i data-lucide="send"></i></a></div></div></header>
+
+  <main>
+    <section class="proposal-hero"><div class="wrap proposal-hero-grid"><div><span class="eyebrow">COMMUNITY REQUEST</span><h1>Предложить новый тайтл</h1><p>Мы рассматриваем заявки, когда можем проверить первоисточник. Поэтому для нового проекта ссылка на RAW обязательна.</p></div><div class="raw-rule"><i data-lucide="file-key-2"></i><div><strong>RAW ОБЯЗАТЕЛЕН</strong><span>Укажите прямую или доступную ссылку на оригинал / архив / страницу, откуда команда сможет получить исходный материал.</span></div></div></div></section>
+
+    <section class="proposal-content"><div class="wrap proposal-layout"><section class="proposal-form-card"><div class="form-card-head"><span>01</span><div><h2>Заявка</h2><p>Один тайтл — одна понятная заявка с проверяемым RAW.</p></div></div>
+      <div id="proposalLogin" class="proposal-login hidden"><div><i data-lucide="send"></i><h3>Войдите через Telegram</h3><p>Telegram используется только для идентификации автора заявки.</p></div><div id="telegramLogin"></div></div>
+      <form id="titleProposalForm" class="title-proposal-form hidden">
+        <label><span>Название тайтла <b>*</b></span><input id="proposalTitle" maxlength="180" required autocomplete="off" placeholder="Название ранобэ / веб-новеллы"></label>
+        <label><span>RAW / первоисточник <b>*</b></span><input id="proposalRaw" maxlength="500" type="url" inputmode="url" required placeholder="https://..."><small>Нужна рабочая HTTP(S)-ссылка. Заявка без RAW сервером не принимается.</small></label>
+        <label><span>Комментарий</span><textarea id="proposalComment" maxlength="1500" rows="6" placeholder="Почему этот тайтл стоит взять? Есть ли особенности перевода, доступность глав, альтернативные источники?"></textarea></label>
+        <div class="proposal-submit-row"><span id="proposalNote" class="form-note"></span><button id="proposalSubmit" class="cta cta-primary" type="submit">ОТПРАВИТЬ ЗАЯВКУ <i data-lucide="send"></i></button></div>
+      </form>
+    </section>
+
+    <aside class="proposal-guide"><span class="eyebrow">ПЕРЕД ОТПРАВКОЙ</span><h2>Что проверить</h2><ol><li><span>01</span><div><strong>Это новый тайтл</strong><p>Не создавайте дубль уже активного проекта или своей действующей заявки.</p></div></li><li><span>02</span><div><strong>RAW открывается</strong><p>Ссылка должна вести к реальному первоисточнику или доступному архиву материала.</p></div></li><li><span>03</span><div><strong>Есть контекст</strong><p>Коротко напишите, почему проект интересен и что команде важно знать заранее.</p></div></li></ol><div class="guide-note"><i data-lucide="info"></i><p>После отправки заявка попадёт в общую очередь сообщества. Решение о взятии проекта остаётся за командой.</p></div></aside></div></section>
+  </main>
+
+  <footer class="site-foot"><div class="wrap footer-grid"><div class="footer-brand"><img src="/brand/team-logo.webp" alt="" width="46" height="46"><div><strong>Дом Некроманта</strong><span>Переводы сообщества</span></div></div><nav><a href="/">Главная</a><a href="/#releases">Релизы</a><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Telegram</a></nav></div></footer>
+</body>
+</html>
