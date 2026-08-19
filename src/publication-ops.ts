@@ -103,7 +103,7 @@ function supportRedirect(origin: string, publicationId: number, source: string):
 export function composeManagedPublication(publication: Pick<PublicationRow, 'id' | 'body_html' | 'add_footer'>, assetCount: number, botUsername = 'domnekromanta_bot'): string {
   const bot = botUsername.replace(/^@/, '');
   const parts = [publication.body_html.trim()];
-  if (assetCount > 0) parts.push('📥 Скачать перевод можно через бота — кнопка под постом.');
+  if (assetCount > 0) parts.push('📥 Скачать перевод можно через бота — кнопка под постом. Если Telegram покажет «Запустить», нажмите один раз — бот сразу пришлёт файлы.');
   parts.push('❤️ Поддержать переводчика — кнопка под постом.');
   if (publication.add_footer) parts.push(`Дом Некроманта · переводы сообщества\nhttps://t.me/${bot}`);
   return parts.filter(Boolean).join('\n\n');
@@ -508,7 +508,7 @@ async function handleDiscussionForward(env: PublicationOpsEnv, message: Telegram
   const files = await assets(env, pub.id);
   if (!files.length) return false;
   await env.DB.prepare('UPDATE publications SET discussion_message_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').bind(message.message_id, pub.id).run();
-  const text = `📥 Скачать файлы релиза можно через @${botName(env)} в личные сообщения.\n\n❤️ Поддержать переводчика — кнопка ниже.`;
+  const text = `📥 Скачать файлы релиза можно через @${botName(env)}. Если Telegram покажет «Запустить», нажмите один раз — бот сразу пришлёт файлы.\n\n❤️ Поддержать переводчика — кнопка ниже.`;
   await telegramCall(env, 'sendMessage', {
     chat_id: normalizeChatId(discussion), text,
     reply_parameters: { message_id: message.message_id },
