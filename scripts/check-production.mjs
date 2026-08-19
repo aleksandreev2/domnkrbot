@@ -1,5 +1,5 @@
 const origin = (process.env.PRODUCTION_URL || 'https://domnkrbot.sashahumortele2.workers.dev').replace(/\/+$/, '');
-const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260819-admin-cockpit1';
+const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260819-publish-editor1';
 const attempts = Number(process.env.ATTEMPTS || 6);
 const delayMs = Number(process.env.DELAY_MS || 10000);
 
@@ -50,6 +50,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const adminStatsCss = await fetchText('/admin/publishing-analytics.css?v=20260819-ops2');
     const adminCockpit = await fetchText('/admin/admin-cockpit.js?v=20260819-cockpit1');
     const adminCockpitCss = await fetchText('/admin/admin-cockpit.css?v=20260819-cockpit1');
+    const publishEditor = await fetchText('/admin/publish-editor.js?v=20260819-publish1');
     const health = await fetchText('/api/health');
 
     last = {
@@ -63,6 +64,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       icons: icons.response.status, lucide: lucide.response.status, admin: admin.response.status,
       adminRaw: adminRaw.response.status, adminStats: adminStats.response.status, adminStatsCss: adminStatsCss.response.status,
       adminCockpit: adminCockpit.response.status, adminCockpitCss: adminCockpitCss.response.status,
+      publishEditor: publishEditor.response.status,
       health: health.response.status,
       storageReady: health.text.includes('"storageReady":true'),
       publishingChannelReady: health.text.includes('"publishingChannelReady":true'),
@@ -89,6 +91,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && admin.text.includes('/admin/publishing-analytics.js?v=20260819-ops2')
       && admin.text.includes('/admin/admin-cockpit.js?v=20260819-cockpit1')
       && admin.text.includes('/admin/admin-cockpit.css?v=20260819-cockpit1')
+      && admin.text.includes('/admin/publish-editor.js?v=20260819-publish1')
       && adminJs.response.ok && adminJs.text.includes('Publishing Center')
       && adminRaw.response.ok && adminRaw.text.includes('/api/admin/proposal-raw')
       && adminStats.response.ok && adminStats.text.includes('/api/admin/publishing-analytics')
@@ -97,13 +100,16 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && adminCockpit.response.ok && adminCockpit.text.includes('/api/admin/users')
       && adminCockpit.text.includes('/api/admin/activity') && adminCockpit.text.includes('Пользователи')
       && adminCockpitCss.response.ok && adminCockpitCss.text.includes('.cockpit-users-layout')
+      && publishEditor.response.ok && publishEditor.text.includes('Опубликовать в канал')
+      && publishEditor.text.includes('/api/admin/publishing-center/preflight')
+      && publishEditor.text.includes('/api/admin/publications/${publicationId}/publish')
       && health.response.ok && health.text.includes('"service":"domnkrbot"')
       && health.text.includes('"storageReady":true') && health.text.includes('"publishingChannelReady":true')
       && health.text.includes('"publicationDeliveryReady":true') && health.text.includes('"membershipAccessReady":true');
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: admin cockpit, membership-gated bot delivery, publishing analytics and existing production services are ready (${marker})`);
+      console.log(`PASS: direct publish editor, admin cockpit and existing production services are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -113,6 +119,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: admin cockpit assets/routes are stale or existing production services regressed.');
+console.error('FAIL: publish editor/admin assets are stale or existing production services regressed.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
