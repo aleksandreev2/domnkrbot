@@ -5,6 +5,8 @@
   const labelIcons=new Map([
     ['Открыть Publishing','arrow-up-right'],['Все заявки','list-filter'],['Синхронизировать','refresh-cw'],['Сохранить настройки','save'],['Проверить','shield-check'],['Применить','wand-sparkles'],['Сохранить шаблон','save'],['Создать черновик публикации','file-plus-2'],['Очистить','eraser'],['Тестовая отправка','send'],['Опубликовать','send'],['Удалить','trash-2'],['Редактировать','pencil'],['Скачать','download'],['Выйти','log-out']
   ]);
+  const refreshSelector='i[data-lucide],[data-route],.admin-stat-icon,.publication-thumb,.file-icon,.empty-icon,.round-icon,button,a,.preflight-check,.save-status';
+  const refreshTargetSelector='button,a,.admin-stat-icon,.publication-thumb,.file-icon,.empty-icon,.round-icon,.preflight-check,.save-status';
   let queued=false;
 
   function placeholder(name,className=''){
@@ -85,11 +87,34 @@
     upgradeNavigation();upgradeExactGlyphs();upgradeLeadingGlyphs();upgradeButtons();renderFreshIcons();
   }
 
-  function schedule(){if(queued)return;queued=true;queueMicrotask(refresh);}
+  function schedule(){
+    if(queued)return;
+    queued=true;
+    if(typeof window.requestAnimationFrame==='function')window.requestAnimationFrame(refresh);
+    else setTimeout(refresh,0);
+  }
+
+  function elementNeedsRefresh(node){
+    if(node.nodeType!==Node.ELEMENT_NODE)return false;
+    const element=node;
+    return element.matches(refreshSelector)||Boolean(element.querySelector(refreshSelector));
+  }
+
+  function mutationNeedsRefresh(records){
+    for(const record of records){
+      if(record.target?.nodeType===Node.ELEMENT_NODE&&record.target.matches?.(refreshTargetSelector))return true;
+      for(const node of record.addedNodes){
+        if(elementNeedsRefresh(node))return true;
+        if(node.nodeType===Node.TEXT_NODE&&node.parentElement?.matches?.(refreshTargetSelector))return true;
+      }
+    }
+    return false;
+  }
+
   window.DomNkrIcons={refresh:schedule};
   document.addEventListener('DOMContentLoaded',()=>{
     refresh();
     const root=document.body;
-    if(root)new MutationObserver(schedule).observe(root,{childList:true,subtree:true});
+    if(root)new MutationObserver((records)=>{if(mutationNeedsRefresh(records))schedule();}).observe(root,{childList:true,subtree:true});
   });
 })();
