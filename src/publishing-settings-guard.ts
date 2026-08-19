@@ -113,7 +113,7 @@ function chatLabel(chat: TelegramChat): string {
   return chat.title || (chat.username ? `@${chat.username}` : String(chat.id));
 }
 
-async function configurePublishingSettings(
+export async function configurePublishingSettings(
   env: SettingsEnv,
   rawChannel: unknown,
   rawDiscussion: unknown,
