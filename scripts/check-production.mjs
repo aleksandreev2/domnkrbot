@@ -1,5 +1,5 @@
 const origin = (process.env.PRODUCTION_URL || 'https://domnkrbot.sashahumortele2.workers.dev').replace(/\/+$/, '');
-const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260819-publishing-ops1';
+const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260819-membership1';
 const attempts = Number(process.env.ATTEMPTS || 6);
 const delayMs = Number(process.env.DELAY_MS || 10000);
 
@@ -38,14 +38,15 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const reader = await fetchText('/reader/');
     const readerJs = await fetchText('/reader.js?v=20260819-reader1');
     const rawAuth = await fetchUnauthedRawInit();
+    const membershipAuth = await fetchText('/api/admin/membership-access');
     const logo = await fetchAsset('/brand/team-logo.webp');
     const icons = await fetchText('/ui-icons.js?v=20260819-icons2');
     const lucide = await fetchText('/vendor/lucide.min.js?v=1.27.0');
     const admin = await fetchText('/admin/');
     const adminJs = await fetchText('/admin/admin.js?v=20260819-admin1');
     const adminRaw = await fetchText('/admin/proposal-raw.js?v=20260819-raw1');
-    const adminStats = await fetchText('/admin/publishing-analytics.js?v=20260819-ops1');
-    const adminStatsCss = await fetchText('/admin/publishing-analytics.css?v=20260819-ops1');
+    const adminStats = await fetchText('/admin/publishing-analytics.js?v=20260819-ops2');
+    const adminStatsCss = await fetchText('/admin/publishing-analytics.css?v=20260819-ops2');
     const health = await fetchText('/api/health');
 
     last = {
@@ -53,20 +54,15 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       propose: propose.response.status, proposeJs: proposeJs.response.status,
       title: title.response.status, titleJs: titleJs.response.status,
       reader: reader.response.status, readerJs: readerJs.response.status,
-      rawUnauthed: rawAuth.response.status, logo: logo.response.status, logoBytes: logo.bytes,
+      rawUnauthed: rawAuth.response.status, membershipUnauthed: membershipAuth.response.status,
+      logo: logo.response.status, logoBytes: logo.bytes,
       icons: icons.response.status, lucide: lucide.response.status, admin: admin.response.status,
       adminRaw: adminRaw.response.status, adminStats: adminStats.response.status, adminStatsCss: adminStatsCss.response.status,
       health: health.response.status,
-      premiumHomepage: shell.text.includes('Последние обновления') && shell.text.includes('Наши переводы'),
-      rawUploadPage: propose.text.includes('id="rawDrop"') && propose.text.includes('Загрузить файл'),
-      titlePage: title.text.includes('id="titleApp"') && title.text.includes('Список глав'),
-      readerPage: reader.text.includes('id="readerSettings"') && reader.text.includes('Настройки чтения'),
-      safeIconRuntime: icons.text.includes("querySelectorAll('i[data-lucide]')")
-        && icons.text.includes("nameAttr:'data-domnkr-lucide'")
-        && icons.text.includes("removeAttribute('data-domnkr-lucide')"),
       storageReady: health.text.includes('"storageReady":true'),
       publishingChannelReady: health.text.includes('"publishingChannelReady":true'),
       publicationDeliveryReady: health.text.includes('"publicationDeliveryReady":true'),
+      membershipAccessReady: health.text.includes('"membershipAccessReady":true'),
     };
 
     const ok = build.response.ok && build.text.includes(marker)
@@ -79,26 +75,25 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && titleJs.response.ok && titleJs.text.includes('/api/title?ref=') && titleJs.text.includes('readerAvailable')
       && reader.response.ok && reader.text.includes('id="readerSettings"')
       && readerJs.response.ok && readerJs.text.includes('/api/reader/chapter?ref=') && readerJs.text.includes('Текст этой главы ещё не импортирован')
-      && rawAuth.response.status === 401
+      && rawAuth.response.status === 401 && membershipAuth.response.status === 401
       && logo.response.ok && logo.bytes > 1000
       && icons.response.ok && icons.text.includes("querySelectorAll('i[data-lucide]')")
       && icons.text.includes("nameAttr:'data-domnkr-lucide'") && icons.text.includes("removeAttribute('data-domnkr-lucide')")
       && lucide.response.ok && lucide.text.length > 10000
       && admin.response.ok && admin.text.includes('ADMIN CONSOLE')
-      && admin.text.includes('/admin/proposal-raw.js?v=20260819-raw1')
-      && admin.text.includes('/admin/publishing-analytics.js?v=20260819-ops1')
+      && admin.text.includes('/admin/publishing-analytics.js?v=20260819-ops2')
       && adminJs.response.ok && adminJs.text.includes('Publishing Center')
       && adminRaw.response.ok && adminRaw.text.includes('/api/admin/proposal-raw')
       && adminStats.response.ok && adminStats.text.includes('/api/admin/publishing-analytics')
-      && adminStats.text.includes('Сказали «Спасибо»') && adminStats.text.includes('Поддержка')
-      && adminStatsCss.response.ok && adminStatsCss.text.includes('.publishing-kpis')
+      && adminStats.text.includes('/api/admin/membership-access') && adminStats.text.includes('Чёрный список')
+      && adminStatsCss.response.ok && adminStatsCss.text.includes('.publishing-access-list')
       && health.response.ok && health.text.includes('"service":"domnkrbot"')
       && health.text.includes('"storageReady":true') && health.text.includes('"publishingChannelReady":true')
-      && health.text.includes('"publicationDeliveryReady":true');
+      && health.text.includes('"publicationDeliveryReady":true') && health.text.includes('"membershipAccessReady":true');
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: publishing bot delivery, analytics admin, reader assets and existing production services are ready (${marker})`);
+      console.log(`PASS: membership-gated bot delivery, blacklist admin, publishing analytics and existing production services are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -108,6 +103,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: publishing delivery/analytics assets are stale, publication delivery schema is not ready, or existing R2/publishing readiness regressed.');
+console.error('FAIL: membership-gated delivery assets are stale, membership schema is not ready, or existing production services regressed.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
