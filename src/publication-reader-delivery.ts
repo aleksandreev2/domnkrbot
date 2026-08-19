@@ -1,6 +1,16 @@
 import { checkDownloadMembership, type ChannelMembershipEnv } from './channel-membership-access.js';
 import { ensurePublicationCommentGateSchema } from './publication-comment-gate.js';
 import { BOOSTY_SUPPORT_URL, ensurePublicationOpsSchema, type PublicationOpsEnv } from './publication-ops.js';
+import {
+  acquireTelegramFileCacheLease,
+  clearTelegramFileId,
+  ensureTelegramFileCacheSchema,
+  readTelegramFileId,
+  releaseTelegramFileCacheLease,
+  storeTelegramFileId,
+  waitForTelegramFileId,
+  type TelegramFileCacheDB,
+} from './telegram-file-cache.js';
 
 type D1Row = Record<string, unknown>;
 type D1AllResult<T> = { results: T[] };
@@ -11,7 +21,7 @@ interface D1PreparedStatementLike {
   all<T = D1Row>(): Promise<D1AllResult<T>>;
   run(): Promise<D1RunResult>;
 }
-interface D1DatabaseLike {
+interface D1DatabaseLike extends TelegramFileCacheDB {
   prepare(query: string): D1PreparedStatementLike;
   batch(statements: D1PreparedStatementLike[]): Promise<D1RunResult[]>;
 }
@@ -19,6 +29,7 @@ interface R2ObjectLike {
   size: number;
   httpMetadata?: { contentType?: string };
   arrayBuffer(): Promise<ArrayBuffer>;
+  blob?: () => Promise<Blob>;
 }
 interface R2BucketLike { get(key: string): Promise<R2ObjectLike | null> }
 
@@ -40,7 +51,7 @@ type TelegramMessage = {
 };
 type TelegramCallbackQuery = { id: string; from: TelegramUser; data?: string; message?: TelegramMessage };
 type TelegramUpdate = { message?: TelegramMessage; callback_query?: TelegramCallbackQuery };
-type TelegramResponse<T> = { ok?: boolean; result?: T; description?: string };
+type TelegramResponse<T> = { ok?: boolean; result?: T; description?: string; error_code?: number };
 type ChatInfo = { id: number | string; linked_chat_id?: number | string };
 type PublicationRow = {
   id: number;
@@ -69,16 +80,31 @@ type DeliveryRow = {
   last_delivered_at: string | null;
   updated_at: string | null;
 };
-
 type DownloadContext = {
   publication: PublicationRow | null;
   assets: AssetRow[];
   thanked: boolean;
   deliveries: Map<number, DeliveryRow>;
 };
+type SendResult = {
+  message: TelegramMessage;
+  transport: 'telegram_file_id' | 'r2_upload';
+  cache: 'hit' | 'waited' | 'cold' | 'repaired';
+};
 
 const RESEND_COOLDOWN_MS = 60_000;
 const SENDING_STALE_MS = 2 * 60_000;
+
+class TelegramApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly errorCode: number | null,
+    readonly description: string,
+  ) {
+    super(message);
+  }
+}
 
 function normalizeChatId(value: string): string | number {
   const raw = value.trim();
@@ -119,11 +145,17 @@ function isFreshSending(row: DeliveryRow | undefined): boolean {
   const age = Date.now() - timestamp;
   return age >= 0 && age < SENDING_STALE_MS;
 }
+function isInvalidCachedFileError(error: unknown): boolean {
+  if (!(error instanceof TelegramApiError) || error.errorCode !== 400) return false;
+  return /(file[_ -]?id|file identifier|wrong remote file|wrong file identifier|invalid file)/i.test(error.description);
+}
 
 async function setting(env: PublicationReaderDeliveryEnv, key: string): Promise<string> {
   try {
     return (await env.DB.prepare('SELECT value FROM app_settings WHERE key=?').bind(key).first<{ value: string }>())?.value?.trim() || '';
-  } catch { return ''; }
+  } catch {
+    return '';
+  }
 }
 async function telegramCall<T>(env: PublicationReaderDeliveryEnv, method: string, payload: Record<string, unknown>): Promise<T> {
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
@@ -132,7 +164,15 @@ async function telegramCall<T>(env: PublicationReaderDeliveryEnv, method: string
     method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload),
   });
   const body = await response.json().catch(() => null) as TelegramResponse<T> | null;
-  if (!response.ok || !body?.ok) throw new Error(body?.description || `Telegram ${method} failed with HTTP ${response.status}`);
+  if (!response.ok || !body?.ok) {
+    const description = body?.description || `Telegram ${method} failed with HTTP ${response.status}`;
+    throw new TelegramApiError(
+      description,
+      response.status,
+      Number.isFinite(body?.error_code) ? Number(body?.error_code) : null,
+      description,
+    );
+  }
   return body.result as T;
 }
 async function telegramUpload(env: PublicationReaderDeliveryEnv, form: FormData): Promise<TelegramMessage> {
@@ -140,7 +180,15 @@ async function telegramUpload(env: PublicationReaderDeliveryEnv, form: FormData)
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
   const response = await fetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: 'POST', body: form });
   const body = await response.json().catch(() => null) as TelegramResponse<TelegramMessage> | null;
-  if (!response.ok || !body?.ok || !body.result) throw new Error(body?.description || `Telegram sendDocument failed with HTTP ${response.status}`);
+  if (!response.ok || !body?.ok || !body.result) {
+    const description = body?.description || `Telegram sendDocument failed with HTTP ${response.status}`;
+    throw new TelegramApiError(
+      description,
+      response.status,
+      Number.isFinite(body?.error_code) ? Number(body?.error_code) : null,
+      description,
+    );
+  }
   return body.result;
 }
 async function recordEvent(
@@ -169,7 +217,9 @@ async function linkedDiscussionId(env: PublicationReaderDeliveryEnv): Promise<nu
   try {
     const info = await telegramCall<ChatInfo>(env, 'getChat', { chat_id: normalizeChatId(channel) });
     return info.linked_chat_id ?? null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 async function handleAutomaticForward(env: PublicationReaderDeliveryEnv, message: TelegramMessage, origin: string): Promise<boolean> {
@@ -242,7 +292,7 @@ async function handleThankGate(
     await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'Некорректный релиз.' }).catch(() => undefined);
     return;
   }
-  await Promise.all([ensurePublicationOpsSchema(env), ensurePublicationCommentGateSchema(env)]);
+  await Promise.all([ensurePublicationOpsSchema(env), ensurePublicationCommentGateSchema(env), ensureTelegramFileCacheSchema(env)]);
   const gate = await env.DB.prepare(`SELECT p.status,g.status AS gate_status,g.gate_message_id
     FROM publications p LEFT JOIN publication_comment_gates g ON g.publication_id=p.id WHERE p.id=?`)
     .bind(publicationId).first<Record<string, unknown>>();
@@ -310,8 +360,16 @@ async function readDownloadContext(env: PublicationReaderDeliveryEnv, publicatio
   return { publication, assets, thanked, deliveries };
 }
 
-async function claimDelivery(env: PublicationReaderDeliveryEnv, publicationId: number, asset: AssetRow, userId: number, prior: DeliveryRow | undefined): Promise<{ claimed: boolean; repeat: boolean }> {
-  if (isRecent(prior?.last_delivered_at || null) || isFreshSending(prior)) return { claimed: false, repeat: Boolean(prior?.first_delivered_at) };
+async function claimDelivery(
+  env: PublicationReaderDeliveryEnv,
+  publicationId: number,
+  asset: AssetRow,
+  userId: number,
+  prior: DeliveryRow | undefined,
+): Promise<{ claimed: boolean; repeat: boolean }> {
+  if (isRecent(prior?.last_delivered_at || null) || isFreshSending(prior)) {
+    return { claimed: false, repeat: Boolean(prior?.first_delivered_at) };
+  }
   const result = await env.DB.prepare(`INSERT INTO publication_deliveries
       (publication_id,asset_id,user_telegram_id,status,attempts,updated_at)
       VALUES (?,?,?,'sending',1,CURRENT_TIMESTAMP)
@@ -319,27 +377,89 @@ async function claimDelivery(env: PublicationReaderDeliveryEnv, publicationId: n
         status='sending',attempts=publication_deliveries.attempts+1,last_error=NULL,updated_at=CURRENT_TIMESTAMP
       WHERE publication_deliveries.status<>'sending' OR publication_deliveries.updated_at<=datetime('now','-2 minutes')`)
     .bind(publicationId, asset.id, String(userId)).run();
-  const changes = Number(result.meta?.changes ?? 1);
-  return { claimed: changes > 0, repeat: Boolean(prior?.first_delivered_at) };
+  return { claimed: Number(result.meta?.changes ?? 1) > 0, repeat: Boolean(prior?.first_delivered_at) };
 }
 
-async function sendAsset(env: PublicationReaderDeliveryEnv, userId: number, asset: AssetRow): Promise<{ message: TelegramMessage; transport: 'telegram_file_id' | 'r2_upload' }> {
-  if (asset.telegram_file_id) {
-    const message = await telegramCall<TelegramMessage>(env, 'sendDocument', { chat_id: userId, document: asset.telegram_file_id });
-    return { message, transport: 'telegram_file_id' };
-  }
+async function r2Blob(env: PublicationReaderDeliveryEnv, asset: AssetRow): Promise<Blob> {
   if (!env.FILES) throw new Error('R2 FILES binding is not configured');
   const object = await env.FILES.get(asset.r2_key);
   if (!object) throw new Error(`R2 object missing: ${asset.file_name}`);
-  const form = new FormData();
-  form.set('chat_id', String(userId));
-  form.set('document', new Blob([await object.arrayBuffer()], { type: asset.mime_type || object.httpMetadata?.contentType || 'application/octet-stream' }), asset.file_name);
-  const message = await telegramUpload(env, form);
-  return { message, transport: 'r2_upload' };
+  const stored = object.blob ? await object.blob() : new Blob([await object.arrayBuffer()]);
+  const contentType = asset.mime_type || object.httpMetadata?.contentType || stored.type || 'application/octet-stream';
+  return stored.type === contentType ? stored : new Blob([stored], { type: contentType });
 }
 
-async function deliverDownload(env: PublicationReaderDeliveryEnv, publicationId: number, user: TelegramUser, origin: string, ctx: ReaderDeliveryExecutionContext): Promise<void> {
-  await Promise.all([ensurePublicationOpsSchema(env), ensurePublicationCommentGateSchema(env)]);
+async function uploadAsset(env: PublicationReaderDeliveryEnv, userId: number, asset: AssetRow): Promise<TelegramMessage> {
+  const form = new FormData();
+  form.set('chat_id', String(userId));
+  form.set('document', await r2Blob(env, asset), asset.file_name);
+  return telegramUpload(env, form);
+}
+
+async function sendByFileId(env: PublicationReaderDeliveryEnv, userId: number, fileId: string): Promise<TelegramMessage> {
+  return telegramCall<TelegramMessage>(env, 'sendDocument', { chat_id: userId, document: fileId });
+}
+
+async function coldSendWithLease(
+  env: PublicationReaderDeliveryEnv,
+  userId: number,
+  asset: AssetRow,
+  cache: 'cold' | 'repaired',
+): Promise<SendResult> {
+  const lease = await acquireTelegramFileCacheLease(env, asset.id);
+  if (!lease) {
+    const warmed = await waitForTelegramFileId(env, asset.id);
+    if (!warmed) throw new Error(`Telegram cache warm timeout: ${asset.file_name}`);
+    try {
+      return { message: await sendByFileId(env, userId, warmed), transport: 'telegram_file_id', cache: 'waited' };
+    } catch (error) {
+      if (!isInvalidCachedFileError(error)) throw error;
+      await clearTelegramFileId(env, asset.id, warmed).catch(() => undefined);
+      return coldSendWithLease(env, userId, { ...asset, telegram_file_id: null }, 'repaired');
+    }
+  }
+
+  try {
+    const alreadyWarmed = await readTelegramFileId(env, asset.id);
+    if (alreadyWarmed) {
+      try {
+        return { message: await sendByFileId(env, userId, alreadyWarmed), transport: 'telegram_file_id', cache: 'waited' };
+      } catch (error) {
+        if (!isInvalidCachedFileError(error)) throw error;
+        await clearTelegramFileId(env, asset.id, alreadyWarmed).catch(() => undefined);
+      }
+    }
+    const message = await uploadAsset(env, userId, asset);
+    const fileId = message.document?.file_id?.trim();
+    if (fileId) await storeTelegramFileId(env, asset.id, fileId);
+    return { message, transport: 'r2_upload', cache };
+  } finally {
+    await releaseTelegramFileCacheLease(env, asset.id, lease).catch(() => undefined);
+  }
+}
+
+async function sendAssetResilient(env: PublicationReaderDeliveryEnv, userId: number, asset: AssetRow): Promise<SendResult> {
+  const cached = asset.telegram_file_id?.trim() || await readTelegramFileId(env, asset.id);
+  if (cached) {
+    try {
+      return { message: await sendByFileId(env, userId, cached), transport: 'telegram_file_id', cache: 'hit' };
+    } catch (error) {
+      if (!isInvalidCachedFileError(error)) throw error;
+      await clearTelegramFileId(env, asset.id, cached).catch(() => undefined);
+      return coldSendWithLease(env, userId, { ...asset, telegram_file_id: null }, 'repaired');
+    }
+  }
+  return coldSendWithLease(env, userId, asset, 'cold');
+}
+
+async function deliverDownload(
+  env: PublicationReaderDeliveryEnv,
+  publicationId: number,
+  user: TelegramUser,
+  origin: string,
+  ctx: ReaderDeliveryExecutionContext,
+): Promise<void> {
+  await Promise.all([ensurePublicationOpsSchema(env), ensurePublicationCommentGateSchema(env), ensureTelegramFileCacheSchema(env)]);
   const context = await readDownloadContext(env, publicationId, user.id);
   const pub = context.publication;
   if (!pub || pub.status !== 'published') {
@@ -379,14 +499,20 @@ async function deliverDownload(env: PublicationReaderDeliveryEnv, publicationId:
   for (const asset of context.assets) {
     const prior = context.deliveries.get(asset.id);
     const claim = await claimDelivery(env, publicationId, asset, user.id, prior);
-    if (!claim.claimed) { skipped += 1; continue; }
-    const transportHint = asset.telegram_file_id ? 'telegram_file_id' : 'r2_upload';
+    if (!claim.claimed) {
+      skipped += 1;
+      continue;
+    }
     ctx.waitUntil(recordEvent(env, publicationId, 'delivery_started', {
-      userId: user.id, assetId: asset.id, source: 'bot', repeat: claim.repeat, details: { transport: transportHint },
+      userId: user.id,
+      assetId: asset.id,
+      source: 'bot',
+      repeat: claim.repeat,
+      details: { transport: asset.telegram_file_id ? 'telegram_file_id' : 'cache_resolve' },
     }).catch(() => undefined));
     const startedAt = Date.now();
     try {
-      const result = await sendAsset(env, user.id, asset);
+      const result = await sendAssetResilient(env, user.id, asset);
       const deliveredAt = new Date().toISOString();
       const latencyMs = Date.now() - startedAt;
       await env.DB.batch([
@@ -394,12 +520,14 @@ async function deliverDownload(env: PublicationReaderDeliveryEnv, publicationId:
           last_delivered_at=?,telegram_message_id=?,last_error=NULL,updated_at=CURRENT_TIMESTAMP
           WHERE publication_id=? AND asset_id=? AND user_telegram_id=?`)
           .bind(deliveredAt, deliveredAt, result.message.message_id, publicationId, asset.id, String(user.id)),
-        env.DB.prepare('UPDATE publication_assets SET telegram_file_id=COALESCE(?,telegram_file_id) WHERE id=?')
-          .bind(result.message.document?.file_id || null, asset.id),
         env.DB.prepare(`INSERT INTO publication_reader_events
           (publication_id,asset_id,user_telegram_id,event_type,source,success,repeat,details,created_at)
           VALUES (?,?,?,'delivery_success','bot',1,?,?,CURRENT_TIMESTAMP)`)
-          .bind(publicationId, asset.id, String(user.id), claim.repeat ? 1 : 0, JSON.stringify({ transport: result.transport, latency_ms: latencyMs })),
+          .bind(publicationId, asset.id, String(user.id), claim.repeat ? 1 : 0, JSON.stringify({
+            transport: result.transport,
+            cache: result.cache,
+            latency_ms: latencyMs,
+          })),
       ]);
       sent += 1;
     } catch (error) {
@@ -411,7 +539,10 @@ async function deliverDownload(env: PublicationReaderDeliveryEnv, publicationId:
         env.DB.prepare(`INSERT INTO publication_reader_events
           (publication_id,asset_id,user_telegram_id,event_type,source,success,repeat,details,created_at)
           VALUES (?,?,?,'delivery_failed','bot',0,?,?,CURRENT_TIMESTAMP)`)
-          .bind(publicationId, asset.id, String(user.id), claim.repeat ? 1 : 0, JSON.stringify({ transport: transportHint, error: message.slice(0, 300), latency_ms: Date.now() - startedAt })),
+          .bind(publicationId, asset.id, String(user.id), claim.repeat ? 1 : 0, JSON.stringify({
+            error: message.slice(0, 300),
+            latency_ms: Date.now() - startedAt,
+          })),
       ]).catch(() => undefined);
       failed += 1;
     }
@@ -442,7 +573,9 @@ export async function handlePublicationReaderDeliveryWebhook(
   const url = new URL(request.url);
   if (url.pathname !== '/telegram/webhook' || request.method !== 'POST') return null;
   const expected = env.TELEGRAM_WEBHOOK_SECRET?.trim();
-  if (expected && request.headers.get('x-telegram-bot-api-secret-token') !== expected) return new Response('Forbidden', { status: 403 });
+  if (expected && request.headers.get('x-telegram-bot-api-secret-token') !== expected) {
+    return new Response('Forbidden', { status: 403 });
+  }
   const update = await request.clone().json().catch(() => null) as TelegramUpdate | null;
   if (!update) return null;
 
