@@ -43,10 +43,15 @@ jobs:
           grep -Fq 'id="titleApp"' public/title/index.html
           grep -Fq 'id="readerSettings"' public/reader/index.html
           grep -Fq 'id="adminLink" class="admin-entry hidden"' public/index.html
-          grep -Fq 'publishing-analytics.js?v=20260819-ops1' public/admin/index.html
+          grep -Fq 'publishing-analytics.js?v=20260819-ops2' public/admin/index.html
           grep -Fq 'Поддержать переводчика' src/publication-ops.ts
           grep -Fq 'boosty.to/domnekromanta/single-payment/donation/818248/target?share=target_link' src/publication-ops.ts
           grep -Fq 'publication_reader_events' migrations/0006_publication_delivery_analytics.sql
+          grep -Fq 'channel_access_state' migrations/0007_channel_membership_access.sql
+          grep -Fq 'getChatMember' src/channel-membership-access.ts
+          grep -Fq 'left_after_download_48h' src/channel-membership-access.ts
+          grep -Fq "allowed_updates: ['message', 'callback_query', 'chat_member']" scripts/configure-bot.mjs
+          grep -Fq '/api/admin/membership-access' public/admin/publishing-analytics.js
           grep -Fq "querySelectorAll('i[data-lucide]')" public/ui-icons.js
           grep -Fq "nameAttr:'data-domnkr-lucide'" public/ui-icons.js
           grep -Fq "removeAttribute('data-domnkr-lucide')" public/ui-icons.js
