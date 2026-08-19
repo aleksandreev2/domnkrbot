@@ -44,6 +44,11 @@ type PublishingSettingsResult = {
   } | null;
 };
 
+export type PublishingReadiness = {
+  channelReady: boolean;
+  discussionReady: boolean;
+};
+
 class PublishingSettingsError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
@@ -183,6 +188,29 @@ function errorResponse(error: unknown): Response {
   return json({ error: error instanceof Error ? error.message : 'Telegram validation failed' }, 502);
 }
 
+export async function getPublishingReadiness(env: SettingsEnv): Promise<PublishingReadiness> {
+  await ensureSettingsSchema(env);
+  const [channel, discussion] = await Promise.all([
+    getSetting(env, 'publish_channel_id'),
+    getSetting(env, 'discussion_chat_id'),
+  ]);
+  return {
+    channelReady: Boolean(channel?.trim()),
+    discussionReady: Boolean(discussion?.trim()),
+  };
+}
+
+export async function ensurePublishingDefaults(env: SettingsEnv): Promise<PublishingSettingsResult | null> {
+  const defaultChannel = normalizeChatInput(env.PUBLISH_CHANNEL_ID);
+  if (!defaultChannel) return null;
+
+  await ensureSettingsSchema(env);
+  const configured = await getSetting(env, 'publish_channel_id');
+  if (configured?.trim()) return null;
+
+  return configurePublishingSettings(env, defaultChannel, '');
+}
+
 export async function handlePublishingSettingsGuard(request: Request, env: SettingsEnv): Promise<Response | null> {
   const url = new URL(request.url);
   if (request.method !== 'POST' || url.pathname !== '/api/admin/publishing/settings') return null;
@@ -211,15 +239,8 @@ export async function handlePublishingDefaultBootstrap(request: Request, env: Se
   const admin = await requireAdminSession(request, env);
   if (admin instanceof Response) return admin;
 
-  const defaultChannel = normalizeChatInput(env.PUBLISH_CHANNEL_ID);
-  if (!defaultChannel) return null;
-
-  await ensureSettingsSchema(env);
-  const configured = await getSetting(env, 'publish_channel_id');
-  if (configured?.trim()) return null;
-
   try {
-    await configurePublishingSettings(env, defaultChannel, '');
+    await ensurePublishingDefaults(env);
     return null;
   } catch (error) {
     return errorResponse(error);
