@@ -28,6 +28,24 @@
     $('#proposalForm')?.addEventListener('submit',submitProposal);
     $('#proposalType')?.addEventListener('change',()=>$('#chapterFields')?.classList.toggle('hidden',$('#proposalType').value!=='chapters'));
     $('#logoutButton')?.addEventListener('click',async()=>{await api('/auth/logout',{method:'POST'});location.reload();});
+    $('#proposalOpen')?.addEventListener('click',openProposalDialog);
+    $('#proposalOpenHero')?.addEventListener('click',openProposalDialog);
+    $('#proposalClose')?.addEventListener('click',closeProposalDialog);
+    $('#proposalDialog')?.addEventListener('click',(event)=>{if(event.target===event.currentTarget)closeProposalDialog();});
+  }
+
+  function openProposalDialog(){
+    const dialog=$('#proposalDialog');
+    if(!dialog)return;
+    if(typeof dialog.showModal==='function')dialog.showModal();else dialog.setAttribute('open','');
+    if(!state.bootstrap?.user)mountTelegramLogin();
+    refreshIcons();
+  }
+
+  function closeProposalDialog(){
+    const dialog=$('#proposalDialog');
+    if(!dialog)return;
+    if(typeof dialog.close==='function'&&dialog.open)dialog.close();else dialog.removeAttribute('open');
   }
 
   function renderSession(){
@@ -42,7 +60,7 @@
       return;
     }
     if(account)account.textContent='Гость';
-    mountTelegramLogin();refreshIcons();
+    refreshIcons();
   }
 
   function mountTelegramLogin(){
@@ -97,6 +115,7 @@
       await api('/api/proposals',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)});
       event.currentTarget.reset();$('#chapterFields').classList.add('hidden');note.textContent='Заявка отправлена.';
       state.bootstrap=await api('/api/bootstrap');renderProposals(state.bootstrap.proposals||[]);
+      window.setTimeout(closeProposalDialog,500);
     }catch(error){note.textContent=error.message;}finally{button.disabled=false;}
   }
 
