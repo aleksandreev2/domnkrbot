@@ -16,6 +16,8 @@
     "src/proposal-raw-runtime.ts",
     "src/reader-runtime.ts",
     "src/publication-ops.ts",
+    "src/publication-comment-gate.ts",
+    "src/publishing-analytics-v2.ts",
     "src/publication-ops-preflight.ts",
     "src/channel-membership-access.ts",
     "src/admin-user-workspace.ts"
