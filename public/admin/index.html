@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#f7f4ee" />
+  <title>Дом Некроманта · Admin</title>
+  <link rel="stylesheet" href="/admin/admin.css?v=20260819-admin1" />
+  <script defer src="/admin/admin.js?v=20260819-admin1"></script>
+</head>
+<body>
+  <div id="authGate" class="auth-gate">
+    <div class="auth-panel">
+      <div class="admin-side-brand"><span class="brand-box">ДН</span><div><strong>Дом Некроманта</strong><span>ADMIN CONSOLE</span></div></div>
+      <h1>Вход в админку</h1>
+      <p>Авторизация через Telegram Login. Mini App для админки больше не используется.</p>
+      <div id="adminTelegramLogin"></div>
+      <a class="text-link" href="/">← На сайт</a>
+    </div>
+  </div>
+
+  <div id="adminApp" class="admin-v2 hidden">
+    <aside class="admin-side">
+      <div class="admin-side-brand"><span class="brand-box">ДН</span><div><strong>Дом Некроманта</strong><span>ADMIN CONSOLE</span></div></div>
+      <nav class="admin-side-nav" aria-label="Админ-навигация">
+        <button class="active" data-route="overview" type="button"><span class="nav-icon">⌂</span><span>Обзор</span></button>
+        <button data-route="publishing" type="button"><span class="nav-icon">✎</span><span>Publishing</span></button>
+        <button data-route="requests" type="button"><span class="nav-icon">☷</span><span>Заявки</span></button>
+        <button data-route="files" type="button"><span class="nav-icon">▱</span><span>Файлы</span></button>
+        <button data-route="sync" type="button"><span class="nav-icon">↻</span><span>RanobeLib</span></button>
+        <button data-route="settings" type="button"><span class="nav-icon">⚙</span><span>Настройки</span></button>
+      </nav>
+      <div class="side-footer"><a href="/">Открыть сайт</a><button id="adminLogout" type="button">Выйти</button></div>
+    </aside>
+
+    <main class="admin-workspace">
+      <header class="admin-work-head">
+        <div><span class="admin-kicker">ДОМ НЕКРОМАНТА · ADMIN</span><h1 id="pageTitle">Обзор</h1><p id="pageDescription">Состояние переводов, публикаций и файлов.</p></div>
+        <div class="admin-live"><span></span><b id="adminIdentity">online</b></div>
+      </header>
+      <nav class="admin-mobile-nav" aria-label="Админ-навигация"></nav>
+      <section id="adminContent" class="admin-content"><div class="admin-loading">Загрузка…</div></section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+</body>
+</html>
