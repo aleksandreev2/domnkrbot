@@ -13,8 +13,12 @@ class MockStatement{
   bind(...values){this.values=values;return this;}
   async first(){
     if(this.query.includes('FROM publications WHERE id=?'))return this.db.publication&&Number(this.values[0])===this.db.publication.id?{...this.db.publication}:null;
+    if(this.query.includes('FROM publications WHERE channel_message_id=?'))return this.db.publication&&Number(this.values[0])===this.db.publication.channel_message_id?{...this.db.publication}:null;
     if(this.query.includes('FROM publication_deliveries'))return this.db.delivery?{...this.db.delivery}:null;
-    if(this.query.includes('SELECT value FROM app_settings'))return null;
+    if(this.query.includes('SELECT value FROM app_settings')){
+      if(this.values[0]==='discussion_chat_id')return{value:'-200'};
+      return null;
+    }
     return null;
   }
   async all(){
@@ -80,6 +84,23 @@ test('private /start download deep-link delivers cached Telegram file and record
   assert.ok(db.operations.some((op)=>op.query.includes('publication_reader_events')&&op.values.includes('download_open')));
   assert.ok(db.operations.some((op)=>op.query.includes('publication_reader_events')&&op.values.includes('delivery_success')));
   assert.equal(db.delivery?.status,'delivered');
+});
+
+test('automatic discussion forward posts download gate and does not expose release file',async()=>{
+  const db=new MockDB();const execution=ctx();
+  await withTelegramMock(async(calls)=>{
+    const request=new Request(`${ORIGIN}/telegram/webhook`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message:{message_id:55,chat:{id:-200,type:'supergroup'},is_automatic_forward:true,forward_origin:{type:'channel',message_id:123}}})});
+    const response=await handlePublicationOpsWebhook(request,env(db),execution);
+    assert.ok(response);assert.equal(response.status,200);
+    const methods=calls.map((call)=>call.url.split('/').pop());
+    assert.ok(methods.includes('sendMessage'));
+    assert.equal(methods.includes('sendDocument'),false);
+    const gate=calls.find((call)=>call.url.endsWith('/sendMessage'));
+    const body=JSON.parse(String(gate.options.body));
+    assert.match(body.text,/Скачать файлы релиза можно через/);
+    assert.match(JSON.stringify(body.reply_markup),/Скачать/);
+  });
+  assert.ok(db.operations.some((op)=>op.query.startsWith('UPDATE publications SET discussion_message_id=')));
 });
 
 test('thank-you callback is answered and stored uniquely',async()=>{
