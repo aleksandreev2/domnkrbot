@@ -17,6 +17,7 @@ import {
 } from './publishing-settings-guard.js';
 import { handleProposalRawApi, type ProposalRawEnv } from './proposal-raw-runtime.js';
 import { handleReaderApi } from './reader-runtime.js';
+import { ensureReaderProposalSchema } from './reader-proposal-schema.js';
 import { handleTitleProposalAdminApi, type TitleProposalAdminEnv } from './title-proposal-admin.js';
 import { handleTitleProposalPolicy } from './title-proposal-policy.js';
 import { requireAdminSession } from './web-auth.js';
@@ -127,6 +128,20 @@ export default {
 
     kickPublishingDefaults(env, ctx);
 
+    const usesReaderProposalSchema = url.pathname.startsWith('/api/proposal-raw/')
+      || url.pathname === '/api/proposal-raw/init'
+      || url.pathname === '/api/title-proposals'
+      || url.pathname === '/api/admin/proposal-raw'
+      || url.pathname.startsWith('/api/admin/proposal-raw/')
+      || url.pathname === '/api/admin/title-proposal-details'
+      || url.pathname === '/api/catalog'
+      || url.pathname === '/api/title'
+      || url.pathname === '/api/reader/chapter';
+    if (usesReaderProposalSchema) {
+      await ensureRanobeLibSchema(env);
+      await ensureReaderProposalSchema(env);
+    }
+
     const proposalRawResponse = await handleProposalRawApi(request, env as ProposalRawEnv);
     if (proposalRawResponse) return proposalRawResponse;
 
@@ -134,7 +149,6 @@ export default {
     if (titleProposalAdminResponse) return titleProposalAdminResponse;
 
     if (url.pathname === '/api/catalog' || url.pathname === '/api/title' || url.pathname === '/api/reader/chapter') {
-      await ensureRanobeLibSchema(env);
       const readerResponse = await handleReaderApi(request, env);
       if (readerResponse) return readerResponse;
     }
