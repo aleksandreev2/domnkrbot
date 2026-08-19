@@ -23,6 +23,7 @@ jobs:
           node --check public/site.js
           node --check public/admin/admin.js
           node --check public/admin/publication-lifecycle.js
+          node --check public/admin/publishing-diagnostics.js
           node --check scripts/configure-bot.mjs
       - name: Tests
         run: npm test
