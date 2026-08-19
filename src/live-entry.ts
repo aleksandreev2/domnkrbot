@@ -6,6 +6,7 @@ import {
   syncRanobeLib,
   type D1DatabaseLike,
 } from './ranobelib-runtime.js';
+import { handlePublicationArchiveGuard } from './publication-archive-guard.js';
 import { handlePublicationLifecycleApi } from './publication-lifecycle.js';
 import { requireAdminSession } from './web-auth.js';
 
@@ -63,6 +64,9 @@ async function handleManualRanobeSync(request: Request, env: Env): Promise<Respo
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response> {
     const url = new URL(request.url);
+
+    const publicationArchiveResponse = await handlePublicationArchiveGuard(request, env);
+    if (publicationArchiveResponse) return publicationArchiveResponse;
 
     const publicationLifecycleResponse = await handlePublicationLifecycleApi(request, env);
     if (publicationLifecycleResponse) return publicationLifecycleResponse;
