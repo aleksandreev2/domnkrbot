@@ -3,25 +3,56 @@
   const $=(selector,root=document)=>root.querySelector(selector);
   const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
+  const API_TIMEOUT_MS=10000;
 
   async function api(path,options={}){
-    const response=await fetch(path,{credentials:'same-origin',...options});
-    const body=await response.json().catch(()=>null);
-    if(!response.ok)throw new Error(body?.error||`HTTP ${response.status}`);
-    return body;
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),API_TIMEOUT_MS);
+    try{
+      const response=await fetch(path,{credentials:'same-origin',...options,signal:controller.signal});
+      const body=await response.json().catch(()=>null);
+      if(!response.ok)throw new Error(body?.error||`HTTP ${response.status}`);
+      return body;
+    }catch(error){
+      if(controller.signal.aborted)throw new Error('Сервер отвечает слишком долго.');
+      throw error;
+    }finally{
+      clearTimeout(timer);
+    }
   }
 
-  async function boot(){
+  function boot(){
     bind();refreshIcons();
+    void loadBootstrap();
+    void loadCatalog();
+  }
+
+  async function loadBootstrap(){
     try{
-      const [bootstrap,ranobelib]=await Promise.all([api('/api/bootstrap'),api('/api/ranobelib')]);
-      state.bootstrap=bootstrap;state.ranobelib=ranobelib;state.titles=ranobelib.titles||[];
+      const bootstrap=await api('/api/bootstrap');
+      state.bootstrap=bootstrap;
       if(restorePostLoginRoute())return;
-      renderSession();renderCatalog();renderProposals(bootstrap.proposals||[]);
+      renderSession();
+      renderProposals(bootstrap.proposals||[]);
     }catch(error){
-      $('#releaseGrid').innerHTML=emptyState('triangle-alert','Не удалось загрузить обновления',error.message);
-      $('#titleGrid').innerHTML=emptyState('triangle-alert','Не удалось загрузить каталог','Обновите страницу чуть позже.');
-      $('#proposalGrid').innerHTML=emptyState('triangle-alert','Не удалось загрузить заявки','Обновите страницу чуть позже.');
+      const proposal=$('#proposalGrid');
+      if(proposal)proposal.innerHTML=emptyState('triangle-alert','Не удалось загрузить заявки',error.message||'Обновите страницу чуть позже.');
+      const account=$('#accountName');if(account)account.textContent='Войти';
+      const panel=$('#loginPanel');if(panel)panel.innerHTML='<span class="login-ready">Авторизация временно недоступна</span>';
+      refreshIcons();
+    }
+  }
+
+  async function loadCatalog(){
+    try{
+      const ranobelib=await api('/api/ranobelib');
+      state.ranobelib=ranobelib;state.titles=ranobelib.titles||[];
+      renderCatalog();
+    }catch(error){
+      const release=$('#releaseGrid');
+      const titles=$('#titleGrid');
+      if(release)release.innerHTML=emptyState('triangle-alert','Не удалось загрузить обновления',error.message||'Обновите страницу чуть позже.');
+      if(titles)titles.innerHTML=emptyState('triangle-alert','Не удалось загрузить каталог','Остальная часть сайта продолжает работать.');
       refreshIcons();
     }
   }

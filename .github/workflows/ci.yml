@@ -45,11 +45,21 @@ jobs:
           grep -Fq 'id="titleApp"' public/title/index.html
           grep -Fq 'id="readerSettings"' public/reader/index.html
           grep -Fq 'id="adminLink" class="admin-entry hidden"' public/index.html
+          grep -Fq '/ui-icons.js?v=20260820-icons3' public/index.html
+          grep -Fq '/site.js?v=20260820-reader2' public/index.html
+          grep -Fq '/ui-icons.js?v=20260820-icons3' public/admin/index.html
           grep -Fq 'publishing-analytics.js?v=20260819-ops3' public/admin/index.html
           grep -Fq 'publishing-analytics.css?v=20260819-ops3' public/admin/index.html
           grep -Fq 'admin-cockpit.js?v=20260819-cockpit1' public/admin/index.html
           grep -Fq 'admin-cockpit.css?v=20260819-cockpit1' public/admin/index.html
           grep -Fq 'publish-editor.js?v=20260819-publish1' public/admin/index.html
+          grep -Fq 'API_TIMEOUT_MS=10000' public/site.js
+          grep -Fq 'void loadBootstrap();' public/site.js
+          grep -Fq 'void loadCatalog();' public/site.js
+          ! grep -Fq "Promise.all([api('/api/bootstrap'),api('/api/ranobelib')])" public/site.js
+          grep -Fq 'mutationNeedsRefresh(records)' public/ui-icons.js
+          grep -Fq 'requestAnimationFrame(refresh)' public/ui-icons.js
+          grep -Fq "new MutationObserver((records)=>{if(mutationNeedsRefresh(records))schedule();})" public/ui-icons.js
           grep -Fq 'Опубликовать в канал' public/admin/publish-editor.js
           grep -Fq '/api/admin/publishing-center/preflight' public/admin/publish-editor.js
           grep -Fq '/api/admin/publications/${publicationId}/publish' public/admin/publish-editor.js
