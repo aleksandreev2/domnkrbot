@@ -17,6 +17,7 @@ import {
 } from './publishing-settings-guard.js';
 import { handleProposalRawApi, type ProposalRawEnv } from './proposal-raw-runtime.js';
 import { handleReaderApi } from './reader-runtime.js';
+import { handleTitleProposalAdminApi, type TitleProposalAdminEnv } from './title-proposal-admin.js';
 import { handleTitleProposalPolicy } from './title-proposal-policy.js';
 import { requireAdminSession } from './web-auth.js';
 
@@ -128,6 +129,9 @@ export default {
 
     const proposalRawResponse = await handleProposalRawApi(request, env as ProposalRawEnv);
     if (proposalRawResponse) return proposalRawResponse;
+
+    const titleProposalAdminResponse = await handleTitleProposalAdminApi(request, env as TitleProposalAdminEnv);
+    if (titleProposalAdminResponse) return titleProposalAdminResponse;
 
     if (url.pathname === '/api/catalog' || url.pathname === '/api/title' || url.pathname === '/api/reader/chapter') {
       await ensureRanobeLibSchema(env);
