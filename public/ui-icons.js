@@ -59,14 +59,37 @@
     });
   }
 
+  function renderFreshIcons(){
+    const icons=[...document.querySelectorAll('i[data-lucide]')];
+    if(!icons.length)return;
+
+    for(const icon of icons){
+      const name=icon.getAttribute('data-lucide');
+      if(!name)continue;
+      icon.setAttribute('data-domnkr-lucide',name);
+      icon.removeAttribute('data-lucide');
+    }
+
+    window.lucide.createIcons({
+      nameAttr:'data-domnkr-lucide',
+      root:document,
+      attrs:{'stroke-width':1.8,'aria-hidden':'true'},
+    });
+
+    document.querySelectorAll('svg[data-domnkr-lucide]').forEach((svg)=>svg.removeAttribute('data-domnkr-lucide'));
+  }
+
   function refresh(){
     queued=false;
     if(!window.lucide?.createIcons)return;
-    upgradeNavigation();upgradeExactGlyphs();upgradeLeadingGlyphs();upgradeButtons();
-    if(document.querySelector('[data-lucide]'))window.lucide.createIcons({attrs:{'stroke-width':1.8,'aria-hidden':'true'}});
+    upgradeNavigation();upgradeExactGlyphs();upgradeLeadingGlyphs();upgradeButtons();renderFreshIcons();
   }
 
   function schedule(){if(queued)return;queued=true;queueMicrotask(refresh);}
   window.DomNkrIcons={refresh:schedule};
-  document.addEventListener('DOMContentLoaded',()=>{refresh();const root=document.body;if(root)new MutationObserver(schedule).observe(root,{childList:true,subtree:true});});
+  document.addEventListener('DOMContentLoaded',()=>{
+    refresh();
+    const root=document.body;
+    if(root)new MutationObserver(schedule).observe(root,{childList:true,subtree:true});
+  });
 })();
