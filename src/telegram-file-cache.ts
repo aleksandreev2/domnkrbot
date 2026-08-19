@@ -9,7 +9,7 @@ export interface TelegramFileCacheDB {
 }
 export interface TelegramFileCacheEnv { DB: TelegramFileCacheDB }
 
-const LOCK_TTL_SECONDS = 45;
+const LOCK_TTL_SECONDS = 120;
 const DEFAULT_WAIT_MS = 12_000;
 const POLL_MS = 350;
 let schemaPromise: Promise<void> | null = null;
