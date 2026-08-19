@@ -59,9 +59,11 @@ async function withTelegramMock(fn){
   try{return await fn(calls);}finally{globalThis.fetch=original;}
 }
 
-test('managed publication automatically includes bot download and translator support copy',()=>{
+test('managed publication automatically includes bot download, Start hint and translator support copy',()=>{
   const text=composeManagedPublication({id:7,body_html:'Новая глава готова.',add_footer:1},1,'domnekromanta_bot');
   assert.match(text,/Скачать перевод можно через бота/);
+  assert.match(text,/Telegram покажет «Запустить»/);
+  assert.match(text,/бот сразу пришлёт файлы/);
   assert.match(text,/Поддержать переводчика/);
   assert.match(text,/Дом Некроманта/);
   assert.doesNotMatch(text,/Файлы находятся в комментариях/);
@@ -86,18 +88,19 @@ test('private /start download deep-link delivers cached Telegram file and record
   assert.equal(db.delivery?.status,'delivered');
 });
 
-test('automatic discussion forward posts download gate and does not expose release file',async()=>{
+test('automatic discussion forward posts one compact gate with Start hint and no release file',async()=>{
   const db=new MockDB();const execution=ctx();
   await withTelegramMock(async(calls)=>{
     const request=new Request(`${ORIGIN}/telegram/webhook`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message:{message_id:55,chat:{id:-200,type:'supergroup'},is_automatic_forward:true,forward_origin:{type:'channel',message_id:123}}})});
     const response=await handlePublicationOpsWebhook(request,env(db),execution);
     assert.ok(response);assert.equal(response.status,200);
     const methods=calls.map((call)=>call.url.split('/').pop());
-    assert.ok(methods.includes('sendMessage'));
+    assert.deepEqual(methods,['sendMessage']);
     assert.equal(methods.includes('sendDocument'),false);
     const gate=calls.find((call)=>call.url.endsWith('/sendMessage'));
     const body=JSON.parse(String(gate.options.body));
     assert.match(body.text,/Скачать файлы релиза можно через/);
+    assert.match(body.text,/Telegram покажет «Запустить»/);
     assert.match(JSON.stringify(body.reply_markup),/Скачать/);
   });
   assert.ok(db.operations.some((op)=>op.query.startsWith('UPDATE publications SET discussion_message_id=')));
