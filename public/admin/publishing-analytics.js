@@ -58,14 +58,14 @@
         ${kpi('heart','Сказали «Спасибо»',s.thanks,'уникальных читателей')}
         ${kpi('heart-handshake','Поддержка',s.support_clicks,'переходов на Boosty')}
         ${kpi('triangle-alert','Ошибки выдачи',s.delivery_failures,'требуют внимания',Number(s.delivery_failures)>0?'danger':'')}
-        ${kpi('user-x','Чёрный список',a.blacklisted,'доступ к скачиваниям закрыт',Number(a.blacklisted)>0?'danger':'')}
-        ${kpi('hourglass','Grace period',a.grace_period,'вышли после скачивания · до 48ч')}
+        ${kpi('shield-check','Под контролем 7 дней',a.monitored,'скачивали за последнюю неделю')}
+        ${kpi('user-x','Чёрный список',a.blacklisted,'вышли из канала в течение 7 дней',Number(a.blacklisted)>0?'danger':'')}
       </div>
       <div class="publishing-stat-grid">
         <section class="admin-panel publishing-ranking"><div class="admin-panel-head"><div><h2>Самые читаемые релизы</h2><p>Рейтинг по уникальным читателям в выбранный период.</p></div></div>${releaseRows(data.top_releases||[])}</section>
         <section class="admin-panel publishing-attention"><div class="admin-panel-head"><div><h2>Требуют внимания</h2><p>Ошибки delivery или проблемы с discussion-thread.</p></div></div>${attentionRows(data.attention||[])}</section>
       </div>
-      <section class="admin-panel publishing-access"><div class="admin-panel-head"><div><h2>Доступ по подписке</h2><p>После первой выдачи выход из канала запускает 48 часов. Если пользователь не вернулся — он попадает в ЧС.</p></div></div>${accessRows(access.users||[])}</section>
+      <section class="admin-panel publishing-access"><div class="admin-panel-head"><div><h2>Чёрный список скачиваний</h2><p>После успешной выдачи пользователь должен оставаться в канале 7 суток. Выход в любой момент этого окна — ЧС без автоматического снятия.</p></div></div>${accessRows(access.users||[])}</section>
       <section class="admin-panel publishing-events"><div class="admin-panel-head"><div><h2>Последние события</h2><p>Фактические события выдачи, а не вычисленные просмотры.</p></div></div>${eventRows(data.recent_events||[])}</section>
     </section>`;
     $$('[data-stat-days]').forEach((button)=>button.addEventListener('click',()=>{const next=Number(button.dataset.statDays);if(next===days)return;days=next;void openStatistics();}));
@@ -90,8 +90,8 @@
     return`<div class="publishing-attention-list">${rows.map((row)=>`<article><div><strong>${esc(row.title)}</strong><span>${Number(row.delivery_failures)>0?`${fmt(row.delivery_failures)} ошибок выдачи`:'Discussion thread не подтверждён'}</span></div><span class="admin-badge failed">Проверить</span></article>`).join('')}</div>`;
   }
   function accessRows(rows){
-    if(!rows.length)return'<div class="admin-empty good">Никто не находится в ЧС или grace period.</div>';
-    return`<div class="publishing-access-list">${rows.map((row)=>{const blocked=Boolean(row.blacklisted_at);const name=row.username?`@${row.username}`:(row.first_name||`user ${row.user_telegram_id}`);return`<article><span class="access-icon ${blocked?'blocked':'grace'}">${icon(blocked?'user-x':'hourglass')}</span><div class="access-copy"><strong>${esc(name)}</strong><span>ID ${esc(row.user_telegram_id)} · выдано ${fmt(row.delivered_assets)} файл(ов)</span><small>${blocked?`ЧС с ${dateTime(row.blacklisted_at)} · ${esc(row.blacklist_reason||'policy')}`:`Вышел ${dateTime(row.left_at)} · ожидаем возврат до 48 часов`}</small></div><span class="admin-badge ${blocked?'failed':'pending'}">${blocked?'ЧС':'48ч'}</span>${blocked?`<button class="mini-button" type="button" data-access-unblock="${esc(row.user_telegram_id)}">Разблокировать</button>`:''}</article>`;}).join('')}</div>`;
+    if(!rows.length)return'<div class="admin-empty good">Чёрный список пуст.</div>';
+    return`<div class="publishing-access-list">${rows.map((row)=>{const name=row.username?`@${row.username}`:(row.first_name||`user ${row.user_telegram_id}`);return`<article><span class="access-icon blocked">${icon('user-x')}</span><div class="access-copy"><strong>${esc(name)}</strong><span>ID ${esc(row.user_telegram_id)} · выдано ${fmt(row.delivered_assets)} файл(ов)</span><small>Последнее скачивание ${dateTime(row.last_download_at)} · ЧС с ${dateTime(row.blacklisted_at)}</small></div><span class="admin-badge failed">ЧС</span><button class="mini-button" type="button" data-access-unblock="${esc(row.user_telegram_id)}">Разблокировать</button></article>`;}).join('')}</div>`;
   }
   function eventRows(rows){
     if(!rows.length)return'<div class="admin-empty">Событий выдачи ещё нет.</div>';
@@ -106,7 +106,7 @@
     const body=$('#publishingBody');if(!body||body.querySelector('[data-delivery-guide]'))return;
     const editor=body.querySelector('.publisher-editor');if(!editor)return;
     const guide=document.createElement('section');guide.className='delivery-auto-guide';guide.dataset.deliveryGuide='1';
-    guide.innerHTML=`<div class="delivery-guide-head"><span>${icon('bot')}</span><div><strong>Автоматическая выдача релиза</strong><p>Служебный блок добавляется backend-ом при test/publish/edit и не зависит от текста редактора.</p></div></div><div class="delivery-message-preview"><p>📥 Скачать перевод можно через бота — кнопка под постом.</p><p>❤️ Поддержать переводчика — кнопка под постом.</p><div><span>${icon('download')} Скачать</span><span>${icon('heart-handshake')} Поддержать переводчика</span></div></div><ul><li>Выдача разрешена только подписчикам канала «Дом Некроманта».</li><li>После первой выдачи выход из канала запускает 48-часовой grace period; если читатель не вернулся, доступ блокируется.</li><li>Повторная выдача использует сохранённый Telegram <code>file_id</code>; R2 остаётся fallback.</li><li>Комментарии канала получают CTA, а не публичные документы — поэтому статистика скачиваний остаётся честной.</li><li>Поддержка ведёт на настроенный Boosty target.</li></ul>`;
+    guide.innerHTML=`<div class="delivery-guide-head"><span>${icon('bot')}</span><div><strong>Автоматическая выдача релиза</strong><p>Служебный блок добавляется backend-ом при test/publish/edit и не зависит от текста редактора.</p></div></div><div class="delivery-message-preview"><p>📥 Скачать перевод можно через бота — кнопка под постом.</p><p>❤️ Поддержать переводчика — кнопка под постом.</p><div><span>${icon('download')} Скачать</span><span>${icon('heart-handshake')} Поддержать переводчика</span></div></div><ul><li>Выдача разрешена только текущим подписчикам канала «Дом Некроманта».</li><li>После успешной выдачи действует контрольное окно 7 суток. Выход через минуту, день или на шестой день приводит к ЧС.</li><li>Повторная подписка автоматически ЧС не снимает; разблокировка доступна здесь администратору.</li><li>Повторная выдача использует сохранённый Telegram <code>file_id</code>; R2 остаётся fallback.</li><li>Комментарии канала получают CTA, а не публичные документы — поэтому статистика скачиваний остаётся честной.</li><li>Поддержка ведёт на настроенный Boosty target.</li></ul>`;
     const preflight=editor.querySelector('.publishing-preflight');if(preflight)preflight.before(guide);else editor.append(guide);refreshIcons();
   }
 
