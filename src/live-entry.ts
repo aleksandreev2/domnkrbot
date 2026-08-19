@@ -8,6 +8,13 @@ import {
 } from './ranobelib-runtime.js';
 import { handlePublicationArchiveGuard } from './publication-archive-guard.js';
 import { handlePublicationLifecycleApi } from './publication-lifecycle.js';
+import {
+  ensurePublicationOpsSchema,
+  handlePublicationOpsRequest,
+  handlePublicationOpsWebhook,
+  type PublicationOpsEnv,
+} from './publication-ops.js';
+import { handlePublicationOpsPreflight, type PublicationOpsPreflightEnv } from './publication-ops-preflight.js';
 import { handlePublishingDiagnostics } from './publishing-diagnostics.js';
 import {
   ensurePublishingDefaults,
@@ -121,17 +128,34 @@ export default {
         console.error('Publishing readiness state failed', error);
         return { channelReady: false, discussionReady: false };
       });
+      let publicationDeliveryReady = true;
+      try {
+        await ensurePublicationOpsSchema(env as PublicationOpsEnv);
+      } catch (error) {
+        publicationDeliveryReady = false;
+        console.error('Publication delivery analytics schema check failed', error);
+      }
       return json({
         ok: true,
         service: 'domnkrbot',
         storageReady: Boolean(env.FILES),
         publishingChannelReady: publishing.channelReady,
         publishingDiscussionReady: publishing.discussionReady,
+        publicationDeliveryReady,
         time: new Date().toISOString(),
       });
     }
 
     kickPublishingDefaults(env, ctx);
+
+    const publicationWebhookResponse = await handlePublicationOpsWebhook(request, env as PublicationOpsEnv, ctx);
+    if (publicationWebhookResponse) return publicationWebhookResponse;
+
+    const publicationOpsResponse = await handlePublicationOpsRequest(request, env as PublicationOpsEnv);
+    if (publicationOpsResponse) return publicationOpsResponse;
+
+    const publicationPreflightResponse = await handlePublicationOpsPreflight(request, env as PublicationOpsPreflightEnv);
+    if (publicationPreflightResponse) return publicationPreflightResponse;
 
     const readerPath = url.pathname === '/api/catalog' || url.pathname === '/api/title' || url.pathname === '/api/reader/chapter';
     const rawUserPath = url.pathname === '/api/proposal-raw/init'
