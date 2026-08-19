@@ -8,7 +8,12 @@ import {
 } from './ranobelib-runtime.js';
 import { handlePublicationArchiveGuard } from './publication-archive-guard.js';
 import { handlePublicationLifecycleApi } from './publication-lifecycle.js';
-import { handlePublishingDefaultBootstrap, handlePublishingSettingsGuard } from './publishing-settings-guard.js';
+import {
+  ensurePublishingDefaults,
+  getPublishingReadiness,
+  handlePublishingDefaultBootstrap,
+  handlePublishingSettingsGuard,
+} from './publishing-settings-guard.js';
 import { requireAdminSession } from './web-auth.js';
 
 interface AssetFetcher { fetch(request: Request): Promise<Response> }
@@ -43,9 +48,21 @@ const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'cache-control': 'no-store',
 };
+let publishingDefaultsPromise: Promise<void> | null = null;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
+}
+
+function kickPublishingDefaults(env: Env, ctx: ExecutionContextLike): void {
+  if (!env.PUBLISH_CHANNEL_ID || publishingDefaultsPromise) return;
+  publishingDefaultsPromise = ensurePublishingDefaults(env)
+    .then(() => undefined)
+    .catch((error) => {
+      publishingDefaultsPromise = null;
+      console.error('Publishing target bootstrap failed', error);
+    });
+  ctx.waitUntil(publishingDefaultsPromise);
 }
 
 async function handleManualRanobeSync(request: Request, env: Env): Promise<Response> {
@@ -68,8 +85,27 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === 'GET' && url.pathname === '/api/health') {
-      return json({ ok: true, service: 'domnkrbot', storageReady: Boolean(env.FILES), time: new Date().toISOString() });
+      try {
+        await ensurePublishingDefaults(env);
+        publishingDefaultsPromise = Promise.resolve();
+      } catch (error) {
+        console.error('Publishing readiness check failed', error);
+      }
+      const publishing = await getPublishingReadiness(env).catch((error) => {
+        console.error('Publishing readiness state failed', error);
+        return { channelReady: false, discussionReady: false };
+      });
+      return json({
+        ok: true,
+        service: 'domnkrbot',
+        storageReady: Boolean(env.FILES),
+        publishingChannelReady: publishing.channelReady,
+        publishingDiscussionReady: publishing.discussionReady,
+        time: new Date().toISOString(),
+      });
     }
+
+    kickPublishingDefaults(env, ctx);
 
     const publishingSettingsResponse = await handlePublishingSettingsGuard(request, env);
     if (publishingSettingsResponse) return publishingSettingsResponse;
@@ -108,6 +144,12 @@ export default {
   },
 
   async scheduled(controller: ScheduledControllerLike, env: Env, _ctx: ExecutionContextLike): Promise<void> {
+    try {
+      await ensurePublishingDefaults(env);
+    } catch (error) {
+      console.error('Publishing target cron bootstrap failed', error);
+    }
+
     try {
       await ensureRanobeLibSchema(env);
       const result = await syncRanobeLib(env);
