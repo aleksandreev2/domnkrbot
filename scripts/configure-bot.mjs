@@ -55,7 +55,7 @@ await call('setChatMenuButton', { menu_button: { type: 'commands' } });
 await call('setWebhook', {
   url: `${siteUrl}/telegram/webhook`,
   secret_token: webhookSecret,
-  allowed_updates: ['message'],
+  allowed_updates: ['message', 'callback_query', 'chat_member'],
   drop_pending_updates: false,
 });
 
@@ -63,7 +63,9 @@ const webhook = await call('getWebhookInfo');
 console.log(`✓ Bot: @${me.username}`);
 console.log(`✓ Site: ${siteUrl}`);
 console.log(`✓ Webhook: ${webhook.url || '(not set)'}`);
+console.log(`✓ Allowed updates: ${(webhook.allowed_updates || []).join(', ') || '(default)'}`);
 console.log(`✓ Pending updates: ${webhook.pending_update_count ?? 0}`);
+console.log('! Bot must be an administrator of the publishing channel for reliable getChatMember/chat_member enforcement.');
 console.log('! For website login, link this HTTPS domain to the bot in BotFather (/setdomain).');
 
 function loadDevVars() {
