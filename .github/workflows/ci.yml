@@ -28,6 +28,9 @@ jobs:
           node --check public/admin/publication-lifecycle.js
           node --check public/admin/publishing-diagnostics.js
           node --check scripts/configure-bot.mjs
+          grep -Fq "querySelectorAll('i[data-lucide]')" public/ui-icons.js
+          grep -Fq "nameAttr:'data-domnkr-lucide'" public/ui-icons.js
+          grep -Fq "removeAttribute('data-domnkr-lucide')" public/ui-icons.js
       - name: Tests
         run: npm test
       - name: Wrangler dry run
