@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "build:spike": "tsc -p tsconfig.build.json",
     "build:runtime-test": "tsc -p tsconfig.runtime-test.json",
-    "test": "npm run prepare:vendor && npm run build:spike && npm run build:runtime-test && node --test tests/ranobelib-sync.test.mjs tests/web-auth.test.mjs tests/publication-lifecycle.test.mjs tests/publishing-files.test.mjs tests/publishing-settings.test.mjs tests/publishing-diagnostics.test.mjs tests/title-proposal-policy.test.mjs tests/proposal-raw-runtime.test.mjs tests/publication-ops.test.mjs tests/publication-comment-gate.test.mjs tests/publication-reader-delivery.test.mjs tests/publication-reader-delivery-cache.test.mjs tests/publication-release-analytics.test.mjs tests/channel-membership-access.test.mjs tests/admin-user-workspace.test.mjs",
+    "test": "npm run prepare:vendor && npm run build:spike && npm run build:runtime-test && node --test tests/ranobelib-sync.test.mjs tests/web-auth.test.mjs tests/publication-lifecycle.test.mjs tests/publishing-files.test.mjs tests/publishing-settings.test.mjs tests/publishing-diagnostics.test.mjs tests/title-proposal-policy.test.mjs tests/proposal-raw-runtime.test.mjs tests/publication-ops.test.mjs tests/publication-comment-gate.test.mjs tests/publication-reader-delivery.test.mjs tests/publication-reader-delivery-cache.test.mjs tests/publication-file-cache-prewarm.test.mjs tests/publication-release-analytics.test.mjs tests/channel-membership-access.test.mjs tests/admin-user-workspace.test.mjs",
     "sync:ranobelib:spike": "npm run build:spike && node scripts/ranobelib-sync-spike.mjs",
     "dev": "npm run prepare:vendor && wrangler dev",
     "db:local": "wrangler d1 migrations apply DB --local",
