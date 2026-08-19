@@ -6,9 +6,9 @@ import {
   type PublicationCommentGateEnv,
 } from './publication-comment-gate.js';
 import {
-  handlePublicationReaderDeliveryCacheWebhook,
-  type PublicationReaderDeliveryCacheEnv,
-} from './publication-reader-delivery-cache.js';
+  handlePublicationReaderDeliveryWebhook,
+  type PublicationReaderDeliveryEnv,
+} from './publication-reader-delivery.js';
 import {
   handlePublicationFileCachePrewarm,
   type PublicationFileCachePrewarmEnv,
@@ -23,13 +23,13 @@ interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
 type Env = PublicationCommentGateEnv
   & PublishingAnalyticsV2Env
-  & PublicationReaderDeliveryCacheEnv
+  & PublicationReaderDeliveryEnv
   & PublicationFileCachePrewarmEnv
   & PublicationReleaseAnalyticsEnv;
 
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
-    const readerDelivery = await handlePublicationReaderDeliveryCacheWebhook(request, env, ctx);
+    const readerDelivery = await handlePublicationReaderDeliveryWebhook(request, env, ctx);
     if (readerDelivery) return readerDelivery;
 
     const gateWebhook = await handlePublicationCommentGateWebhook(request, env, ctx);
