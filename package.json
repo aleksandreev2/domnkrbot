@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "postinstall": "node scripts/prepare-vendor.mjs",
     "prepare:vendor": "node scripts/prepare-vendor.mjs",
     "typecheck": "tsc --noEmit",
     "build:spike": "tsc -p tsconfig.build.json",
