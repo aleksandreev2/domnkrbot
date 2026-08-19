@@ -3,119 +3,63 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#161616">
-  <title>Дом Некроманта · Переводы сообщества</title>
-  <meta name="description" content="Переводы, новые главы и предложения сообщества «Дом Некроманта».">
-  <link rel="stylesheet" href="/site.css?v=20260819-web4">
+  <meta name="theme-color" content="#1c1e24">
+  <title>Дом Некроманта · Переводы и будущая читалка</title>
+  <meta name="description" content="Переводы сообщества «Дом Некроманта»: новые главы, новости, выбор следующих тайтлов и будущая собственная читалка.">
+  <link rel="stylesheet" href="/site.css?v=20260819-web5">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260819-icons2"></script>
-  <script defer src="/site.js?v=20260819-web4"></script>
+  <script defer src="/site.js?v=20260819-web5"></script>
 </head>
 <body>
+  <div class="utility-bar">
+    <div class="wrap utility-inner">
+      <span>DOM NEKROMANTA · NOVEL TRANSLATIONS</span>
+      <div class="utility-actions">
+        <a id="adminLink" class="utility-admin hidden" href="/admin/" aria-label="Админка"><i data-lucide="shield-cog"></i><span>ADMIN</span></a>
+        <details id="loginMenu" class="login-menu">
+          <summary><i data-lucide="user-round"></i><span id="accountName">LOGIN</span></summary>
+          <div id="loginPanel" class="login-panel"><div id="telegramLogin"></div></div>
+        </details>
+        <button id="logoutButton" class="utility-icon hidden" type="button" aria-label="Выйти"><i data-lucide="log-out"></i></button>
+      </div>
+    </div>
+  </div>
+
   <header class="site-head">
-    <div class="wrap site-head-inner">
+    <div class="wrap nav-shell">
       <a class="brand" href="/" aria-label="Дом Некроманта — главная">
-        <span class="brand-mark">ДН</span>
-        <span class="brand-copy"><strong>Дом Некроманта</strong><small>ПЕРЕВОДЫ СООБЩЕСТВА</small></span>
+        <img src="/brand/team-logo.webp" alt="" width="62" height="62">
+        <span class="brand-copy"><strong>ДОМ НЕКРОМАНТА</strong><small>ПЕРЕВОДЫ СООБЩЕСТВА</small></span>
       </a>
-      <nav class="top-nav" aria-label="Навигация">
-        <a href="#releases">Релизы</a>
-        <a href="#community">Сообщество</a>
-        <a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Telegram <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+      <nav class="main-nav" aria-label="Основная навигация">
+        <a href="#reader">ЧИТАТЬ</a><a href="#releases">РЕЛИЗЫ</a><a href="/propose/">ПРЕДЛОЖИТЬ ТАЙТЛ</a><a href="#community">СООБЩЕСТВО</a>
       </nav>
-      <div class="head-actions">
-        <a id="adminLink" class="head-button" href="/admin/"><i data-lucide="shield-cog" aria-hidden="true"></i><span>Админка</span></a>
-        <span id="accountName" class="account-chip"><i data-lucide="user-round" aria-hidden="true"></i><span>Загрузка…</span></span>
-        <button id="logoutButton" class="icon-button hidden" type="button" aria-label="Выйти"><i data-lucide="log-out" aria-hidden="true"></i></button>
+      <div class="nav-icons">
+        <a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer" aria-label="Telegram"><i data-lucide="send"></i></a>
+        <a href="#releases" aria-label="Новые главы"><i data-lucide="book-open"></i></a>
       </div>
     </div>
   </header>
 
   <main>
-    <section class="masthead">
-      <div class="wrap masthead-grid">
-        <div class="masthead-copy">
-          <span class="edition-line">ДОМ НЕКРОМАНТА · ПЕРЕВОДЫ СООБЩЕСТВА</span>
-          <h1>Истории, которые стоят перевода.</h1>
-          <p>Следим за тайтлами, выпускаем главы и выбираем следующие проекты вместе с читателями. Без Mini App и лишних экранов.</p>
-          <div class="masthead-actions">
-            <a class="button light" href="#releases"><i data-lucide="book-open" aria-hidden="true"></i>Последние релизы</a>
-            <button id="proposalOpenHero" class="button outline-light" type="button"><i data-lucide="plus" aria-hidden="true"></i>Предложить перевод</button>
-          </div>
-        </div>
-        <div class="masthead-meta" aria-label="Состояние проекта">
-          <div class="issue-label"><span>СЕЙЧАС</span><strong>@domnekromanta</strong></div>
-          <div class="hero-stats">
-            <div><strong id="statTitles">—</strong><span>активных тайтлов</span></div>
-            <div><strong id="statSynced">—</strong><span>синхронизировано</span></div>
-            <div><strong id="statReleases">—</strong><span>релизов</span></div>
-          </div>
-          <a class="channel-link" href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">
-            <span><i data-lucide="send" aria-hidden="true"></i></span>
-            <div><strong>Telegram-канал</strong><small>Анонсы, публикации и файлы</small></div>
-            <i data-lucide="arrow-up-right" aria-hidden="true"></i>
-          </a>
-        </div>
-      </div>
-    </section>
+    <section id="reader" class="feature-wrap"><div class="wrap"><article class="feature-hero">
+      <div class="feature-cover" aria-hidden="true"><img src="/brand/team-logo.webp" alt=""><span>DN READER</span><small>COMING NEXT</small></div>
+      <div class="feature-copy"><span class="feature-overline">DOMNEKROMANTA.RU · PROUDLY PRESENTS</span><h1>Своя читалка.<br>Свои переводы.</h1><p>Сейчас здесь живут релизы и выбор новых проектов. Следующий большой этап — собственная библиотека и читалка без привязки к стороннему интерфейсу.</p><div class="feature-actions"><a class="cta cta-primary" href="#releases">СМОТРЕТЬ РЕЛИЗЫ <i data-lucide="arrow-right"></i></a><a class="cta cta-ghost" href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">TELEGRAM <i data-lucide="arrow-up-right"></i></a></div></div>
+      <div class="feature-stats"><div><strong id="statTitles">—</strong><span>ТАЙТЛОВ</span></div><div><strong id="statSynced">—</strong><span>В СИНХРОНИЗАЦИИ</span></div><div><strong id="statReleases">—</strong><span>РЕЛИЗОВ</span></div></div>
+    </article></div></section>
 
-    <section id="releases" class="section releases-section">
-      <div class="wrap section-grid">
-        <div class="section-intro">
-          <span class="section-number">01</span>
-          <span class="section-kicker">СВЕЖЕЕ</span>
-          <h2>Последние релизы</h2>
-          <p>Новые главы и изменения, которые пришли из каталога команды на RanobeLib.</p>
-        </div>
-        <div class="section-body">
-          <div id="releaseList" class="release-list"><div class="skeleton-stack"><span></span><span></span><span></span></div></div>
-        </div>
-      </div>
-    </section>
+    <section class="promo-section"><div class="wrap promo-grid">
+      <a class="promo-card reader-card" href="#reader"><span class="promo-icon"><i data-lucide="book-open-text"></i></span><div><strong>ЧИТАТЬ ОНЛАЙН</strong><p>Собственная читалка</p></div><span class="promo-tag">СКОРО</span></a>
+      <a class="promo-card news-card" href="#releases"><span class="promo-icon"><i data-lucide="newspaper"></i></span><div><strong>НОВОСТИ И РЕЛИЗЫ</strong><p>Новые главы команды</p></div><i data-lucide="arrow-right"></i></a>
+      <a class="promo-card propose-card" href="/propose/"><span class="promo-icon"><i data-lucide="file-plus-2"></i></span><div><strong>ПРЕДЛОЖИТЬ ТАЙТЛ</strong><p>Нужна ссылка на RAW</p></div><i data-lucide="arrow-right"></i></a>
+    </div></section>
 
-    <section id="community" class="section community-section">
-      <div class="wrap section-grid">
-        <div class="section-intro">
-          <span class="section-number">02</span>
-          <span class="section-kicker">СООБЩЕСТВО</span>
-          <h2>Что переводить дальше</h2>
-          <p>Предлагайте тайтлы и главы. Поддерживайте заявки, которые хотите увидеть в работе.</p>
-          <button id="proposalOpen" class="button dark" type="button"><i data-lucide="circle-plus" aria-hidden="true"></i>Предложить перевод</button>
-        </div>
-        <div class="section-body">
-          <div id="proposalList" class="proposal-list"><div class="skeleton-stack compact"><span></span><span></span></div></div>
-        </div>
-      </div>
-    </section>
+    <section id="releases" class="content-section"><div class="wrap"><div class="section-heading"><div><span class="eyebrow">NEW CHAPTERS</span><h2>Новые главы</h2></div><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">ВСЕ АНОНСЫ <i data-lucide="arrow-up-right"></i></a></div><div id="releaseList" class="release-shelf"><div class="shelf-loading"><span></span><span></span><span></span><span></span></div></div></div></section>
+
+    <section id="community" class="community-section"><div class="wrap community-shell"><div class="community-copy"><span class="eyebrow">COMMUNITY QUEUE</span><h2>Что переводить дальше?</h2><p>Заявка на новый тайтл теперь оформляется отдельно. Для неё обязательно нужна ссылка на RAW — так команда сразу понимает, есть ли материал для работы.</p><a class="cta cta-primary" href="/propose/">ПРЕДЛОЖИТЬ ТАЙТЛ <i data-lucide="arrow-right"></i></a></div><div id="proposalList" class="proposal-board"><div class="board-loading"><span></span><span></span><span></span></div></div></div></section>
   </main>
 
-  <dialog id="proposalDialog" class="proposal-dialog">
-    <div class="dialog-shell">
-      <div class="dialog-head">
-        <div><span class="section-kicker">НОВАЯ ЗАЯВКА</span><h2>Предложить перевод</h2><p>Оставьте ссылку и коротко объясните, почему проект стоит взять в работу.</p></div>
-        <button id="proposalClose" class="dialog-close" type="button" aria-label="Закрыть"><i data-lucide="x" aria-hidden="true"></i></button>
-      </div>
-
-      <div id="loginCard" class="auth-card">
-        <span class="auth-icon"><i data-lucide="send" aria-hidden="true"></i></span>
-        <div><strong>Сначала войдите через Telegram</strong><p>Авторизация нужна только для заявок и голосования.</p><div id="telegramLogin" class="telegram-login"></div></div>
-      </div>
-
-      <form id="proposalForm" class="proposal-form hidden">
-        <div class="form-grid two"><label><span>Тип заявки</span><select id="proposalType"><option value="title">Новый тайтл</option><option value="chapters">Конкретные главы</option></select></label><label><span>Название</span><input id="proposalTitle" maxlength="180" required placeholder="Название новеллы"></label></div>
-        <label><span>Источник</span><input id="proposalSource" maxlength="500" type="url" placeholder="https://ranobelib.me/..."></label>
-        <div id="chapterFields" class="form-grid two hidden"><label><span>С главы</span><input id="chapterFrom" inputmode="decimal"></label><label><span>По главу</span><input id="chapterTo" inputmode="decimal"></label></div>
-        <label><span>Комментарий</span><textarea id="proposalComment" maxlength="1500" rows="4" placeholder="Почему стоит взяться за этот перевод?"></textarea></label>
-        <div class="form-submit"><span id="proposalNote" class="form-note"></span><button id="proposalSubmit" class="button dark" type="submit"><i data-lucide="send" aria-hidden="true"></i>Отправить заявку</button></div>
-      </form>
-    </div>
-  </dialog>
-
-  <footer class="site-foot">
-    <div class="wrap foot-inner">
-      <div class="foot-brand"><span class="brand-mark small">ДН</span><div><strong>Дом Некроманта</strong><span>Переводы сообщества</span></div></div>
-      <div class="foot-links"><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Telegram</a><a href="/admin/">Админка</a></div>
-    </div>
-  </footer>
+  <footer class="site-foot"><div class="wrap footer-grid"><div class="footer-brand"><img src="/brand/team-logo.webp" alt="" width="46" height="46"><div><strong>Дом Некроманта</strong><span>Переводы сообщества</span></div></div><nav><a href="#reader">Читать</a><a href="#releases">Релизы</a><a href="/propose/">Предложить тайтл</a><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Telegram</a></nav></div></footer>
 </body>
 </html>
