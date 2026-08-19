@@ -8,6 +8,7 @@ import {
 } from './ranobelib-runtime.js';
 import { handlePublicationArchiveGuard } from './publication-archive-guard.js';
 import { handlePublicationLifecycleApi } from './publication-lifecycle.js';
+import { handlePublishingSettingsGuard } from './publishing-settings-guard.js';
 import { requireAdminSession } from './web-auth.js';
 
 interface AssetFetcher { fetch(request: Request): Promise<Response> }
@@ -68,6 +69,9 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/health') {
       return json({ ok: true, service: 'domnkrbot', storageReady: Boolean(env.FILES), time: new Date().toISOString() });
     }
+
+    const publishingSettingsResponse = await handlePublishingSettingsGuard(request, env);
+    if (publishingSettingsResponse) return publishingSettingsResponse;
 
     const publicationArchiveResponse = await handlePublicationArchiveGuard(request, env);
     if (publicationArchiveResponse) return publicationArchiveResponse;
