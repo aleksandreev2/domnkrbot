@@ -79,15 +79,23 @@ jobs:
           grep -Fq 'publication_reader_events' migrations/0006_publication_delivery_analytics.sql
           grep -Fq 'channel_access_state' migrations/0007_channel_membership_access.sql
           grep -Fq 'publication_comment_gates' migrations/0009_publication_comment_gate.sql
+          grep -Fq 'publication_asset_cache_locks' migrations/0010_telegram_file_cache_lock.sql
           grep -Fq 'getChatMember' src/channel-membership-access.ts
           grep -Fq 'left_within_7d_of_download' src/channel-membership-access.ts
           grep -Fq 'ENFORCEMENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000' src/channel-membership-access.ts
           grep -Fq "allowed_updates: ['message', 'callback_query', 'chat_member']" scripts/configure-bot.mjs
           grep -Fq '"main": "src/live-entry-v2.ts"' wrangler.jsonc
           grep -Fq 'handlePublicationCommentGateWebhook' src/live-entry-v2.ts
-          grep -Fq 'handlePublicationReaderDeliveryWebhook' src/live-entry-v2.ts
+          grep -Fq 'handlePublicationReaderDeliveryCacheWebhook' src/live-entry-v2.ts
+          grep -Fq 'handlePublicationFileCachePrewarm' src/live-entry-v2.ts
           grep -Fq 'handlePublicationReleaseAnalytics' src/live-entry-v2.ts
           grep -Fq 'handlePublishingAnalyticsV2' src/live-entry-v2.ts
+          grep -Fq 'acquireTelegramFileCacheLease' src/telegram-file-cache.ts
+          grep -Fq 'waitForTelegramFileId' src/telegram-file-cache.ts
+          grep -Fq 'clearTelegramFileId' src/publication-reader-delivery-cache.ts
+          grep -Fq "cache: 'repaired'" src/publication-reader-delivery-cache.ts
+          grep -Fq 'deleteMessage' src/publication-file-cache-prewarm.ts
+          grep -Fq 'telegram_cache_prewarmed' src/publication-file-cache-prewarm.ts
           grep -Fq 'gate-download:' src/publication-comment-gate.ts
           grep -Fq 'Пост опубликован без inline-кнопок' src/publication-comment-gate.ts
           grep -Fq 'reply_markup: { inline_keyboard: [] }' src/publication-comment-gate.ts
