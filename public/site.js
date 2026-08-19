@@ -30,8 +30,6 @@
 
   function renderSession(){
     const user=state.bootstrap?.user;
-    const admin=Boolean(state.bootstrap?.isAdmin);
-    $('#adminLink')?.classList.toggle('hidden',!admin);
     $('#logoutButton')?.classList.toggle('hidden',!user);
     $('#proposalForm')?.classList.toggle('hidden',!user);
     $('#loginCard')?.classList.toggle('hidden',Boolean(user));
