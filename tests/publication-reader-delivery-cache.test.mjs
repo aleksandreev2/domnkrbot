@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handlePublicationReaderDeliveryCacheWebhook } from '../dist-runtime/publication-reader-delivery-cache.js';
+import { handlePublicationReaderDeliveryWebhook } from '../dist-runtime/publication-reader-delivery.js';
 
 const ORIGIN='https://domnkr.test';
 
@@ -87,14 +87,14 @@ async function withTelegramMock(fn,{staleFileId=null}={}){
 
 test('invalid webhook secret is rejected before cache or Telegram side effects',async()=>{
   const db=new MockDB();const bucket=new MockBucket();
-  const response=await handlePublicationReaderDeliveryCacheWebhook(webhook({message:{chat:{id:4242,type:'private'},from:{id:4242,first_name:'Reader'},text:'/start dl_7'}},'wrong'),env(db,bucket),ctx());
+  const response=await handlePublicationReaderDeliveryWebhook(webhook({message:{chat:{id:4242,type:'private'},from:{id:4242,first_name:'Reader'},text:'/start dl_7'}},'wrong'),env(db,bucket),ctx());
   assert.ok(response);assert.equal(response.status,403);assert.equal(db.operations.length,0);assert.equal(bucket.gets.length,0);
 });
 
 test('stale Telegram file_id self-heals from R2 and stores the replacement cache id',async()=>{
   const db=new MockDB({cached:'stale-file'});const bucket=new MockBucket();const execution=ctx();
   await withTelegramMock(async(calls)=>{
-    const response=await handlePublicationReaderDeliveryCacheWebhook(webhook({message:{message_id:1,chat:{id:4242,type:'private'},from:{id:4242,first_name:'Reader',username:'reader'},text:'/start dl_7'}}),env(db,bucket),execution);
+    const response=await handlePublicationReaderDeliveryWebhook(webhook({message:{message_id:1,chat:{id:4242,type:'private'},from:{id:4242,first_name:'Reader',username:'reader'},text:'/start dl_7'}}),env(db,bucket),execution);
     assert.ok(response);assert.equal(response.status,200);await flush(execution);
     const documentCalls=calls.filter((call)=>call.url.endsWith('/sendDocument'));
     assert.equal(documentCalls.length,2);
@@ -111,7 +111,7 @@ test('stale Telegram file_id self-heals from R2 and stores the replacement cache
 test('cold-cache loser waits for the global asset cache and reuses the winning file_id without R2',async()=>{
   const db=new MockDB({cached:null,waitedFileId:'telegram-warmed-elsewhere',leaseAvailable:false});const bucket=new MockBucket();const execution=ctx();
   await withTelegramMock(async(calls)=>{
-    const response=await handlePublicationReaderDeliveryCacheWebhook(webhook({message:{message_id:1,chat:{id:4242,type:'private'},from:{id:4242,first_name:'Reader'},text:'/start dl_7'}}),env(db,bucket),execution);
+    const response=await handlePublicationReaderDeliveryWebhook(webhook({message:{message_id:1,chat:{id:4242,type:'private'},from:{id:4242,first_name:'Reader'},text:'/start dl_7'}}),env(db,bucket),execution);
     assert.ok(response);await flush(execution);
     assert.equal(bucket.gets.length,0);
     assert.ok(db.operations.some((row)=>row.query.startsWith('INSERT INTO publication_asset_cache_locks')));
@@ -124,7 +124,7 @@ test('cold-cache loser waits for the global asset cache and reuses the winning f
 test('direct deep-link on gated release still requires thank-you grant',async()=>{
   const db=new MockDB({thanked:false});const bucket=new MockBucket();const execution=ctx();
   await withTelegramMock(async(calls)=>{
-    const response=await handlePublicationReaderDeliveryCacheWebhook(webhook({message:{message_id:1,chat:{id:4242,type:'private'},from:{id:4242,first_name:'Reader'},text:'/start dl_7'}}),env(db,bucket),execution);
+    const response=await handlePublicationReaderDeliveryWebhook(webhook({message:{message_id:1,chat:{id:4242,type:'private'},from:{id:4242,first_name:'Reader'},text:'/start dl_7'}}),env(db,bucket),execution);
     assert.ok(response);await flush(execution);
     assert.equal(calls.some((call)=>call.url.endsWith('/sendDocument')),false);
     const text=JSON.parse(String(calls.find((call)=>call.url.endsWith('/sendMessage')).options.body)).text;
