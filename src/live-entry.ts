@@ -9,6 +9,14 @@ import {
 import { handlePublicationArchiveGuard } from './publication-archive-guard.js';
 import { handlePublicationLifecycleApi } from './publication-lifecycle.js';
 import {
+  ensureChannelMembershipSchema,
+  ensureWebhookMembershipUpdates,
+  handleChannelMembershipAdmin,
+  handleChannelMembershipWebhook,
+  runChannelMembershipMaintenance,
+  type ChannelMembershipEnv,
+} from './channel-membership-access.js';
+import {
   ensurePublicationOpsSchema,
   handlePublicationOpsRequest,
   handlePublicationOpsWebhook,
@@ -135,6 +143,13 @@ export default {
         publicationDeliveryReady = false;
         console.error('Publication delivery analytics schema check failed', error);
       }
+      let membershipAccessReady = true;
+      try {
+        await ensureChannelMembershipSchema(env as ChannelMembershipEnv);
+      } catch (error) {
+        membershipAccessReady = false;
+        console.error('Channel membership access schema check failed', error);
+      }
       return json({
         ok: true,
         service: 'domnkrbot',
@@ -142,14 +157,21 @@ export default {
         publishingChannelReady: publishing.channelReady,
         publishingDiscussionReady: publishing.discussionReady,
         publicationDeliveryReady,
+        membershipAccessReady,
         time: new Date().toISOString(),
       });
     }
 
     kickPublishingDefaults(env, ctx);
 
+    const membershipWebhookResponse = await handleChannelMembershipWebhook(request, env as ChannelMembershipEnv, ctx);
+    if (membershipWebhookResponse) return membershipWebhookResponse;
+
     const publicationWebhookResponse = await handlePublicationOpsWebhook(request, env as PublicationOpsEnv, ctx);
     if (publicationWebhookResponse) return publicationWebhookResponse;
+
+    const membershipAdminResponse = await handleChannelMembershipAdmin(request, env as ChannelMembershipEnv);
+    if (membershipAdminResponse) return membershipAdminResponse;
 
     const publicationOpsResponse = await handlePublicationOpsRequest(request, env as PublicationOpsEnv);
     if (publicationOpsResponse) return publicationOpsResponse;
@@ -234,6 +256,14 @@ export default {
       await ensurePublishingDefaults(env);
     } catch (error) {
       console.error('Publishing target cron bootstrap failed', error);
+    }
+
+    try {
+      const webhookUpdated = await ensureWebhookMembershipUpdates(env as ChannelMembershipEnv);
+      const membership = await runChannelMembershipMaintenance(env as ChannelMembershipEnv);
+      console.log('Channel membership maintenance complete', { webhookUpdated, ...membership });
+    } catch (error) {
+      console.error('Channel membership maintenance failed', error);
     }
 
     try {
