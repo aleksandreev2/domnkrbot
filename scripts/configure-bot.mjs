@@ -49,8 +49,8 @@ await call('setMyCommands', {
   ],
 });
 
-// Remove the old Mini App menu button. The default menu opens the command list.
-await call('setChatMenuButton', { menu_button: { type: 'default' } });
+// Explicitly replace any previously configured Web App menu button with the command list.
+await call('setChatMenuButton', { menu_button: { type: 'commands' } });
 
 await call('setWebhook', {
   url: `${siteUrl}/telegram/webhook`,
