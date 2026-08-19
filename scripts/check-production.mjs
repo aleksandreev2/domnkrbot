@@ -1,5 +1,5 @@
 const origin = (process.env.PRODUCTION_URL || 'https://domnkrbot.sashahumortele2.workers.dev').replace(/\/+$/, '');
-const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260820-loading-jank1';
+const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260820-publishing-loop1';
 const attempts = Number(process.env.ATTEMPTS || 6);
 const delayMs = Number(process.env.DELAY_MS || 10000);
 
@@ -47,7 +47,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const admin = await fetchText('/admin/');
     const adminJs = await fetchText('/admin/admin.js?v=20260819-admin1');
     const adminRaw = await fetchText('/admin/proposal-raw.js?v=20260819-raw1');
-    const adminStats = await fetchText('/admin/publishing-analytics.js?v=20260819-ops3');
+    const adminStats = await fetchText('/admin/publishing-analytics.js?v=20260820-ops4');
     const adminStatsCss = await fetchText('/admin/publishing-analytics.css?v=20260819-ops3');
     const adminCockpit = await fetchText('/admin/admin-cockpit.js?v=20260819-cockpit1');
     const adminCockpitCss = await fetchText('/admin/admin-cockpit.css?v=20260819-cockpit1');
@@ -93,7 +93,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && icons.text.includes('mutationNeedsRefresh(records)') && icons.text.includes('requestAnimationFrame(refresh)')
       && lucide.response.ok && lucide.text.length > 10000
       && admin.response.ok && admin.text.includes('ADMIN CONSOLE') && admin.text.includes('/ui-icons.js?v=20260820-icons3')
-      && admin.text.includes('/admin/publishing-analytics.js?v=20260819-ops3')
+      && admin.text.includes('/admin/publishing-analytics.js?v=20260820-ops4')
       && admin.text.includes('/admin/publishing-analytics.css?v=20260819-ops3')
       && admin.text.includes('/admin/admin-cockpit.js?v=20260819-cockpit1')
       && admin.text.includes('/admin/admin-cockpit.css?v=20260819-cockpit1')
@@ -103,6 +103,9 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && adminStats.response.ok && adminStats.text.includes('/api/admin/publishing-analytics')
       && adminStats.text.includes('echarts@6.1.0') && adminStats.text.includes('Воронка релиза')
       && adminStats.text.includes('reconcile-gate') && adminStats.text.includes('Выдача через комментарии')
+      && adminStats.text.includes('commentHelp&&commentHelp.textContent!==COMMENT_HELP_TEXT')
+      && adminStats.text.includes('mutationNeedsInstall(records)')
+      && !adminStats.text.includes("if(commentHelp)commentHelp.textContent='Один download/support комментарий в discussion thread.'")
       && adminStatsCss.response.ok && adminStatsCss.text.includes('.statistics-release-table')
       && adminStatsCss.text.includes('.delivery-flow-comment')
       && adminCockpit.response.ok && adminCockpit.text.includes('/api/admin/users')
@@ -117,7 +120,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: independent homepage loading, bounded icon observer and existing production services are ready (${marker})`);
+      console.log(`PASS: Publishing observer loop fix, bounded homepage/icon runtimes and existing production services are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -127,6 +130,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: homepage/icon runtime assets are stale or existing production services regressed.');
+console.error('FAIL: Publishing observer hotfix assets are stale or existing production services regressed.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
