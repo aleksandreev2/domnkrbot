@@ -78,8 +78,7 @@ export function normalizeAdminTags(input: unknown): string[] {
 
 function parseTags(value: unknown): string[] {
   try {
-    const parsed = JSON.parse(String(value || '[]'));
-    return normalizeAdminTags(parsed);
+    return normalizeAdminTags(JSON.parse(String(value || '[]')));
   } catch {
     return [];
   }
@@ -197,7 +196,6 @@ async function listUsers(url: URL, env: AdminUserWorkspaceEnv): Promise<Response
     newest: 'u.created_at DESC,u.telegram_id DESC',
     id: 'u.telegram_id DESC',
   };
-
   const selectAndJoins = `
     FROM users u
     LEFT JOIN delivery d ON d.user_telegram_id=u.telegram_id
@@ -219,9 +217,7 @@ async function listUsers(url: URL, env: AdminUserWorkspaceEnv): Promise<Response
     ORDER BY ${orderBy[options.sort]}
     LIMIT ? OFFSET ?`)
     .bind(...binds, options.limit, options.offset).all<Record<string, unknown>>();
-
-  const total = await env.DB.prepare(`${BASE_CTES}
-    SELECT COUNT(*) count ${selectAndJoins}`)
+  const total = await env.DB.prepare(`${BASE_CTES} SELECT COUNT(*) count ${selectAndJoins}`)
     .bind(...binds).first<{ count: number | string }>();
   const count = Number(total?.count || 0);
 
@@ -279,11 +275,7 @@ async function userDetail(userId: string, env: AdminUserWorkspaceEnv): Promise<R
   ]);
 
   return json({
-    user: {
-      ...user,
-      notes: String(user.notes || ''),
-      tags: parseTags(user.tags_json),
-    },
+    user: { ...user, notes: String(user.notes || ''), tags: parseTags(user.tags_json) },
     stats: stats || {},
     deliveries: deliveries.results,
     proposals: proposals.results,
@@ -300,7 +292,7 @@ export function buildTimeline(
   proposals: Record<string, unknown>[],
   events: Record<string, unknown>[],
   messages: Record<string, unknown>[],
-  audit: Record<string, unknown>[],
+  auditRows: Record<string, unknown>[],
 ): TimelineItem[] {
   const result: TimelineItem[] = [];
   if (user.created_at) result.push({ type: 'created', title: 'Пользователь появился', detail: 'Первое сохранённое взаимодействие.', at: String(user.created_at) });
@@ -318,7 +310,7 @@ export function buildTimeline(
   for (const row of messages) {
     result.push({ type: 'admin_message', title: row.status === 'sent' ? 'Сообщение администратора' : 'Ошибка сообщения', detail: String(row.text || '').slice(0, 180), at: String(row.created_at || ''), tone: row.status === 'sent' ? 'neutral' : 'danger' });
   }
-  for (const row of audit) {
+  for (const row of auditRows) {
     result.push({ type: 'admin', title: auditTitle(String(row.action || 'admin')), detail: safeDetails(row.details), at: String(row.created_at || '') });
   }
   return result.filter((item) => item.at).sort((a, b) => Date.parse(b.at) - Date.parse(a.at)).slice(0, 60);
@@ -400,11 +392,8 @@ async function messageUser(request: Request, env: AdminUserWorkspaceEnv, userId:
     VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)`)
     .bind(userId, String(adminId), text, status, telegramMessageId, errorText).run();
   await audit(env, adminId, status === 'sent' ? 'user_message' : 'user_message_failed', userId, {
-    message: text.slice(0, 160),
-    telegramMessageId,
-    error: errorText,
+    message: text.slice(0, 160), telegramMessageId, error: errorText,
   });
-
   if (status !== 'sent') return json({ error: `Telegram не доставил сообщение: ${errorText || 'unknown error'}` }, 502);
   return userDetail(userId, env);
 }
@@ -463,13 +452,16 @@ export async function handleAdminUserWorkspace(request: Request, env: AdminUserW
   if (request.method === 'GET' && url.pathname === '/api/admin/activity') return activity(env, url);
 
   const detailMatch = /^\/api\/admin\/users\/(\d+)$/.exec(url.pathname);
-  if (request.method === 'GET' && detailMatch) return userDetail(detailMatch[1], env);
+  const detailUserId = detailMatch?.[1];
+  if (request.method === 'GET' && detailUserId) return userDetail(detailUserId, env);
 
   const controlMatch = /^\/api\/admin\/users\/(\d+)\/control$/.exec(url.pathname);
-  if (request.method === 'POST' && controlMatch) return saveControl(request, env, controlMatch[1], admin.id);
+  const controlUserId = controlMatch?.[1];
+  if (request.method === 'POST' && controlUserId) return saveControl(request, env, controlUserId, admin.id);
 
   const messageMatch = /^\/api\/admin\/users\/(\d+)\/message$/.exec(url.pathname);
-  if (request.method === 'POST' && messageMatch) return messageUser(request, env, messageMatch[1], admin.id);
+  const messageUserId = messageMatch?.[1];
+  if (request.method === 'POST' && messageUserId) return messageUser(request, env, messageUserId, admin.id);
 
   return json({ error: 'Method not allowed.' }, 405);
 }
