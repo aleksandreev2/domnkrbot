@@ -32,6 +32,7 @@ jobs:
           node --check public/admin/publishing-diagnostics.js
           node --check public/admin/proposal-raw.js
           node --check public/admin/publishing-analytics.js
+          node --check public/admin/admin-cockpit.js
           node --check scripts/configure-bot.mjs
           node --check scripts/check-production.mjs
           test -s public/brand/team-logo.webp
@@ -44,6 +45,14 @@ jobs:
           grep -Fq 'id="readerSettings"' public/reader/index.html
           grep -Fq 'id="adminLink" class="admin-entry hidden"' public/index.html
           grep -Fq 'publishing-analytics.js?v=20260819-ops2' public/admin/index.html
+          grep -Fq 'admin-cockpit.js?v=20260819-cockpit1' public/admin/index.html
+          grep -Fq 'admin-cockpit.css?v=20260819-cockpit1' public/admin/index.html
+          grep -Fq '/api/admin/users' public/admin/admin-cockpit.js
+          grep -Fq '/api/admin/activity' public/admin/admin-cockpit.js
+          grep -Fq 'admin_user_controls' migrations/0008_admin_user_workspace.sql
+          grep -Fq 'admin_user_messages' migrations/0008_admin_user_workspace.sql
+          grep -Fq 'admin_audit_log' migrations/0008_admin_user_workspace.sql
+          grep -Fq 'handleAdminUserWorkspace' src/entry.ts
           grep -Fq 'Поддержать переводчика' src/publication-ops.ts
           grep -Fq 'boosty.to/domnekromanta/single-payment/donation/818248/target?share=target_link' src/publication-ops.ts
           grep -Fq 'publication_reader_events' migrations/0006_publication_delivery_analytics.sql
