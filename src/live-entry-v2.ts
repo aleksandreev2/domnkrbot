@@ -6,9 +6,13 @@ import {
   type PublicationCommentGateEnv,
 } from './publication-comment-gate.js';
 import {
-  handlePublicationReaderDeliveryWebhook,
-  type PublicationReaderDeliveryEnv,
-} from './publication-reader-delivery.js';
+  handlePublicationReaderDeliveryCacheWebhook,
+  type PublicationReaderDeliveryCacheEnv,
+} from './publication-reader-delivery-cache.js';
+import {
+  handlePublicationFileCachePrewarm,
+  type PublicationFileCachePrewarmEnv,
+} from './publication-file-cache-prewarm.js';
 import {
   handlePublicationReleaseAnalytics,
   type PublicationReleaseAnalyticsEnv,
@@ -17,11 +21,15 @@ import { handlePublishingAnalyticsV2, type PublishingAnalyticsV2Env } from './pu
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
-type Env = PublicationCommentGateEnv & PublishingAnalyticsV2Env & PublicationReaderDeliveryEnv & PublicationReleaseAnalyticsEnv;
+type Env = PublicationCommentGateEnv
+  & PublishingAnalyticsV2Env
+  & PublicationReaderDeliveryCacheEnv
+  & PublicationFileCachePrewarmEnv
+  & PublicationReleaseAnalyticsEnv;
 
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
-    const readerDelivery = await handlePublicationReaderDeliveryWebhook(request, env, ctx);
+    const readerDelivery = await handlePublicationReaderDeliveryCacheWebhook(request, env, ctx);
     if (readerDelivery) return readerDelivery;
 
     const gateWebhook = await handlePublicationCommentGateWebhook(request, env, ctx);
@@ -29,6 +37,9 @@ export default {
 
     const gateRequest = await handlePublicationCommentGateRequest(request, env);
     if (gateRequest) return gateRequest;
+
+    const fileCachePrewarm = await handlePublicationFileCachePrewarm(request, env);
+    if (fileCachePrewarm) return fileCachePrewarm;
 
     const releaseAnalytics = await handlePublicationReleaseAnalytics(request, env);
     if (releaseAnalytics) return releaseAnalytics;
