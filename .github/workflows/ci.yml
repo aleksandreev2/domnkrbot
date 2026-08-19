@@ -93,7 +93,7 @@ jobs:
           grep -Fq 'acquireTelegramFileCacheLease' src/telegram-file-cache.ts
           grep -Fq 'waitForTelegramFileId' src/telegram-file-cache.ts
           grep -Fq 'clearTelegramFileId' src/publication-reader-delivery-cache.ts
-          grep -Fq "cache: 'repaired'" src/publication-reader-delivery-cache.ts
+          grep -Fq 'isInvalidCachedFileError' src/publication-reader-delivery-cache.ts
           grep -Fq 'deleteMessage' src/publication-file-cache-prewarm.ts
           grep -Fq 'telegram_cache_prewarmed' src/publication-file-cache-prewarm.ts
           grep -Fq 'gate-download:' src/publication-comment-gate.ts
