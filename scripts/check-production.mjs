@@ -18,7 +18,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const build = await fetchText('/build.txt');
     const shell = await fetchText('/');
     const site = await fetchText('/site.js?v=20260819-web3');
-    const icons = await fetchText('/ui-icons.js?v=20260819-icons1');
+    const icons = await fetchText('/ui-icons.js?v=20260819-icons2');
     const lucide = await fetchText('/vendor/lucide.min.js?v=1.27.0');
     const admin = await fetchText('/admin/');
     const adminJs = await fetchText('/admin/admin.js?v=20260819-admin1');
@@ -37,6 +37,9 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       health: health.response.status,
       adminEntryVisible: shell.text.includes('id="adminLink"'),
       lucideMounted: shell.text.includes('/vendor/lucide.min.js?v=1.27.0') && admin.text.includes('/vendor/lucide.min.js?v=1.27.0'),
+      safeIconRuntime: icons.text.includes("querySelectorAll('i[data-lucide]')")
+        && icons.text.includes("nameAttr:'data-domnkr-lucide'")
+        && icons.text.includes("removeAttribute('data-domnkr-lucide')"),
       storageReady: health.text.includes('"storageReady":true'),
       publishingChannelReady: health.text.includes('"publishingChannelReady":true'),
       publishingDiscussionReady: health.text.includes('"publishingDiscussionReady":true'),
@@ -45,10 +48,15 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const ok = build.response.ok && build.text.includes(marker)
       && shell.response.ok && shell.text.includes('Переводы без лишнего шума')
       && shell.text.includes('id="adminLink"')
+      && shell.text.includes('/ui-icons.js?v=20260819-icons2')
       && site.response.ok && site.text.includes('/auth/telegram/callback')
-      && icons.response.ok && icons.text.includes('window.DomNkrIcons')
+      && icons.response.ok
+      && icons.text.includes("querySelectorAll('i[data-lucide]')")
+      && icons.text.includes("nameAttr:'data-domnkr-lucide'")
+      && icons.text.includes("removeAttribute('data-domnkr-lucide')")
       && lucide.response.ok && lucide.text.length > 10000
       && admin.response.ok && admin.text.includes('ADMIN CONSOLE')
+      && admin.text.includes('/ui-icons.js?v=20260819-icons2')
       && admin.text.includes('/admin/admin-polish.css?v=20260819-admin2')
       && adminJs.response.ok && adminJs.text.includes('Publishing Center')
       && adminPolish.response.ok && adminPolish.text.includes('.admin-v2')
@@ -58,7 +66,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: redesigned website/admin, Lucide assets, R2 FILES binding and publishing channel are ready (${marker})`);
+      console.log(`PASS: website/admin, safe Lucide runtime, R2 FILES binding and publishing channel are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -68,6 +76,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: redesigned production assets are stale, Lucide runtime is missing, R2 FILES is missing, publishing channel is not ready, or the Worker is unreachable.');
+console.error('FAIL: production assets are stale, safe Lucide runtime is missing, R2 FILES is missing, publishing channel is not ready, or the Worker is unreachable.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
