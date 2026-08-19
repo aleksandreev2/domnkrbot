@@ -33,7 +33,7 @@ class MockStatement{
   }
   async run(){
     this.db.operations.push({query:this.query,values:[...this.values]});
-    if(this.query.startsWith('INSERT INTO channel_access_state')&&this.query.includes('blacklisted_at,blacklist_reason')){
+    if(this.query.startsWith('INSERT INTO channel_access_state')&&this.query.includes('VALUES (?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP)')){
       const [id,status,reason]=this.values;const previous=this.db.access.get(String(id))||{};
       this.db.access.set(String(id),{...previous,user_telegram_id:String(id),last_status:String(status),last_checked_at:new Date().toISOString(),left_at:previous.left_at||new Date().toISOString(),rejoined_at:previous.rejoined_at||null,blacklisted_at:previous.blacklisted_at||new Date().toISOString(),blacklist_reason:previous.blacklist_reason||String(reason)});
       return{};
