@@ -1,5 +1,5 @@
 const origin = (process.env.PRODUCTION_URL || 'https://domnkrbot.sashahumortele2.workers.dev').replace(/\/+$/, '');
-const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260820-release-drilldown1';
+const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260820-file-cache1';
 const attempts = Number(process.env.ATTEMPTS || 6);
 const delayMs = Number(process.env.DELAY_MS || 10000);
 
@@ -135,7 +135,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: release drill-down, thank-first delivery and existing production services are ready (${marker})`);
+      console.log(`PASS: Telegram file-cache hardening, release analytics and existing production services are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -145,6 +145,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: release drill-down or thank-first delivery assets are stale, or existing production services regressed.');
+console.error('FAIL: Telegram file-cache build is stale or existing production services regressed.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
