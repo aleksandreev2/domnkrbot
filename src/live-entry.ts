@@ -65,6 +65,10 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response> {
     const url = new URL(request.url);
 
+    if (request.method === 'GET' && url.pathname === '/api/health') {
+      return json({ ok: true, service: 'domnkrbot', storageReady: Boolean(env.FILES), time: new Date().toISOString() });
+    }
+
     const publicationArchiveResponse = await handlePublicationArchiveGuard(request, env);
     if (publicationArchiveResponse) return publicationArchiveResponse;
 
