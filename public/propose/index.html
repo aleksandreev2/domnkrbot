@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f7f4ee">
+  <meta name="theme-color" content="#f8f5ef">
   <title>Предложить тайтл · Дом Некроманта</title>
   <meta name="description" content="Предложить новый тайтл команде «Дом Некроманта»: загрузите RAW-файл или укажите рабочую ссылку на первоисточник.">
-  <link rel="stylesheet" href="/site.css?v=20260819-reader1">
+  <link rel="stylesheet" href="/site.css?v=20260819-reference2">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260819-icons2"></script>
   <script defer src="/propose.js?v=20260819-raw2"></script>
@@ -24,15 +24,15 @@
   <main class="propose-page"><div class="shell">
     <nav class="breadcrumbs"><a href="/">Главная</a><i>/</i><span>Предложить тайтл</span></nav>
     <h1 class="page-title">Предложить тайтл</h1>
-    <p class="page-lead">Команда «Дом Некроманта» рассматривает новые проекты, если существует доступный первоисточник и произведение ещё не находится в работе.</p>
+    <p class="page-lead">Команда «Дом Некроманта» рассматривает новые проекты, если существует доступный первоисточник и произведение ещё не находится в работе. Чем понятнее заявка, тем быстрее мы сможем её проверить.</p>
 
     <div class="proposal-layout">
       <section class="proposal-form-card">
         <form id="titleProposalForm" class="title-proposal-form">
           <label class="field"><span>Название тайтла <b>*</b></span><input id="proposalTitle" maxlength="180" required autocomplete="off" placeholder="Введите название тайтла"></label>
-          <label class="field"><span>Оригинальное название</span><input id="proposalOriginalTitle" maxlength="180" autocomplete="off" placeholder="Введите оригинальное название"></label>
+          <label class="field"><span>Оригинальное название</span><input id="proposalOriginalTitle" maxlength="180" autocomplete="off" placeholder="Если есть, укажите оригинальное название"></label>
 
-          <div class="field"><span>RAW / первоисточник <b>*</b></span><small>Загрузите файл RAW или укажите ссылку на RAW</small>
+          <div class="field"><span>RAW / первоисточник <b>*</b></span><small>Приложите RAW-файл или укажите рабочую ссылку на RAW.</small>
             <div class="raw-tabs" role="tablist"><button id="rawFileTab" class="raw-tab active" type="button" data-raw-tab="file"><i data-lucide="file-archive"></i>Загрузить файл</button><button id="rawUrlTab" class="raw-tab" type="button" data-raw-tab="url"><i data-lucide="link-2"></i>Указать ссылку</button></div>
             <div id="rawFilePanel">
               <div id="rawDrop" class="raw-drop" tabindex="0"><div><i data-lucide="upload"></i><strong>Перетащите RAW сюда</strong><span>или выберите файл</span><button id="rawChoose" class="raw-file-button" type="button">Выбрать файл</button><small>ZIP, RAR, 7Z, TAR, GZ, TXT, MD, RTF, PDF, EPUB, DOC/DOCX · до 5 ГиБ</small></div><input id="rawFile" class="hidden" type="file" accept=".zip,.rar,.7z,.tar,.gz,.tgz,.txt,.md,.rtf,.pdf,.epub,.doc,.docx"></div>
@@ -42,15 +42,15 @@
           </div>
 
           <label class="field"><span>Дополнительная ссылка <small>(NovelUpdates, официальный сайт, страница автора и т.д.)</small></span><input id="proposalExtraUrl" maxlength="500" type="url" inputmode="url" placeholder="https://example.com (необязательно)"></label>
-          <label class="field"><span>Комментарий / почему стоит перевести</span><textarea id="proposalComment" maxlength="1500" rows="5" placeholder="Расскажите, почему этот тайтл стоит перевести и чем он может быть интересен читателям."></textarea></label>
+          <label class="field"><span>Комментарий / почему стоит перевести</span><textarea id="proposalComment" maxlength="1500" rows="5" placeholder="Расскажите, чем интересен тайтл, почему он достоин перевода и есть ли важные детали."></textarea></label>
 
           <div class="proposal-submit-bar"><button id="proposalSubmit" class="submit-button" type="submit" disabled><i data-lucide="lock"></i>Отправить заявку</button><div id="loginRequired" class="login-required"><span><i data-lucide="lock-keyhole"></i>Войдите через Telegram, чтобы отправить заявку</span><div id="telegramLogin" class="telegram-login-host"></div></div></div>
           <div id="proposalNote" class="form-note" aria-live="polite"></div>
-          <div class="required-note">Поля, отмеченные <b>*</b>, обязательны. Нужно приложить готовый RAW-файл или указать рабочую RAW-ссылку.</div>
+          <div class="required-note">Поля, отмеченные <b>*</b>, обязательны. Нужен готовый RAW-файл или рабочая RAW-ссылка.</div>
         </form>
       </section>
 
-      <aside class="proposal-guide"><h2>Перед отправкой</h2><div class="guide-accent"></div><ol><li><span>01</span><div><strong>Убедитесь, что тайтл ещё не переводится командой.</strong></div></li><li><span>02</span><div><strong>Приложите RAW-файл или рабочую ссылку на RAW.</strong></div></li><li><span>03</span><div><strong>Добавьте понятный источник.</strong><p>Официальные страницы и авторитетные архивы в приоритете.</p></div></li><li><span>04</span><div><strong>Не создавайте дубликаты.</strong></div></li></ol><div class="guide-illustration"><i data-lucide="feather"></i></div></aside>
+      <aside class="proposal-guide"><h2>Перед отправкой</h2><div class="guide-accent"></div><ol><li><span>01</span><div><strong>Убедитесь, что тайтл ещё не переводится командой.</strong></div></li><li><span>02</span><div><strong>Приложите RAW-файл или рабочую ссылку на RAW.</strong></div></li><li><span>03</span><div><strong>Добавьте понятный источник.</strong><p>Официальные страницы и доступные архивы первоисточника в приоритете.</p></div></li><li><span>04</span><div><strong>Не создавайте дубликаты.</strong><p>Если заявка уже есть — лучше поддержать её, а не создавать новую.</p></div></li></ol><div class="guide-illustration"><i data-lucide="feather"></i></div></aside>
     </div>
   </div></main>
 
