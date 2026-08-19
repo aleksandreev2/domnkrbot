@@ -48,7 +48,7 @@ jobs:
           grep -Fq '/ui-icons.js?v=20260820-icons3' public/index.html
           grep -Fq '/site.js?v=20260820-reader2' public/index.html
           grep -Fq '/ui-icons.js?v=20260820-icons3' public/admin/index.html
-          grep -Fq 'publishing-analytics.js?v=20260819-ops3' public/admin/index.html
+          grep -Fq 'publishing-analytics.js?v=20260820-ops4' public/admin/index.html
           grep -Fq 'publishing-analytics.css?v=20260819-ops3' public/admin/index.html
           grep -Fq 'admin-cockpit.js?v=20260819-cockpit1' public/admin/index.html
           grep -Fq 'admin-cockpit.css?v=20260819-cockpit1' public/admin/index.html
@@ -89,6 +89,10 @@ jobs:
           grep -Fq 'Воронка релиза' public/admin/publishing-analytics.js
           grep -Fq 'reconcile-gate' public/admin/publishing-analytics.js
           grep -Fq 'Выдача через комментарии' public/admin/publishing-analytics.js
+          grep -Fq "const COMMENT_HELP_TEXT='Один download/support комментарий в discussion thread.'" public/admin/publishing-analytics.js
+          grep -Fq 'commentHelp&&commentHelp.textContent!==COMMENT_HELP_TEXT' public/admin/publishing-analytics.js
+          grep -Fq 'mutationNeedsInstall(records)' public/admin/publishing-analytics.js
+          ! grep -Fq "if(commentHelp)commentHelp.textContent='Один download/support комментарий в discussion thread.'" public/admin/publishing-analytics.js
           grep -Fq '.statistics-release-table' public/admin/publishing-analytics.css
           grep -Fq '/api/admin/membership-access' public/admin/publishing-analytics.js
           grep -Fq "querySelectorAll('i[data-lucide]')" public/ui-icons.js
