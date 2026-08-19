@@ -1,5 +1,5 @@
+import { composeChannelPublication } from './publication-comment-gate.js';
 import { requireAdminSession, type WebAuthEnv } from './web-auth.js';
-import { composeManagedPublication, type PublicationOpsEnv } from './publication-ops.js';
 
 type D1Row = Record<string, unknown>;
 interface D1PreparedStatementLike {
@@ -49,12 +49,12 @@ export async function handlePublicationOpsPreflight(request: Request, env: Publi
   const total = imageSize + fileSizes.reduce((sum, value) => sum + Math.max(0, value), 0);
   const [publishChannel, discussionChat] = await Promise.all([setting(env, 'publish_channel_id'), setting(env, 'discussion_chat_id')]);
   const filesWithinLimit = fileSizes.every((size) => size >= 0 && size <= MAX_FILE_BYTES);
-  const managed = composeManagedPublication(
-    { id: 999999999, body_html: text, add_footer: flag(body.add_footer) },
-    fileSizes.length,
+  const channelText = composeChannelPublication(
+    { body_html: text, add_footer: flag(body.add_footer) },
     env.BOT_USERNAME || 'domnekromanta_bot',
   );
-  const captionOk = !imageSize || managed.length <= 1024;
+  const captionOk = !imageSize || channelText.length <= 1024;
+  const discussionReady = fileSizes.length === 0 || Boolean(discussionChat);
   const checks = [
     { id: 'title', label: 'Название', status: title ? 'ok' : 'error', message: title ? `${title.length} / ${MAX_TITLE}` : 'Заполните название.' },
     { id: 'body', label: 'Текст', status: text ? 'ok' : 'error', message: text ? `${text.length} / ${MAX_BODY}` : 'Добавьте текст.' },
@@ -63,10 +63,16 @@ export async function handlePublicationOpsPreflight(request: Request, env: Publi
     { id: 'file_size', label: 'Файл ≤ 45 МБ', status: filesWithinLimit ? 'ok' : 'error', message: filesWithinLimit ? 'Размер отдельных файлов допустим для Telegram Bot API.' : 'Есть файл больше 45 МБ.' },
     { id: 'image_size', label: 'Картинка ≤ 8 МБ', status: imageSize <= MAX_IMAGE_BYTES ? 'ok' : 'error', message: imageSize <= MAX_IMAGE_BYTES ? 'Размер изображения допустим.' : 'Изображение больше 8 МБ.' },
     { id: 'total_size', label: 'Общий размер', status: total <= MAX_TOTAL_BYTES ? 'ok' : 'error', message: `${Math.round(total / 1024 / 1024 * 10) / 10} / 80 МБ` },
-    { id: 'caption', label: 'Telegram caption', status: captionOk ? 'ok' : 'error', message: captionOk ? `${managed.length} / ${imageSize ? 1024 : 4096} с авто-блоком скачивания/поддержки.` : `${managed.length} / 1024 — сократите текст для поста с изображением.` },
+    { id: 'caption', label: 'Пост в канале', status: captionOk ? 'ok' : 'error', message: captionOk ? `${channelText.length} / ${imageSize ? 1024 : 4096}; download/support CTA в канальный пост не добавляются.` : `${channelText.length} / 1024 — сократите текст для поста с изображением.` },
     { id: 'channel', label: 'Канал', status: publishChannel ? 'ok' : 'error', message: publishChannel ? 'Канал настроен.' : 'Укажите канал в настройках.' },
-    { id: 'download_delivery', label: 'Скачивание', status: fileSizes.length ? 'ok' : 'ok', message: fileSizes.length ? 'Файлы будут выдаваться читателю в личке бота; в канал попадёт кнопка «Скачать».' : 'В релизе нет файлов.' },
-    { id: 'discussion', label: 'Комментарии', status: discussionChat ? 'ok' : 'warning', message: discussionChat ? 'Discussion group настроена: бот продублирует download CTA в комментариях.' : 'Discussion group не обязательна для выдачи через бота; CTA останется под постом в канале.' },
+    { id: 'download_delivery', label: 'Скачивание', status: 'ok', message: fileSizes.length ? 'Файлы выдаются только в личке бота после нажатия CTA в комментариях.' : 'В релизе нет файлов.' },
+    { id: 'discussion', label: 'Комментарии', status: discussionReady ? 'ok' : 'error', message: fileSizes.length ? (discussionChat ? 'Discussion group настроена: Telegram automatic forward получит один download/support gate.' : 'Для релиза с файлами обязательно настройте связанную discussion group.') : (discussionChat ? 'Discussion group настроена.' : 'Для публикации без файлов discussion group не обязательна.') },
   ];
-  return json({ ready: !checks.some((check) => check.status === 'error'), checks, deliveryMode: fileSizes.length ? 'bot_private' : 'none', supportUrlConfigured: true });
+  return json({
+    ready: !checks.some((check) => check.status === 'error'),
+    checks,
+    deliveryMode: fileSizes.length ? 'discussion_gate_bot_private' : 'none',
+    channelInlineKeyboard: false,
+    supportUrlConfigured: true,
+  });
 }
