@@ -17,6 +17,7 @@
     "src/reader-runtime.ts",
     "src/publication-ops.ts",
     "src/publication-ops-preflight.ts",
-    "src/channel-membership-access.ts"
+    "src/channel-membership-access.ts",
+    "src/admin-user-workspace.ts"
   ]
 }
