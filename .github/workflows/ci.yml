@@ -49,7 +49,8 @@ jobs:
           grep -Fq 'publication_reader_events' migrations/0006_publication_delivery_analytics.sql
           grep -Fq 'channel_access_state' migrations/0007_channel_membership_access.sql
           grep -Fq 'getChatMember' src/channel-membership-access.ts
-          grep -Fq 'left_after_download_48h' src/channel-membership-access.ts
+          grep -Fq 'left_within_7d_of_download' src/channel-membership-access.ts
+          grep -Fq 'ENFORCEMENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000' src/channel-membership-access.ts
           grep -Fq "allowed_updates: ['message', 'callback_query', 'chat_member']" scripts/configure-bot.mjs
           grep -Fq '/api/admin/membership-access' public/admin/publishing-analytics.js
           grep -Fq "querySelectorAll('i[data-lucide]')" public/ui-icons.js
