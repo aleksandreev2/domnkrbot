@@ -1,11 +1,11 @@
-# Telegram bot token from @BotFather
+# Telegram bot token from @BotFather. Keep it secret.
 TELEGRAM_BOT_TOKEN=
 
 # Generate a random webhook secret, e.g. openssl rand -hex 32
 TELEGRAM_WEBHOOK_SECRET=
 
-# Comma-separated Telegram numeric IDs allowed to use the Mini App admin queue
+# Comma-separated Telegram numeric IDs allowed to use /admin/.
 ADMIN_TELEGRAM_IDS=
 
-# Deployed Worker origin, used only by npm run configure-bot
+# Deployed Worker/site origin, used by npm run configure-bot.
 WEBHOOK_URL=https://domnkrbot.<your-workers-subdomain>.workers.dev
