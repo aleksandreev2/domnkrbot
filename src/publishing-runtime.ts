@@ -6,7 +6,7 @@ interface D1PreparedStatementLike {
   bind(...values: unknown[]): D1PreparedStatementLike;
   first<T = D1Row>(): Promise<T | null>;
   all<T = D1Row>(): Promise<D1AllResult<T>>;
-  run(): Promise<{ meta?: { changes?: number; last_row_id?: number } }>;
+  run(): Promise<any>;
 }
 interface D1DatabaseLike { prepare(query: string): D1PreparedStatementLike }
 interface R2ObjectLike {
@@ -73,7 +73,7 @@ type DraftPayload = {
 };
 
 const MAX_TITLE = 180;
-const MAX_BODY = 900;
+const MAX_BODY = 700;
 const MAX_FILES = 8;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 45 * 1024 * 1024;
@@ -334,7 +334,7 @@ async function createPublication(request: Request, env: PublishingEnv, adminId: 
     INSERT INTO publications (internal_title,body_html,add_footer,add_bot_comment,created_by,created_at,updated_at)
     VALUES (?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
   `).bind(title, body, flag(form.get('add_footer')), flag(form.get('add_bot_comment')), String(adminId)).run();
-  const id = Number(insert.meta?.last_row_id || 0);
+  const id = Number(insert?.meta?.last_row_id || 0);
   if (!id) return json({ error: 'Не удалось создать публикацию.' }, 500);
 
   const createdKeys: string[] = [];
@@ -348,6 +348,7 @@ async function createPublication(request: Request, env: PublishingEnv, adminId: 
     }
     for (let index = 0; index < files.length; index += 1) {
       const file = files[index];
+      if (!file) continue;
       const key = `publications/${id}/files/${crypto.randomUUID()}-${safeName(file.name)}`;
       await env.FILES!.put(key, file.stream(), { httpMetadata: { contentType: file.type || 'application/octet-stream' } });
       createdKeys.push(key);
@@ -497,7 +498,7 @@ export async function handlePublishingApi(request: Request, env: PublishingEnv):
       INSERT INTO publication_templates (name,internal_title,body_html,add_footer,add_bot_comment,created_by,created_at,updated_at)
       VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     `).bind(name, title, text, flag(body.add_footer), flag(body.add_bot_comment), String(admin.id)).run();
-    return json({ ok: true, id: Number(insert.meta?.last_row_id || 0) }, 201);
+    return json({ ok: true, id: Number(insert?.meta?.last_row_id || 0) }, 201);
   }
   const templateDelete = /^\/api\/admin\/publishing-center\/templates\/(\d+)$/.exec(url.pathname);
   if (request.method === 'DELETE' && templateDelete) {
@@ -511,14 +512,21 @@ export async function handlePublishingApi(request: Request, env: PublishingEnv):
     const fileSizes = Array.isArray(body.file_sizes) ? body.file_sizes.map(Number).filter(Number.isFinite) : [];
     const imageSize = Math.max(0, Number(body.image_size || 0));
     const total = imageSize + fileSizes.reduce((sum, value) => sum + Math.max(0, value), 0);
+    const [publishChannel, discussionChat] = await Promise.all([
+      setting(env, 'publish_channel_id'),
+      setting(env, 'discussion_chat_id'),
+    ]);
+    const filesWithinLimit = fileSizes.every((size) => size >= 0 && size <= MAX_FILE_BYTES);
     const checks = [
       { id: 'title', label: 'Название', status: title ? 'ok' : 'error', message: title ? `${title.length} / ${MAX_TITLE}` : 'Заполните название.' },
       { id: 'body', label: 'Текст', status: text ? 'ok' : 'error', message: text ? `${text.length} / ${MAX_BODY}` : 'Добавьте текст.' },
       { id: 'storage', label: 'Файлы', status: (fileSizes.length || imageSize) && !env.FILES ? 'error' : 'ok', message: env.FILES ? 'R2 FILES подключён.' : 'R2 FILES пока не подключён.' },
       { id: 'file_count', label: 'Вложения', status: fileSizes.length <= MAX_FILES ? 'ok' : 'error', message: `${fileSizes.length} / ${MAX_FILES}` },
+      { id: 'file_size', label: 'Файл ≤ 45 МБ', status: filesWithinLimit ? 'ok' : 'error', message: filesWithinLimit ? 'Размер отдельных файлов допустим.' : 'Есть файл больше 45 МБ.' },
+      { id: 'image_size', label: 'Картинка ≤ 8 МБ', status: imageSize <= MAX_IMAGE_BYTES ? 'ok' : 'error', message: imageSize <= MAX_IMAGE_BYTES ? 'Размер изображения допустим.' : 'Изображение больше 8 МБ.' },
       { id: 'total_size', label: 'Размер', status: total <= MAX_TOTAL_BYTES ? 'ok' : 'error', message: `${Math.round(total / 1024 / 1024 * 10) / 10} / 80 МБ` },
-      { id: 'channel', label: 'Канал', status: await setting(env, 'publish_channel_id') ? 'ok' : 'error', message: await setting(env, 'publish_channel_id') ? 'Настроен.' : 'Укажите канал в настройках.' },
-      { id: 'discussion', label: 'Комментарии', status: fileSizes.length && !(await setting(env, 'discussion_chat_id')) ? 'error' : 'ok', message: fileSizes.length ? 'Нужна discussion group для файлов.' : 'Файлов нет.' },
+      { id: 'channel', label: 'Канал', status: publishChannel ? 'ok' : 'error', message: publishChannel ? 'Настроен.' : 'Укажите канал в настройках.' },
+      { id: 'discussion', label: 'Комментарии', status: fileSizes.length && !discussionChat ? 'error' : 'ok', message: fileSizes.length ? (discussionChat ? 'Discussion group настроена.' : 'Нужна discussion group для файлов.') : 'Файлов нет.' },
     ];
     return json({ ready: !checks.some((check) => check.status === 'error'), checks });
   }
