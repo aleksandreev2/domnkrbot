@@ -14,8 +14,19 @@ jobs:
         with:
           node-version: 22
       - run: npm install --no-audit --no-fund
-      - run: npm run typecheck
-      - run: npm test
+      - name: Apply D1 migrations locally
+        run: npm run db:local
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Check website JavaScript syntax
+        run: |
+          node --check public/site.js
+          node --check public/admin/admin.js
+          node --check scripts/configure-bot.mjs
+      - name: Tests
+        run: npm test
+      - name: Wrangler dry run
+        run: npx wrangler deploy --dry-run
 
   production-smoke:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
