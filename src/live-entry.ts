@@ -20,7 +20,7 @@ import { handleReaderApi } from './reader-runtime.js';
 import { ensureReaderProposalSchema } from './reader-proposal-schema.js';
 import { handleTitleProposalAdminApi, type TitleProposalAdminEnv } from './title-proposal-admin.js';
 import { handleTitleProposalPolicy } from './title-proposal-policy.js';
-import { requireAdminSession } from './web-auth.js';
+import { getSessionUser, isSameOriginMutation, requireAdminSession } from './web-auth.js';
 
 interface AssetFetcher { fetch(request: Request): Promise<Response> }
 interface R2ObjectLike {
@@ -101,6 +101,11 @@ async function handleManualRanobeSync(request: Request, env: Env): Promise<Respo
   }
 }
 
+async function ensureNewSchema(env: Env): Promise<void> {
+  await ensureRanobeLibSchema(env);
+  await ensureReaderProposalSchema(env);
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response> {
     const url = new URL(request.url);
@@ -128,18 +133,23 @@ export default {
 
     kickPublishingDefaults(env, ctx);
 
-    const usesReaderProposalSchema = url.pathname.startsWith('/api/proposal-raw/')
-      || url.pathname === '/api/proposal-raw/init'
-      || url.pathname === '/api/title-proposals'
-      || url.pathname === '/api/admin/proposal-raw'
+    const readerPath = url.pathname === '/api/catalog' || url.pathname === '/api/title' || url.pathname === '/api/reader/chapter';
+    const rawUserPath = url.pathname === '/api/proposal-raw/init'
+      || url.pathname.startsWith('/api/proposal-raw/')
+      || url.pathname === '/api/title-proposals';
+    const rawAdminPath = url.pathname === '/api/admin/proposal-raw'
       || url.pathname.startsWith('/api/admin/proposal-raw/')
-      || url.pathname === '/api/admin/title-proposal-details'
-      || url.pathname === '/api/catalog'
-      || url.pathname === '/api/title'
-      || url.pathname === '/api/reader/chapter';
-    if (usesReaderProposalSchema) {
-      await ensureRanobeLibSchema(env);
-      await ensureReaderProposalSchema(env);
+      || url.pathname === '/api/admin/title-proposal-details';
+
+    if (readerPath) {
+      await ensureNewSchema(env);
+    } else if (rawUserPath) {
+      const session = await getSessionUser(request, env);
+      if (session && isSameOriginMutation(request)) await ensureNewSchema(env);
+    } else if (rawAdminPath) {
+      const admin = await requireAdminSession(request, env);
+      if (admin instanceof Response) return admin;
+      await ensureNewSchema(env);
     }
 
     const proposalRawResponse = await handleProposalRawApi(request, env as ProposalRawEnv);
@@ -148,7 +158,7 @@ export default {
     const titleProposalAdminResponse = await handleTitleProposalAdminApi(request, env as TitleProposalAdminEnv);
     if (titleProposalAdminResponse) return titleProposalAdminResponse;
 
-    if (url.pathname === '/api/catalog' || url.pathname === '/api/title' || url.pathname === '/api/reader/chapter') {
+    if (readerPath) {
       const readerResponse = await handleReaderApi(request, env);
       if (readerResponse) return readerResponse;
     }
