@@ -8,7 +8,7 @@ import {
 } from './ranobelib-runtime.js';
 import { handlePublicationArchiveGuard } from './publication-archive-guard.js';
 import { handlePublicationLifecycleApi } from './publication-lifecycle.js';
-import { handlePublishingSettingsGuard } from './publishing-settings-guard.js';
+import { handlePublishingDefaultBootstrap, handlePublishingSettingsGuard } from './publishing-settings-guard.js';
 import { requireAdminSession } from './web-auth.js';
 
 interface AssetFetcher { fetch(request: Request): Promise<Response> }
@@ -26,6 +26,7 @@ interface Env {
   TELEGRAM_WEBHOOK_SECRET?: string;
   ADMIN_TELEGRAM_IDS?: string;
   BOT_USERNAME?: string;
+  PUBLISH_CHANNEL_ID?: string;
   WEBHOOK_URL?: string;
   RANOBELIB_TEAM_REF?: string;
   RANOBELIB_SYNC_BATCH_SIZE?: string;
@@ -72,6 +73,9 @@ export default {
 
     const publishingSettingsResponse = await handlePublishingSettingsGuard(request, env);
     if (publishingSettingsResponse) return publishingSettingsResponse;
+
+    const publishingBootstrapResponse = await handlePublishingDefaultBootstrap(request, env);
+    if (publishingBootstrapResponse) return publishingBootstrapResponse;
 
     const publicationArchiveResponse = await handlePublicationArchiveGuard(request, env);
     if (publicationArchiveResponse) return publicationArchiveResponse;
