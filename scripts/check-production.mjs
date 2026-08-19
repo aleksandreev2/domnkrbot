@@ -1,5 +1,5 @@
 const origin = (process.env.PRODUCTION_URL || 'https://domnkrbot.sashahumortele2.workers.dev').replace(/\/+$/, '');
-const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260820-publishing-loop1';
+const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260820-release-drilldown1';
 const attempts = Number(process.env.ATTEMPTS || 6);
 const delayMs = Number(process.env.DELAY_MS || 10000);
 
@@ -41,6 +41,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const membershipAuth = await fetchText('/api/admin/membership-access');
     const usersAuth = await fetchText('/api/admin/users');
     const analyticsAuth = await fetchText('/api/admin/publishing-analytics');
+    const releaseAnalyticsAuth = await fetchText('/api/admin/publishing-analytics/release?publication_id=1');
     const logo = await fetchAsset('/brand/team-logo.webp');
     const icons = await fetchText('/ui-icons.js?v=20260820-icons3');
     const lucide = await fetchText('/vendor/lucide.min.js?v=1.27.0');
@@ -49,6 +50,9 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const adminRaw = await fetchText('/admin/proposal-raw.js?v=20260819-raw1');
     const adminStats = await fetchText('/admin/publishing-analytics.js?v=20260820-ops4');
     const adminStatsCss = await fetchText('/admin/publishing-analytics.css?v=20260819-ops3');
+    const thankStats = await fetchText('/admin/thank-gate-analytics.js?v=20260820-thank1');
+    const releaseDetail = await fetchText('/admin/release-analytics-detail.js?v=20260820-release1');
+    const releaseDetailCss = await fetchText('/admin/release-analytics-detail.css?v=20260820-release1');
     const adminCockpit = await fetchText('/admin/admin-cockpit.js?v=20260819-cockpit1');
     const adminCockpitCss = await fetchText('/admin/admin-cockpit.css?v=20260819-cockpit1');
     const publishEditor = await fetchText('/admin/publish-editor.js?v=20260819-publish1');
@@ -61,9 +65,11 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       reader: reader.response.status, readerJs: readerJs.response.status,
       rawUnauthed: rawAuth.response.status, membershipUnauthed: membershipAuth.response.status,
       usersUnauthed: usersAuth.response.status, analyticsUnauthed: analyticsAuth.response.status,
+      releaseAnalyticsUnauthed: releaseAnalyticsAuth.response.status,
       logo: logo.response.status, logoBytes: logo.bytes,
       icons: icons.response.status, lucide: lucide.response.status, admin: admin.response.status,
       adminRaw: adminRaw.response.status, adminStats: adminStats.response.status, adminStatsCss: adminStatsCss.response.status,
+      thankStats: thankStats.response.status, releaseDetail: releaseDetail.response.status, releaseDetailCss: releaseDetailCss.response.status,
       adminCockpit: adminCockpit.response.status, adminCockpitCss: adminCockpitCss.response.status,
       publishEditor: publishEditor.response.status,
       health: health.response.status,
@@ -86,7 +92,8 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && titleJs.response.ok && titleJs.text.includes('/api/title?ref=') && titleJs.text.includes('readerAvailable')
       && reader.response.ok && reader.text.includes('id="readerSettings"')
       && readerJs.response.ok && readerJs.text.includes('/api/reader/chapter?ref=') && readerJs.text.includes('Текст этой главы ещё не импортирован')
-      && rawAuth.response.status === 401 && membershipAuth.response.status === 401 && usersAuth.response.status === 401 && analyticsAuth.response.status === 401
+      && rawAuth.response.status === 401 && membershipAuth.response.status === 401 && usersAuth.response.status === 401
+      && analyticsAuth.response.status === 401 && releaseAnalyticsAuth.response.status === 401
       && logo.response.ok && logo.bytes > 1000
       && icons.response.ok && icons.text.includes("querySelectorAll('i[data-lucide]')")
       && icons.text.includes("nameAttr:'data-domnkr-lucide'") && icons.text.includes("removeAttribute('data-domnkr-lucide')")
@@ -95,6 +102,9 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && admin.response.ok && admin.text.includes('ADMIN CONSOLE') && admin.text.includes('/ui-icons.js?v=20260820-icons3')
       && admin.text.includes('/admin/publishing-analytics.js?v=20260820-ops4')
       && admin.text.includes('/admin/publishing-analytics.css?v=20260819-ops3')
+      && admin.text.includes('/admin/thank-gate-analytics.js?v=20260820-thank1')
+      && admin.text.includes('/admin/release-analytics-detail.js?v=20260820-release1')
+      && admin.text.includes('/admin/release-analytics-detail.css?v=20260820-release1')
       && admin.text.includes('/admin/admin-cockpit.js?v=20260819-cockpit1')
       && admin.text.includes('/admin/admin-cockpit.css?v=20260819-cockpit1')
       && admin.text.includes('/admin/publish-editor.js?v=20260819-publish1')
@@ -108,6 +118,11 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && !adminStats.text.includes("if(commentHelp)commentHelp.textContent='Один download/support комментарий в discussion thread.'")
       && adminStatsCss.response.ok && adminStatsCss.text.includes('.statistics-release-table')
       && adminStatsCss.text.includes('.delivery-flow-comment')
+      && thankStats.response.ok && thankStats.text.includes('Нажали «Спасибо» в комментарии')
+      && thankStats.text.includes('duplicateThanks.hidden=true')
+      && releaseDetail.response.ok && releaseDetail.text.includes('/api/admin/publishing-analytics/release?publication_id=')
+      && releaseDetail.text.includes('data-release-user')
+      && releaseDetailCss.response.ok && releaseDetailCss.text.includes('.release-reader-layout')
       && adminCockpit.response.ok && adminCockpit.text.includes('/api/admin/users')
       && adminCockpit.text.includes('/api/admin/activity') && adminCockpit.text.includes('Пользователи')
       && adminCockpitCss.response.ok && adminCockpitCss.text.includes('.cockpit-users-layout')
@@ -120,7 +135,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: Publishing observer loop fix, bounded homepage/icon runtimes and existing production services are ready (${marker})`);
+      console.log(`PASS: release drill-down, thank-first delivery and existing production services are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -130,6 +145,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: Publishing observer hotfix assets are stale or existing production services regressed.');
+console.error('FAIL: release drill-down or thank-first delivery assets are stale, or existing production services regressed.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);

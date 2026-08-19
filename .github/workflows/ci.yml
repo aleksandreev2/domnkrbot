@@ -32,6 +32,8 @@ jobs:
           node --check public/admin/publishing-diagnostics.js
           node --check public/admin/proposal-raw.js
           node --check public/admin/publishing-analytics.js
+          node --check public/admin/thank-gate-analytics.js
+          node --check public/admin/release-analytics-detail.js
           node --check public/admin/admin-cockpit.js
           node --check public/admin/publish-editor.js
           node --check scripts/configure-bot.mjs
@@ -50,6 +52,9 @@ jobs:
           grep -Fq '/ui-icons.js?v=20260820-icons3' public/admin/index.html
           grep -Fq 'publishing-analytics.js?v=20260820-ops4' public/admin/index.html
           grep -Fq 'publishing-analytics.css?v=20260819-ops3' public/admin/index.html
+          grep -Fq 'thank-gate-analytics.js?v=20260820-thank1' public/admin/index.html
+          grep -Fq 'release-analytics-detail.js?v=20260820-release1' public/admin/index.html
+          grep -Fq 'release-analytics-detail.css?v=20260820-release1' public/admin/index.html
           grep -Fq 'admin-cockpit.js?v=20260819-cockpit1' public/admin/index.html
           grep -Fq 'admin-cockpit.css?v=20260819-cockpit1' public/admin/index.html
           grep -Fq 'publish-editor.js?v=20260819-publish1' public/admin/index.html
@@ -80,6 +85,8 @@ jobs:
           grep -Fq "allowed_updates: ['message', 'callback_query', 'chat_member']" scripts/configure-bot.mjs
           grep -Fq '"main": "src/live-entry-v2.ts"' wrangler.jsonc
           grep -Fq 'handlePublicationCommentGateWebhook' src/live-entry-v2.ts
+          grep -Fq 'handlePublicationReaderDeliveryWebhook' src/live-entry-v2.ts
+          grep -Fq 'handlePublicationReleaseAnalytics' src/live-entry-v2.ts
           grep -Fq 'handlePublishingAnalyticsV2' src/live-entry-v2.ts
           grep -Fq 'gate-download:' src/publication-comment-gate.ts
           grep -Fq 'Пост опубликован без inline-кнопок' src/publication-comment-gate.ts
@@ -95,6 +102,16 @@ jobs:
           ! grep -Fq "if(commentHelp)commentHelp.textContent='Один download/support комментарий в discussion thread.'" public/admin/publishing-analytics.js
           grep -Fq '.statistics-release-table' public/admin/publishing-analytics.css
           grep -Fq '/api/admin/membership-access' public/admin/publishing-analytics.js
+          grep -Fq 'Нажали «Спасибо» в комментарии' public/admin/thank-gate-analytics.js
+          grep -Fq 'duplicateThanks.hidden=true' public/admin/thank-gate-analytics.js
+          grep -Fq '/api/admin/publishing-analytics/release?publication_id=' public/admin/release-analytics-detail.js
+          grep -Fq 'data-release-user' public/admin/release-analytics-detail.js
+          grep -Fq '/api/admin/publishing-analytics/release' src/publication-release-analytics.ts
+          grep -Fq 'gate-thanks:' src/publication-reader-delivery.ts
+          grep -Fq 'thank_you_required' src/publication-reader-delivery.ts
+          grep -Fq 'delivery_started' src/publication-reader-delivery.ts
+          grep -Fq 'telegram_file_id' src/publication-reader-delivery.ts
+          grep -Fq 'env.DB.batch' src/publication-reader-delivery.ts
           grep -Fq "querySelectorAll('i[data-lucide]')" public/ui-icons.js
           grep -Fq "nameAttr:'data-domnkr-lucide'" public/ui-icons.js
           grep -Fq "removeAttribute('data-domnkr-lucide')" public/ui-icons.js
