@@ -113,7 +113,7 @@ test('thanked subscriber receives cached Telegram file and optimized delivery ev
     assert.ok(methods.includes('sendDocument'));
     const documentCall=calls.find((call)=>call.url.endsWith('/sendDocument'));assert.match(String(documentCall.options.body),/telegram-cached-file/);
     assert.ok(db.operations.some((row)=>row.values.includes('delivery_started')));
-    assert.ok(db.batchCalls.some((batch)=>batch.some((row)=>row.values.includes('delivery_success'))));
+    assert.ok(db.batchCalls.some((batch)=>batch.some((row)=>row.query.includes('delivery_success'))));
     assert.ok(db.batchCalls.some((batch)=>batch.some((row)=>row.query.includes("SET status='delivered'"))));
   });
 });
