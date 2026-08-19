@@ -2,7 +2,7 @@
   const state={session:null,route:'overview',publishingTab:'create',dashboard:null,publishing:null,center:null,files:null,saveTimer:0,preflightTimer:0};
   const $=(selector,root=document)=>root.querySelector(selector);
   const $$=(selector,root=document)=>Array.from(root.querySelectorAll(selector));
-  const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[char]));
   const builtins=[
     {name:'Релиз новых глав',internal_title:'',body_html:'Новые главы уже доступны.\n\nПриятного чтения!',add_footer:1,add_bot_comment:1},
     {name:'Новый тайтл',internal_title:'',body_html:'Новый перевод появился в «Доме Некроманта».\n\nПервые главы уже доступны.',add_footer:1,add_bot_comment:1},
@@ -97,7 +97,7 @@
   }
 
   function renderCreateEditor(){
-    const draft=state.center?.draft||{};const storage=Boolean(state.center?.storageReady);const templates=[...builtins.map((item,index)=>({...item,key:`builtin:${index}`})),...(state.center?.templates||[]).map((item)=>({...item,key:`custom:${item.id}`}))];
+    const draft=state.center?.draft||{};const storage=Boolean(state.center?.storageReady);const bodyLimit=Number(state.center?.limits?.body||700);const templates=[...builtins.map((item,index)=>({...item,key:`builtin:${index}`})),...(state.center?.templates||[]).map((item)=>({...item,key:`custom:${item.id}`}))];
     const host=$('#publishingBody');host.innerHTML=`
       ${storage?'':'<div class="notice">R2 binding <b>FILES</b> пока не подключён: текстовые черновики работают, загрузка картинок и файлов будет заблокирована backend-ом.</div>'}
       <div class="publisher-layout">
@@ -105,7 +105,7 @@
           <div class="admin-panel-head"><div><h2>Новая публикация</h2><p>Редактор, вложения и preflight как в Dollar TL.</p></div></div>
           <div class="template-row"><select id="pubTemplate"><option value="">Шаблон…</option>${templates.map((item)=>`<option value="${esc(item.key)}">${item.key.startsWith('builtin:')?'★':'✦'} ${esc(item.name)}</option>`).join('')}</select><button id="applyTemplate" class="mini-button" type="button">Применить</button><button id="saveTemplate" class="mini-button" type="button">Сохранить шаблон</button></div>
           <label class="admin-field"><span>Название для админки</span><input id="pubTitle" maxlength="180" value="${esc(draft.internal_title||'')}" placeholder="Релиз: название тайтла"></label>
-          <label class="admin-field"><span>Текст публикации</span><textarea id="pubBody" rows="8" maxlength="900" placeholder="Основной текст поста">${esc(draft.body_html||'')}</textarea></label>
+          <label class="admin-field"><span>Текст публикации</span><textarea id="pubBody" rows="8" maxlength="${bodyLimit}" placeholder="Основной текст поста">${esc(draft.body_html||'')}</textarea></label>
           <div class="publisher-upload-grid">
             <label class="publisher-drop"><strong>Изображение</strong><span>JPEG / PNG / WebP / AVIF · до 8 МБ</span><input id="pubImage" type="file" accept="image/jpeg,image/png,image/webp,image/avif" ${storage?'':'disabled'}></label>
             <label class="publisher-drop"><strong>Файлы</strong><span>до 8 файлов · до 45 МБ каждый</span><input id="pubFiles" type="file" multiple ${storage?'':'disabled'}></label>
