@@ -33,11 +33,10 @@ type AccessRow = {
   blacklisted_at: string | null;
   blacklist_reason: string | null;
 };
-type MonitoredRow = AccessRow & { last_download_at: string | null };
+type MonitoredRow = AccessRow;
 
 const REQUIRED_UPDATES = ['message', 'callback_query', 'chat_member'] as const;
-const ENFORCEMENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-const BLACKLIST_REASON = 'left_within_7d_of_download';
+const BLACKLIST_REASON = 'left_channel';
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 let schemaPromise: Promise<void> | null = null;
 
@@ -69,12 +68,8 @@ function isMember(member: ChatMember): boolean {
   if (member.status === 'creator' || member.status === 'administrator' || member.status === 'member') return true;
   return member.status === 'restricted' && member.is_member === true;
 }
-function isInsideEnforcementWindow(value: string | null): boolean {
-  if (!value) return false;
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return false;
-  const age = Date.now() - timestamp;
-  return age >= 0 && age <= ENFORCEMENT_WINDOW_MS;
+function storedStatusWasMember(status: string | null | undefined): boolean {
+  return status === 'creator' || status === 'administrator' || status === 'member' || status === 'restricted';
 }
 async function telegramCall<T>(env: ChannelMembershipEnv, method: string, payload: Record<string, unknown>): Promise<T> {
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
@@ -113,15 +108,6 @@ async function accessRow(env: ChannelMembershipEnv, userId: number | string): Pr
   await ensureChannelMembershipSchema(env);
   return env.DB.prepare(`SELECT user_telegram_id,last_status,last_checked_at,left_at,rejoined_at,blacklisted_at,blacklist_reason
     FROM channel_access_state WHERE user_telegram_id=?`).bind(String(userId)).first<AccessRow>();
-}
-async function lastSuccessfulDownloadAt(env: ChannelMembershipEnv, userId: number | string): Promise<string | null> {
-  try {
-    const row = await env.DB.prepare(`SELECT MAX(last_delivered_at) last_download_at FROM publication_deliveries
-      WHERE user_telegram_id=? AND last_delivered_at IS NOT NULL`).bind(String(userId)).first<{ last_download_at: string | null }>();
-    return row?.last_download_at || null;
-  } catch {
-    return null;
-  }
 }
 async function rememberStatus(env: ChannelMembershipEnv, userId: number | string, status: string, options: { left?: boolean; rejoined?: boolean } = {}): Promise<void> {
   const now = new Date().toISOString();
@@ -164,7 +150,7 @@ async function sendSubscriptionRequired(env: ChannelMembershipEnv, userId: numbe
 async function sendBlacklisted(env: ChannelMembershipEnv, userId: number): Promise<void> {
   await telegramCall(env, 'sendMessage', {
     chat_id: userId,
-    text: 'Доступ к скачиваниям ограничен. После получения файлов нужно оставаться подписанным на канал минимум 7 дней. Если это ошибка, свяжитесь с администрацией «Дома Некроманта».',
+    text: 'Доступ к скачиваниям ограничен: после зафиксированной подписки вы вышли из канала «Дом Некроманта». Повторная подписка не снимает ограничение автоматически. Если это ошибка, свяжитесь с администрацией.',
   }).catch(() => undefined);
 }
 
@@ -185,8 +171,7 @@ export async function checkDownloadMembership(env: ChannelMembershipEnv, user: T
       await rememberStatus(env, user.id, member.status, { rejoined: Boolean(existing?.left_at) });
       return true;
     }
-    const lastDownload = await lastSuccessfulDownloadAt(env, user.id);
-    if (isInsideEnforcementWindow(lastDownload)) {
+    if (storedStatusWasMember(existing?.last_status)) {
       await blacklist(env, user.id, member.status);
       await sendBlacklisted(env, user.id);
       return false;
@@ -216,6 +201,7 @@ async function handleChatMemberUpdate(env: ChannelMembershipEnv, update: ChatMem
   if (!(await targetMatchesUpdate(env, update.chat))) return;
   const userId = update.new_chat_member.user?.id || update.old_chat_member.user?.id;
   if (!userId) return;
+  const memberBefore = isMember(update.old_chat_member);
   const memberNow = isMember(update.new_chat_member);
   const existing = await accessRow(env, userId);
   if (existing?.blacklisted_at) {
@@ -226,8 +212,7 @@ async function handleChatMemberUpdate(env: ChannelMembershipEnv, update: ChatMem
     await rememberStatus(env, userId, update.new_chat_member.status, { rejoined: Boolean(existing?.left_at) });
     return;
   }
-  const lastDownload = await lastSuccessfulDownloadAt(env, userId);
-  if (isInsideEnforcementWindow(lastDownload)) {
+  if (memberBefore) {
     await blacklist(env, userId, update.new_chat_member.status);
     return;
   }
@@ -259,13 +244,10 @@ export async function handleChannelMembershipWebhook(request: Request, env: Chan
 
 export async function runChannelMembershipMaintenance(env: ChannelMembershipEnv, limit = 40): Promise<{ checked: number; blacklisted: number; members: number }> {
   await ensureChannelMembershipSchema(env);
-  const cutoff = new Date(Date.now() - ENFORCEMENT_WINDOW_MS).toISOString();
-  const monitored = await env.DB.prepare(`SELECT d.user_telegram_id,MAX(d.last_delivered_at) last_download_at,
-      COALESCE(a.last_status,'unknown') last_status,a.last_checked_at,a.left_at,a.rejoined_at,a.blacklisted_at,a.blacklist_reason
-    FROM publication_deliveries d LEFT JOIN channel_access_state a ON a.user_telegram_id=d.user_telegram_id
-    WHERE d.last_delivered_at IS NOT NULL AND d.last_delivered_at>=? AND a.blacklisted_at IS NULL
-    GROUP BY d.user_telegram_id
-    ORDER BY COALESCE(a.last_checked_at,'') ASC LIMIT ?`).bind(cutoff, limit).all<MonitoredRow>();
+  const monitored = await env.DB.prepare(`SELECT user_telegram_id,last_status,last_checked_at,left_at,rejoined_at,blacklisted_at,blacklist_reason
+    FROM channel_access_state
+    WHERE blacklisted_at IS NULL AND last_status IN ('creator','administrator','member','restricted')
+    ORDER BY COALESCE(last_checked_at,'') ASC LIMIT ?`).bind(limit).all<MonitoredRow>();
   const target = await targetChat(env);
   if (!target) return { checked: 0, blacklisted: 0, members: 0 };
   let checked = 0, blacklisted = 0, members = 0;
@@ -311,7 +293,6 @@ export async function handleChannelMembershipAdmin(request: Request, env: Channe
   if (admin instanceof Response) return admin;
   await ensureChannelMembershipSchema(env);
   if (request.method === 'GET' && url.pathname === '/api/admin/membership-access') {
-    const cutoff = new Date(Date.now() - ENFORCEMENT_WINDOW_MS).toISOString();
     const rows = await env.DB.prepare(`SELECT a.user_telegram_id,a.last_status,a.last_checked_at,a.left_at,a.rejoined_at,a.blacklisted_at,a.blacklist_reason,
       u.username,u.first_name,u.last_name,
       (SELECT COUNT(*) FROM publication_deliveries d WHERE d.user_telegram_id=a.user_telegram_id AND d.first_delivered_at IS NOT NULL) delivered_assets,
@@ -320,10 +301,9 @@ export async function handleChannelMembershipAdmin(request: Request, env: Channe
       WHERE a.blacklisted_at IS NOT NULL ORDER BY a.blacklisted_at DESC LIMIT 200`).all<Record<string, unknown>>();
     const summary = await env.DB.prepare(`SELECT
       (SELECT COUNT(*) FROM channel_access_state WHERE blacklisted_at IS NOT NULL) blacklisted,
-      (SELECT COUNT(DISTINCT d.user_telegram_id) FROM publication_deliveries d
-        LEFT JOIN channel_access_state a ON a.user_telegram_id=d.user_telegram_id
-        WHERE d.last_delivered_at>=? AND (a.blacklisted_at IS NULL OR a.blacklisted_at='')) monitored`).bind(cutoff).first<Record<string, number | string | null>>();
-    return json({ summary: { blacklisted: Number(summary?.blacklisted || 0), monitored: Number(summary?.monitored || 0), enforcement_days: 7 }, users: rows.results });
+      (SELECT COUNT(*) FROM channel_access_state
+        WHERE blacklisted_at IS NULL AND last_status IN ('creator','administrator','member','restricted')) monitored`).first<Record<string, number | string | null>>();
+    return json({ summary: { blacklisted: Number(summary?.blacklisted || 0), monitored: Number(summary?.monitored || 0), policy: 'blacklist_on_leave' }, users: rows.results });
   }
   const match = /^\/api\/admin\/membership-access\/(\d+)\/unblock$/.exec(url.pathname);
   if (request.method === 'POST' && match) {
