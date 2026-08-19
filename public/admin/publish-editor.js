@@ -50,7 +50,7 @@
     return data;
   }
 
-  async function freshPreflight(){
+  async function freshPreflight(updateDraftButton=true){
     const selected=editorFiles();
     const result=await api('/api/admin/publishing-center/preflight',{
       method:'POST',
@@ -66,7 +66,7 @@
       list.innerHTML=(result.checks||[]).map((check)=>`<span class="preflight-check ${esc(check.status)}"><b>${esc(check.label)}</b> · ${esc(check.message)}</span>`).join('');
     }
     const draftButton=$('#createPublication');
-    if(draftButton)draftButton.disabled=!result.ready;
+    if(updateDraftButton&&draftButton)draftButton.disabled=!result.ready;
     return result;
   }
 
@@ -86,11 +86,11 @@
     refreshIcons();
     let publicationId=0;
     try{
-      const preflight=await freshPreflight();
+      const preflight=await freshPreflight(false);
       if(!preflight.ready)throw new Error(preflightError(preflight));
       if(!confirm('Опубликовать сейчас в настроенный Telegram-канал?'))return;
 
-      button.innerHTML='<i data-lucide="upload-cloud" aria-hidden="true"></i> Загружаем…';
+      button.innerHTML='<i data-lucide="arrow-up" aria-hidden="true"></i> Загружаем…';
       refreshIcons();
       const created=await api('/api/admin/publications',{method:'POST',headers:{},body:publicationFormData()});
       publicationId=Number(created?.publication?.id||0);
