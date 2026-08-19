@@ -8,6 +8,7 @@
   "include": [
     "src/web-auth.ts",
     "src/publication-lifecycle.ts",
-    "src/publication-archive-guard.ts"
+    "src/publication-archive-guard.ts",
+    "src/publishing-runtime.ts"
   ]
 }
