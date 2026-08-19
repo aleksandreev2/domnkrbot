@@ -11,7 +11,9 @@ class MockStatement{
     this.db.reads.push({query:this.query,values:[...this.values]});
     if(this.query.includes('FROM channel_access_state WHERE user_telegram_id=?'))return null;
     if(this.query==='SELECT telegram_file_id FROM publication_assets WHERE id=? LIMIT 1'){
-      return{telegram_file_id:this.db.waitedFileId??this.db.asset.telegram_file_id};
+      this.db.cacheReads+=1;
+      const warmed=this.db.waitedFileId&&this.db.cacheReads>1?this.db.waitedFileId:null;
+      return{telegram_file_id:warmed??this.db.asset.telegram_file_id};
     }
     if(this.query.includes('SELECT p.status,g.status AS gate_status'))return{status:'published',gate_status:'sent',gate_message_id:77};
     return null;
@@ -30,7 +32,7 @@ class MockStatement{
 
 class MockDB{
   constructor({thanked=true,cached='telegram-cached-file',waitedFileId=null,leaseAvailable=true,returning=true}={}){
-    this.thanked=thanked;this.waitedFileId=waitedFileId;this.leaseAvailable=leaseAvailable;this.returning=returning;
+    this.thanked=thanked;this.waitedFileId=waitedFileId;this.leaseAvailable=leaseAvailable;this.returning=returning;this.cacheReads=0;
     this.publication={id:7,status:'published',internal_title:'Глава 10',gate_status:'sent',gate_message_id:77};
     this.asset={id:11,publication_id:7,file_name:'chapter.epub',mime_type:'application/epub+zip',r2_key:'publications/7/files/chapter.epub',size_bytes:1234,telegram_file_id:cached,sort_order:0};
     this.operations=[];this.reads=[];this.batchCalls=[];
@@ -57,11 +59,11 @@ class MockBucket{
 }
 
 function env(db,bucket=new MockBucket()){
-  return{DB:db,FILES:bucket,TELEGRAM_BOT_TOKEN:'123:test',TELEGRAM_WEBHOOK_SECRET:'secret',BOT_USERNAME:'domnekromanta_bot',PUBLISH_CHANNEL_ID:'@domnekromanta',ADMIN_TELEGRAM_IDS:'4242'};
+  return{DB:db,FILES:bucket,TELEGRAM_BOT_TOKEN:'unit-test-token',TELEGRAM_WEBHOOK_SECRET:'unit-test-secret',BOT_USERNAME:'domnekromanta_bot',PUBLISH_CHANNEL_ID:'@domnekromanta',ADMIN_TELEGRAM_IDS:'4242'};
 }
 function ctx(){return{promises:[],waitUntil(promise){this.promises.push(promise);}};}
 async function flush(execution){for(let i=0;i<8;i+=1){const pending=execution.promises.splice(0);if(!pending.length)return;await Promise.all(pending);}}
-function webhook(update,secret='secret'){return new Request(`${ORIGIN}/telegram/webhook`,{method:'POST',headers:{'content-type':'application/json','x-telegram-bot-api-secret-token':secret},body:JSON.stringify(update)});}
+function webhook(update,secret='unit-test-secret'){return new Request(`${ORIGIN}/telegram/webhook`,{method:'POST',headers:{'content-type':'application/json','x-telegram-bot-api-secret-token':secret},body:JSON.stringify(update)});}
 
 async function withTelegramMock(fn,{staleFileId=null}={}){
   const original=globalThis.fetch;const calls=[];let messageId=100;
@@ -112,6 +114,7 @@ test('cold-cache loser waits for the global asset cache and reuses the winning f
     const response=await handlePublicationReaderDeliveryCacheWebhook(webhook({message:{message_id:1,chat:{id:4242,type:'private'},from:{id:4242,first_name:'Reader'},text:'/start dl_7'}}),env(db,bucket),execution);
     assert.ok(response);await flush(execution);
     assert.equal(bucket.gets.length,0);
+    assert.ok(db.operations.some((row)=>row.query.startsWith('INSERT INTO publication_asset_cache_locks')));
     const documentCall=calls.find((call)=>call.url.endsWith('/sendDocument'));assert.ok(documentCall);
     assert.equal(JSON.parse(String(documentCall.options.body)).document,'telegram-warmed-elsewhere');
     assert.ok(db.batchCalls.some((batch)=>batch.some((row)=>row.query.includes('delivery_success')&&row.values.some((value)=>String(value).includes('"cache":"waited"')))));
