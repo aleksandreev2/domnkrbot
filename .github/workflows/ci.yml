@@ -39,6 +39,7 @@ jobs:
           node --check scripts/configure-bot.mjs
           node --check scripts/check-production.mjs
           test -s public/brand/team-logo.webp
+          grep -Fq 'domnkr-build-20260820-membership1' public/build.txt
           grep -Fq 'id="rawDrop"' public/propose/index.html
           grep -Fq '/api/proposal-raw/init' public/propose.js
           grep -Fq '/api/title-proposals' public/propose.js
@@ -138,4 +139,4 @@ jobs:
         with:
           node-version: 22
       - name: Verify workers.dev serves current build
-        run: node scripts/check-production.mjs
+        run: EXPECTED_MARKER=domnkr-build-20260820-membership1 node scripts/check-production.mjs
