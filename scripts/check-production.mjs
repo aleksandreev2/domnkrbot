@@ -1,5 +1,5 @@
 const origin = (process.env.PRODUCTION_URL || 'https://domnkrbot.sashahumortele2.workers.dev').replace(/\/+$/, '');
-const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260819-publish-editor1';
+const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260819-comment-gate-analytics1';
 const attempts = Number(process.env.ATTEMPTS || 6);
 const delayMs = Number(process.env.DELAY_MS || 10000);
 
@@ -40,14 +40,15 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const rawAuth = await fetchUnauthedRawInit();
     const membershipAuth = await fetchText('/api/admin/membership-access');
     const usersAuth = await fetchText('/api/admin/users');
+    const analyticsAuth = await fetchText('/api/admin/publishing-analytics');
     const logo = await fetchAsset('/brand/team-logo.webp');
     const icons = await fetchText('/ui-icons.js?v=20260819-icons2');
     const lucide = await fetchText('/vendor/lucide.min.js?v=1.27.0');
     const admin = await fetchText('/admin/');
     const adminJs = await fetchText('/admin/admin.js?v=20260819-admin1');
     const adminRaw = await fetchText('/admin/proposal-raw.js?v=20260819-raw1');
-    const adminStats = await fetchText('/admin/publishing-analytics.js?v=20260819-ops2');
-    const adminStatsCss = await fetchText('/admin/publishing-analytics.css?v=20260819-ops2');
+    const adminStats = await fetchText('/admin/publishing-analytics.js?v=20260819-ops3');
+    const adminStatsCss = await fetchText('/admin/publishing-analytics.css?v=20260819-ops3');
     const adminCockpit = await fetchText('/admin/admin-cockpit.js?v=20260819-cockpit1');
     const adminCockpitCss = await fetchText('/admin/admin-cockpit.css?v=20260819-cockpit1');
     const publishEditor = await fetchText('/admin/publish-editor.js?v=20260819-publish1');
@@ -59,7 +60,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       title: title.response.status, titleJs: titleJs.response.status,
       reader: reader.response.status, readerJs: readerJs.response.status,
       rawUnauthed: rawAuth.response.status, membershipUnauthed: membershipAuth.response.status,
-      usersUnauthed: usersAuth.response.status,
+      usersUnauthed: usersAuth.response.status, analyticsUnauthed: analyticsAuth.response.status,
       logo: logo.response.status, logoBytes: logo.bytes,
       icons: icons.response.status, lucide: lucide.response.status, admin: admin.response.status,
       adminRaw: adminRaw.response.status, adminStats: adminStats.response.status, adminStatsCss: adminStatsCss.response.status,
@@ -82,21 +83,24 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       && titleJs.response.ok && titleJs.text.includes('/api/title?ref=') && titleJs.text.includes('readerAvailable')
       && reader.response.ok && reader.text.includes('id="readerSettings"')
       && readerJs.response.ok && readerJs.text.includes('/api/reader/chapter?ref=') && readerJs.text.includes('Текст этой главы ещё не импортирован')
-      && rawAuth.response.status === 401 && membershipAuth.response.status === 401 && usersAuth.response.status === 401
+      && rawAuth.response.status === 401 && membershipAuth.response.status === 401 && usersAuth.response.status === 401 && analyticsAuth.response.status === 401
       && logo.response.ok && logo.bytes > 1000
       && icons.response.ok && icons.text.includes("querySelectorAll('i[data-lucide]')")
       && icons.text.includes("nameAttr:'data-domnkr-lucide'") && icons.text.includes("removeAttribute('data-domnkr-lucide')")
       && lucide.response.ok && lucide.text.length > 10000
       && admin.response.ok && admin.text.includes('ADMIN CONSOLE')
-      && admin.text.includes('/admin/publishing-analytics.js?v=20260819-ops2')
+      && admin.text.includes('/admin/publishing-analytics.js?v=20260819-ops3')
+      && admin.text.includes('/admin/publishing-analytics.css?v=20260819-ops3')
       && admin.text.includes('/admin/admin-cockpit.js?v=20260819-cockpit1')
       && admin.text.includes('/admin/admin-cockpit.css?v=20260819-cockpit1')
       && admin.text.includes('/admin/publish-editor.js?v=20260819-publish1')
       && adminJs.response.ok && adminJs.text.includes('Publishing Center')
       && adminRaw.response.ok && adminRaw.text.includes('/api/admin/proposal-raw')
       && adminStats.response.ok && adminStats.text.includes('/api/admin/publishing-analytics')
-      && adminStats.text.includes('/api/admin/membership-access') && adminStats.text.includes('Чёрный список')
-      && adminStatsCss.response.ok && adminStatsCss.text.includes('.publishing-access-list')
+      && adminStats.text.includes('echarts@6.1.0') && adminStats.text.includes('Воронка релиза')
+      && adminStats.text.includes('reconcile-gate') && adminStats.text.includes('Выдача через комментарии')
+      && adminStatsCss.response.ok && adminStatsCss.text.includes('.statistics-release-table')
+      && adminStatsCss.text.includes('.delivery-flow-comment')
       && adminCockpit.response.ok && adminCockpit.text.includes('/api/admin/users')
       && adminCockpit.text.includes('/api/admin/activity') && adminCockpit.text.includes('Пользователи')
       && adminCockpitCss.response.ok && adminCockpitCss.text.includes('.cockpit-users-layout')
@@ -109,7 +113,7 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: direct publish editor, admin cockpit and existing production services are ready (${marker})`);
+      console.log(`PASS: comment-only download gate, publishing analytics v2, direct editor and existing production services are ready (${marker})`);
       process.exit(0);
     }
   } catch (error) {
@@ -119,6 +123,6 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: publish editor/admin assets are stale or existing production services regressed.');
+console.error('FAIL: comment-gate/analytics assets are stale or existing production services regressed.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
