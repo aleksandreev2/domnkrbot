@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, createHash } from 'node:crypto';
-import { handleWebAuth } from '../src/web-auth.ts';
+import { handleWebAuth } from '../dist-runtime/web-auth.js';
 
 const TOKEN = '123456:test-token-for-unit-tests-only';
 const ORIGIN = 'https://domnkr.test';
