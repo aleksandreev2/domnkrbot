@@ -21,6 +21,17 @@
     scheduled=setTimeout(()=>void install(),60);
   }
 
+  function markArchivedRows(items){
+    for(const item of items.filter((entry)=>entry.status==='deleted')){
+      const action=document.querySelector(`[data-pub-action][data-id="${Number(item.id)}"]`);
+      const actions=action?.closest('.publication-actions');
+      const rowNode=action?.closest('.publication-row');
+      if(actions)actions.innerHTML='<span class="publication-archive-note">Архив · запись и файлы сохранены</span>';
+      const badge=rowNode?.querySelector('.admin-badge');
+      if(badge){badge.className='admin-badge rejected';badge.textContent='Удалено из Telegram';}
+    }
+  }
+
   async function install(force=false){
     const host=document.getElementById('publishingBody');
     if(!host||loading)return;
@@ -32,6 +43,7 @@
       const data=await api('/api/admin/publishing');
       if(!document.getElementById('publishingBody'))return;
       const items=(data.publications||[]).filter((item)=>item.status==='published'||item.status==='deleted');
+      markArchivedRows(items);
       const panel=document.createElement('section');
       panel.id='publicationLifecyclePanel';
       panel.className='admin-panel publication-lifecycle-panel';
