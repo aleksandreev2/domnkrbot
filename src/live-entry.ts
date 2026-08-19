@@ -15,15 +15,34 @@ import {
   handlePublishingDefaultBootstrap,
   handlePublishingSettingsGuard,
 } from './publishing-settings-guard.js';
+import { handleProposalRawApi, type ProposalRawEnv } from './proposal-raw-runtime.js';
+import { handleReaderApi } from './reader-runtime.js';
+import { ensureReaderProposalSchema } from './reader-proposal-schema.js';
+import { handleTitleProposalAdminApi, type TitleProposalAdminEnv } from './title-proposal-admin.js';
 import { handleTitleProposalPolicy } from './title-proposal-policy.js';
-import { requireAdminSession } from './web-auth.js';
+import { getSessionUser, isSameOriginMutation, requireAdminSession } from './web-auth.js';
 
 interface AssetFetcher { fetch(request: Request): Promise<Response> }
-interface R2ObjectLike { size?: number; httpMetadata?: { contentType?: string }; arrayBuffer(): Promise<ArrayBuffer> }
+interface R2ObjectLike {
+  size: number;
+  etag?: string;
+  httpMetadata?: { contentType?: string };
+  body?: ReadableStream;
+  arrayBuffer(): Promise<ArrayBuffer>;
+}
+interface R2UploadedPartLike { partNumber: number; etag: string }
+interface R2MultipartUploadLike {
+  uploadPart(partNumber: number, value: ReadableStream | ArrayBuffer | Uint8Array): Promise<R2UploadedPartLike>;
+  complete(parts: R2UploadedPartLike[]): Promise<R2ObjectLike>;
+  abort(): Promise<void>;
+}
 interface R2BucketLike {
   get(key: string): Promise<R2ObjectLike | null>;
+  head(key: string): Promise<R2ObjectLike | null>;
   put(key: string, value: ReadableStream | ArrayBuffer | Uint8Array, options?: { httpMetadata?: { contentType?: string } }): Promise<unknown>;
-  delete(key: string): Promise<unknown>;
+  delete(key: string): Promise<void>;
+  createMultipartUpload(key: string, options?: { httpMetadata?: { contentType?: string } }): Promise<{ uploadId: string }>;
+  resumeMultipartUpload(key: string, uploadId: string): R2MultipartUploadLike;
 }
 interface Env {
   DB: D1DatabaseLike;
@@ -82,6 +101,11 @@ async function handleManualRanobeSync(request: Request, env: Env): Promise<Respo
   }
 }
 
+async function ensureNewSchema(env: Env): Promise<void> {
+  await ensureRanobeLibSchema(env);
+  await ensureReaderProposalSchema(env);
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContextLike): Promise<Response> {
     const url = new URL(request.url);
@@ -108,6 +132,36 @@ export default {
     }
 
     kickPublishingDefaults(env, ctx);
+
+    const readerPath = url.pathname === '/api/catalog' || url.pathname === '/api/title' || url.pathname === '/api/reader/chapter';
+    const rawUserPath = url.pathname === '/api/proposal-raw/init'
+      || url.pathname.startsWith('/api/proposal-raw/')
+      || url.pathname === '/api/title-proposals';
+    const rawAdminPath = url.pathname === '/api/admin/proposal-raw'
+      || url.pathname.startsWith('/api/admin/proposal-raw/')
+      || url.pathname === '/api/admin/title-proposal-details';
+
+    if (readerPath) {
+      await ensureNewSchema(env);
+    } else if (rawUserPath) {
+      const session = await getSessionUser(request, env);
+      if (session && isSameOriginMutation(request)) await ensureNewSchema(env);
+    } else if (rawAdminPath) {
+      const admin = await requireAdminSession(request, env);
+      if (admin instanceof Response) return admin;
+      await ensureNewSchema(env);
+    }
+
+    const proposalRawResponse = await handleProposalRawApi(request, env as ProposalRawEnv);
+    if (proposalRawResponse) return proposalRawResponse;
+
+    const titleProposalAdminResponse = await handleTitleProposalAdminApi(request, env as TitleProposalAdminEnv);
+    if (titleProposalAdminResponse) return titleProposalAdminResponse;
+
+    if (readerPath) {
+      const readerResponse = await handleReaderApi(request, env);
+      if (readerResponse) return readerResponse;
+    }
 
     const titleProposalPolicyResponse = await handleTitleProposalPolicy(request);
     if (titleProposalPolicyResponse) return titleProposalPolicyResponse;
