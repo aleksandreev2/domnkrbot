@@ -77,7 +77,6 @@ type DownloadContext = {
   deliveries: Map<number, DeliveryRow>;
 };
 
-const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 const RESEND_COOLDOWN_MS = 60_000;
 const SENDING_STALE_MS = 2 * 60_000;
 
@@ -230,7 +229,12 @@ async function handleAutomaticForward(env: PublicationReaderDeliveryEnv, message
   return true;
 }
 
-async function handleThankGate(env: PublicationReaderDeliveryEnv, callback: TelegramCallbackQuery): Promise<void> {
+async function handleThankGate(
+  env: PublicationReaderDeliveryEnv,
+  callback: TelegramCallbackQuery,
+  origin: string,
+  ctx: ReaderDeliveryExecutionContext,
+): Promise<void> {
   const match = /^gate-(?:thanks|download):(\d+)$/.exec(callback.data || '');
   if (!match) return;
   const publicationId = Number(match[1]);
@@ -248,8 +252,9 @@ async function handleThankGate(env: PublicationReaderDeliveryEnv, callback: Tele
     return;
   }
 
+  let returningReader = false;
   try {
-    await env.DB.batch([
+    const grantResults = await env.DB.batch([
       env.DB.prepare(`INSERT INTO users (telegram_id,username,first_name,last_name,language_code,updated_at)
         VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)
         ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username,first_name=excluded.first_name,last_name=excluded.last_name,language_code=excluded.language_code,updated_at=CURRENT_TIMESTAMP`)
@@ -264,10 +269,18 @@ async function handleThankGate(env: PublicationReaderDeliveryEnv, callback: Tele
         (publication_id,asset_id,user_telegram_id,event_type,source,success,repeat,details,created_at)
         VALUES (?,NULL,?,'thank_you_click','discussion',1,0,?,CURRENT_TIMESTAMP)`)
         .bind(publicationId, String(callback.from.id), JSON.stringify({ gateMessageId: gate.gate_message_id })),
+      env.DB.prepare(`SELECT 1 AS active FROM publication_reader_events
+        WHERE user_telegram_id=? AND source='bot' AND event_type IN ('download_open','delivery_success') LIMIT 1`)
+        .bind(String(callback.from.id)),
     ]);
+    returningReader = Boolean(grantResults[4]?.results?.length);
   } catch {
     await telegramCall(env, 'answerCallbackQuery', { callback_query_id: callback.id, text: 'Не удалось подготовить выдачу. Попробуйте ещё раз.' }).catch(() => undefined);
     return;
+  }
+
+  if (returningReader) {
+    ctx.waitUntil(deliverDownload(env, publicationId, callback.from, origin, ctx).catch(() => undefined));
   }
 
   await telegramCall(env, 'answerCallbackQuery', {
@@ -434,7 +447,7 @@ export async function handlePublicationReaderDeliveryWebhook(
   if (!update) return null;
 
   if (/^gate-(?:thanks|download):/.test(update.callback_query?.data || '')) {
-    ctx.waitUntil(handleThankGate(env, update.callback_query as TelegramCallbackQuery));
+    ctx.waitUntil(handleThankGate(env, update.callback_query as TelegramCallbackQuery, url.origin, ctx));
     return new Response('ok');
   }
 
