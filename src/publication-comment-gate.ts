@@ -1,5 +1,5 @@
 import { ensurePublicationOpsSchema, BOOSTY_SUPPORT_URL, type PublicationOpsEnv } from './publication-ops.js';
-import { requireAdminSession } from './web-auth.js';
+import { firstAdminId, requireAdminSession } from './web-auth.js';
 
 type D1Row = Record<string, unknown>;
 type D1AllResult<T> = { results: T[] };
@@ -35,7 +35,7 @@ type Publication = {
   channel_message_id: number | null;
   discussion_message_id: number | null;
 };
-type Asset = { id: number };
+type Asset = { id: number; file_name: string };
 type TelegramMessage = {
   message_id: number;
   chat: { id: number | string; type?: string };
@@ -140,7 +140,7 @@ async function publicationByChannelMessage(env: PublicationCommentGateEnv, messa
     .bind(messageId).first<Publication>();
 }
 async function assets(env: PublicationCommentGateEnv, id: number): Promise<Asset[]> {
-  return (await env.DB.prepare('SELECT id FROM publication_assets WHERE publication_id=? ORDER BY sort_order,id').bind(id).all<Asset>()).results;
+  return (await env.DB.prepare('SELECT id,file_name FROM publication_assets WHERE publication_id=? ORDER BY sort_order,id').bind(id).all<Asset>()).results;
 }
 async function gateRow(env: PublicationCommentGateEnv, id: number): Promise<GateRow | null> {
   await ensurePublicationCommentGateSchema(env);
@@ -283,9 +283,10 @@ async function publish(request: Request, env: PublicationCommentGateEnv, id: num
   const channel = await setting(env, 'publish_channel_id');
   if (!channel) return json({ error: 'Канал публикации не настроен.' }, 409);
   const fileCount = (await assets(env, id)).length;
-  const discussion = await linkedDiscussionId(env);
-  if (fileCount > 0 && !discussion) {
-    return json({ error: 'Для релиза с файлами нужна связанная discussion group: download gate публикуется только в комментариях.' }, 409);
+  const needsGate = fileCount > 0 || pub.add_bot_comment === 1;
+  const discussion = needsGate ? await linkedDiscussionId(env) : null;
+  if (needsGate && !discussion) {
+    return json({ error: 'Для download/support gate нужна связанная discussion group: служебные кнопки больше не публикуются в самом канале.' }, 409);
   }
   const text = composeChannelPublication(pub, botName(env));
   if (pub.image_key && text.length > 1024) return json({ error: `Telegram caption занимает ${text.length} / 1024 символов.` }, 400);
@@ -295,7 +296,7 @@ async function publish(request: Request, env: PublicationCommentGateEnv, id: num
     const sent = await sendChannelPost(env, normalizeChatId(channel), pub, text);
     await env.DB.prepare("UPDATE publications SET status='published',channel_message_id=?,published_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP,error_text=NULL WHERE id=?")
       .bind(sent.message_id, id).run();
-    if (fileCount > 0 || pub.add_bot_comment === 1) {
+    if (needsGate) {
       await env.DB.prepare(`INSERT INTO publication_comment_gates(publication_id,status,attempts,created_at,updated_at)
         VALUES (?,'waiting_forward',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
         ON CONFLICT(publication_id) DO UPDATE SET status='waiting_forward',last_error=NULL,updated_at=CURRENT_TIMESTAMP`).bind(id).run();
@@ -303,11 +304,42 @@ async function publish(request: Request, env: PublicationCommentGateEnv, id: num
     await log(env, id, 'success', 'published_waiting_comment_gate', 'Пост опубликован без inline-кнопок; gate появится в комментариях после automatic forward.', {
       adminUserId: admin.id, fileCount, channelMessageId: sent.message_id,
     });
-    return json({ ok: true, publication: await getPublication(env, id), delivery: { mode: fileCount ? 'comment_gate_bot_private' : 'comment_support', waitingForDiscussion: fileCount > 0 || pub.add_bot_comment === 1 } });
+    return json({ ok: true, publication: await getPublication(env, id), delivery: { mode: fileCount ? 'comment_gate_bot_private' : needsGate ? 'comment_support' : 'none', waitingForDiscussion: needsGate } });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await env.DB.prepare("UPDATE publications SET status='failed',error_text=?,updated_at=CURRENT_TIMESTAMP WHERE id=?").bind(message.slice(0, 1000), id).run().catch(() => undefined);
     await log(env, id, 'error', 'publish_failed', 'Telegram не опубликовал чистый канальный пост.', message);
+    return json({ error: message }, 502);
+  }
+}
+
+async function testPublication(request: Request, env: PublicationCommentGateEnv, id: number): Promise<Response> {
+  const admin = await requireAdminSession(request, env);
+  if (admin instanceof Response) return admin;
+  const pub = await getPublication(env, id);
+  if (!pub) return json({ error: 'Публикация не найдена.' }, 404);
+  const target = firstAdminId(env);
+  if (!target) return json({ error: 'ADMIN_TELEGRAM_IDS не настроен.' }, 409);
+  const fileRows = await assets(env, id);
+  const channelText = `🧪 КАНАЛ · без служебных кнопок\n\n${composeChannelPublication(pub, botName(env))}`;
+  try {
+    await sendChannelPost(env, target, pub, channelText);
+    const preview = [
+      '🧪 КОММЕНТАРИЙ БОТА',
+      '',
+      gateMessage(pub, fileRows.length, env).replace(/<\/?b>/g, ''),
+      '',
+      fileRows.length ? `Вложений для приватной выдачи: ${fileRows.length}.` : 'Файлов для приватной выдачи нет.',
+      fileRows.length ? fileRows.map((asset) => `• ${asset.file_name}`).join('\n') : '',
+      '',
+      'В реальной публикации кнопки «Скачать» и «Поддержать переводчика» появятся только в этом комментарии.',
+    ].filter(Boolean).join('\n');
+    await telegramCall(env, 'sendMessage', { chat_id: target, text: preview, link_preview_options: { is_disabled: true } });
+    await log(env, id, 'success', 'comment_gate_test_sent', 'Тест показал отдельно чистый пост канала и будущий gate-комментарий.', { adminUserId: admin.id, fileCount: fileRows.length });
+    return json({ ok: true, channelClean: true, commentGatePreview: true, fileCount: fileRows.length });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await log(env, id, 'error', 'comment_gate_test_failed', 'Тест comment-gate публикации не отправлен.', message);
     return json({ error: message }, 502);
   }
 }
@@ -352,8 +384,15 @@ async function reconcile(request: Request, env: PublicationCommentGateEnv, id: n
     const common = { chat_id: normalizeChatId(channel), message_id: pub.channel_message_id, reply_markup: { inline_keyboard: [] } };
     if (pub.image_key) await telegramCall(env, 'editMessageCaption', { ...common, caption: text });
     else await telegramCall(env, 'editMessageText', { ...common, text, link_preview_options: { is_disabled: true } });
-    await log(env, id, 'success', 'channel_cta_removed', 'Inline-кнопки удалены из канального поста.', { adminUserId: admin.id });
-    return json({ ok: true, cleanedChannelPost: true, discussionMessageId: pub.discussion_message_id, note: pub.discussion_message_id ? 'Существующий discussion thread не дублировался.' : 'Ждём automatic forward для новых публикаций.' });
+    await log(env, id, 'success', 'channel_cta_removed', 'Inline-кнопки и служебный CTA удалены из канального поста.', { adminUserId: admin.id });
+    return json({
+      ok: true,
+      cleanedChannelPost: true,
+      discussionMessageId: pub.discussion_message_id,
+      note: pub.discussion_message_id
+        ? 'Канал очищен. Существующий комментарий не дублировался.'
+        : 'Канал очищен. Для старого поста automatic forward уже нельзя безопасно переотправить без риска дубля.',
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await log(env, id, 'error', 'channel_cta_remove_failed', 'Не удалось удалить inline-кнопки из канального поста.', message);
@@ -361,7 +400,7 @@ async function reconcile(request: Request, env: PublicationCommentGateEnv, id: n
   }
 }
 
-async function handleGateCallback(env: PublicationCommentGateEnv, callback: TelegramCallbackQuery, origin: string): Promise<void> {
+async function handleGateCallback(env: PublicationCommentGateEnv, callback: TelegramCallbackQuery): Promise<void> {
   const match = /^gate-download:(\d+)$/.exec(callback.data || '');
   if (!match) return;
   const id = Number(match[1]);
@@ -408,7 +447,7 @@ export async function handlePublicationCommentGateWebhook(
   const update = await request.clone().json().catch(() => null) as TelegramUpdate | null;
   if (!update) return null;
   if (update.callback_query?.data?.startsWith('gate-download:')) {
-    ctx.waitUntil(handleGateCallback(env, update.callback_query, url.origin));
+    ctx.waitUntil(handleGateCallback(env, update.callback_query));
     return new Response('ok');
   }
   if (update.message && await handleAutomaticForward(env, update.message, url.origin, ctx)) return new Response('ok');
@@ -417,10 +456,11 @@ export async function handlePublicationCommentGateWebhook(
 
 export async function handlePublicationCommentGateRequest(request: Request, env: PublicationCommentGateEnv): Promise<Response | null> {
   const url = new URL(request.url);
-  const match = /^\/api\/admin\/publications\/(\d+)\/(publish|edit|reconcile-gate)$/.exec(url.pathname);
+  const match = /^\/api\/admin\/publications\/(\d+)\/(test|publish|edit|reconcile-gate)$/.exec(url.pathname);
   if (!match || request.method !== 'POST') return null;
   const id = Number(match[1]);
   if (match[2] === 'publish') return publish(request, env, id);
+  if (match[2] === 'test') return testPublication(request, env, id);
   if (match[2] === 'edit') return edit(request, env, id);
   return reconcile(request, env, id);
 }
