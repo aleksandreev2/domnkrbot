@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist-runtime",
+    "rootDir": "src",
+    "noEmit": false
+  },
+  "include": [
+    "src/web-auth.ts",
+    "src/publication-lifecycle.ts",
+    "src/publication-archive-guard.ts"
+  ]
+}

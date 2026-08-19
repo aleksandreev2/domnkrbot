@@ -5,14 +5,14 @@ loadDevVars();
 
 const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
 const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
-const rawWebhookUrl = (process.env.WEBHOOK_URL || process.env.MINI_APP_URL || '').trim();
+const rawWebhookUrl = (process.env.WEBHOOK_URL || '').trim();
 
 if (!token) throw new Error('TELEGRAM_BOT_TOKEN is required in .dev.vars or environment');
 if (!webhookSecret) throw new Error('TELEGRAM_WEBHOOK_SECRET is required in .dev.vars or environment');
 if (!rawWebhookUrl) throw new Error('WEBHOOK_URL is required, for example https://domnkrbot.<account>.workers.dev');
 
-const appUrl = rawWebhookUrl.replace(/\/+$/, '');
-if (!/^https:\/\//i.test(appUrl)) throw new Error('WEBHOOK_URL must use https://');
+const siteUrl = rawWebhookUrl.replace(/\/+$/, '');
+if (!/^https:\/\//i.test(siteUrl)) throw new Error('WEBHOOK_URL must use https://');
 
 const apiBase = `https://api.telegram.org/bot${token}`;
 
@@ -34,7 +34,7 @@ console.log(`Configuring @${me.username} (${me.id})…`);
 
 await call('setMyName', { name: 'Дом Некроманта' });
 await call('setMyDescription', {
-  description: 'Переводы, новые главы и предложения сообщества. Откройте Mini App, чтобы следить за проектами и предложить новый тайтл или главы.',
+  description: 'Переводы, новые главы и предложения сообщества. Каталог и управление доступны на сайте «Дом Некроманта».',
 });
 await call('setMyShortDescription', {
   short_description: 'Переводы и предложения сообщества «Дом Некроманта».',
@@ -43,22 +43,17 @@ await call('setMyShortDescription', {
 await call('setMyCommands', {
   commands: [
     { command: 'start', description: 'Открыть Дом Некроманта' },
-    { command: 'app', description: 'Открыть Mini App' },
+    { command: 'site', description: 'Открыть сайт' },
     { command: 'propose', description: 'Предложить перевод' },
     { command: 'help', description: 'Помощь' },
   ],
 });
 
-await call('setChatMenuButton', {
-  menu_button: {
-    type: 'web_app',
-    text: 'Дом Некроманта',
-    web_app: { url: appUrl },
-  },
-});
+// Remove the old Mini App menu button. The default menu opens the command list.
+await call('setChatMenuButton', { menu_button: { type: 'default' } });
 
 await call('setWebhook', {
-  url: `${appUrl}/telegram/webhook`,
+  url: `${siteUrl}/telegram/webhook`,
   secret_token: webhookSecret,
   allowed_updates: ['message'],
   drop_pending_updates: false,
@@ -66,9 +61,10 @@ await call('setWebhook', {
 
 const webhook = await call('getWebhookInfo');
 console.log(`✓ Bot: @${me.username}`);
-console.log(`✓ Mini App: ${appUrl}`);
+console.log(`✓ Site: ${siteUrl}`);
 console.log(`✓ Webhook: ${webhook.url || '(not set)'}`);
 console.log(`✓ Pending updates: ${webhook.pending_update_count ?? 0}`);
+console.log('! For website login, link this HTTPS domain to the bot in BotFather (/setdomain).');
 
 function loadDevVars() {
   const filePath = path.resolve('.dev.vars');

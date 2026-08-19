@@ -1,170 +1,152 @@
-# Дом Некроманта Bot
+# Дом Некроманта
 
-Telegram Mini App для команды переводов «Дом Некроманта».
+Обычный web-сайт + Telegram-бот + web-админка для команды переводов «Дом Некроманта».
 
-## Что уже есть в MVP
+Telegram Mini App больше не является частью runtime: сайт открывается как обычный HTTPS URL, а Telegram используется для входа, webhook бота и доставки публикаций.
 
-- Cloudflare Worker + D1;
-- Telegram webhook;
-- `/start`, `/app`, `/propose`, `/help`;
-- Telegram Menu Button, открывающий Mini App;
-- главная Mini App в фирменном тёмном стиле;
-- предложение нового тайтла;
-- предложение конкретного диапазона глав;
-- публичная очередь предложений сообщества;
-- личный список заявок пользователя;
-- статусы `Новая → Одобрено → Запланировано → В работе → Готово`;
-- скрытая админ-очередь со сменой статусов;
-- проверка Telegram Mini App `initData` на сервере;
-- существующий read-only RanobeLib sync spike сохранён в `src/integrations/ranobelib` и будет подключён к D1 следующим этапом.
+## Архитектура
 
-## Рекомендуемый production setup: GitHub → Cloudflare Workers Builds
+- Cloudflare Worker — API, Telegram webhook и серверная авторизация;
+- Workers Static Assets — публичный сайт `/` и админка `/admin/`;
+- D1 — пользователи, заявки, RanobeLib snapshot, публикации и metadata файлов;
+- R2 binding `FILES` — изображения и файлы публикаций (опционально до настройки bucket);
+- Telegram Login Widget — вход на обычном сайте;
+- RanobeLib sync — Cron + ручной запуск из админки.
 
-Для production не нужно вручную запускать `wrangler deploy` после каждого изменения. Подключите репозиторий `aleksandreev2/domnkrbot` к Cloudflare Workers Builds, и Cloudflare будет автоматически собирать и деплоить `main` после каждого push/merge.
+## Публичный сайт
 
-### 1. Импортировать GitHub-репозиторий в Cloudflare
+На `/` доступны:
 
-Cloudflare Dashboard → **Workers & Pages → Create application → Import a repository**.
+- свежие релизы RanobeLib;
+- статистика каталога;
+- предложения сообщества;
+- Telegram Login;
+- создание заявки и голосование после входа.
 
-Выберите:
+Сервер создаёт подписанную `HttpOnly; Secure; SameSite=Lax` session cookie после проверки Telegram Login payload. Администратор определяется только сервером по `ADMIN_TELEGRAM_IDS`.
 
-```text
-aleksandreev2/domnkrbot
-```
+## Админка
 
-Production branch:
+`/admin/` использует интерфейс и publishing workflow, адаптированные из `dollartlbot`:
 
-```text
-main
-```
+- обзор и метрики;
+- заявки и смена статусов;
+- Publishing Center;
+- автосохранение рабочего черновика;
+- встроенные и пользовательские шаблоны;
+- preflight перед созданием публикации;
+- изображение + до 8 файлов;
+- тестовая отправка администратору;
+- публикация в Telegram-канал;
+- отправка файлов в linked discussion group после automatic forward поста;
+- список и скачивание сохранённых файлов;
+- настройки канала/discussion group;
+- ручной RanobeLib sync.
 
-Worker name должен быть:
+## Переменные и secrets
 
-```text
-domnkrbot
-```
-
-Он уже совпадает с `name` в `wrangler.jsonc`.
-
-D1 binding `DB` описан без `database_id`, поэтому Wrangler/Cloudflare может автоматически provision'ить `domnkrbot-db`. Ручное копирование UUID базы в GitHub не требуется.
-
-### 2. Настроить Workers Builds
-
-В **Settings → Builds** используйте:
-
-Build command:
-
-```bash
-npm test
-```
-
-Deploy command:
-
-```bash
-npm run deploy
-```
-
-`npm run deploy` сначала делает TypeScript check, затем применяет неприменённые D1 migrations к remote DB и только после этого запускает `wrangler deploy`.
-
-После этого каждый merge в `main` автоматически обновляет production Worker.
-
-### 3. Добавить Cloudflare secrets
-
-В Worker → **Settings → Variables and Secrets** добавьте encrypted secrets:
+Скопируйте `.dev.vars.example` в `.dev.vars` для локальной разработки:
 
 ```text
-TELEGRAM_BOT_TOKEN
-TELEGRAM_WEBHOOK_SECRET
-ADMIN_TELEGRAM_IDS
-```
-
-`TELEGRAM_BOT_TOKEN` — токен `@domnekromanta_bot` из `@BotFather`.
-
-`TELEGRAM_WEBHOOK_SECRET` — длинная случайная строка.
-
-`ADMIN_TELEGRAM_IDS` — numeric Telegram ID одного или нескольких администраторов через запятую.
-
-Секреты не должны храниться в GitHub.
-
-### 4. Первый deploy
-
-После сохранения Git integration и secrets запустите первый build из Cloudflare или сделайте merge/push в `main`.
-
-Cloudflare выдаст адрес вида:
-
-```text
-https://domnkrbot.<account>.workers.dev
-```
-
-### 5. Один раз привязать `@domnekromanta_bot`
-
-Webhook и Menu Button Telegram нужно настроить один раз после появления production URL.
-
-Локально:
-
-```bash
-npm install
-cp .dev.vars.example .dev.vars
-```
-
-На Windows можно просто скопировать `.dev.vars.example` в `.dev.vars`.
-
-Заполните:
-
-```text
-TELEGRAM_BOT_TOKEN=<тот же токен @domnekromanta_bot>
-TELEGRAM_WEBHOOK_SECRET=<тот же webhook secret из Cloudflare>
-ADMIN_TELEGRAM_IDS=<numeric Telegram ID админа>
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_SECRET=
+ADMIN_TELEGRAM_IDS=
 WEBHOOK_URL=https://domnkrbot.<account>.workers.dev
 ```
 
-Затем:
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` и `ADMIN_TELEGRAM_IDS` не коммитить в git.
 
-```bash
-npm run configure-bot
+`BOT_USERNAME` и RanobeLib config находятся в `wrangler.jsonc` как обычные non-secret vars.
+
+## Telegram Login для сайта
+
+После появления production HTTPS domain:
+
+1. в `@BotFather` используйте `/setdomain` и привяжите домен сайта к `@domnekromanta_bot`;
+2. настройте secrets Worker;
+3. выполните `npm run configure-bot` с тем же production `WEBHOOK_URL`.
+
+`configure-bot`:
+
+- настраивает имя/описание и команды `/start`, `/site`, `/propose`, `/help`;
+- сбрасывает старый Web App menu button в обычное меню;
+- устанавливает webhook с `secret_token`.
+
+## R2 для публикаций и файлов
+
+Код файлового workflow уже работает через binding `FILES`, но repository намеренно не содержит выдуманного production bucket name.
+
+Создайте или выберите отдельный R2 bucket для этого проекта, затем добавьте binding в `wrangler.jsonc`:
+
+```jsonc
+"r2_buckets": [
+  {
+    "binding": "FILES",
+    "bucket_name": "<your-domnkrbot-files-bucket>"
+  }
+]
 ```
 
-Скрипт автоматически:
+После изменения bindings выполните актуальную генерацию Wrangler types, если проект начинает использовать generated Env types.
 
-- проверит токен через `getMe`;
-- выставит имя **Дом Некроманта**;
-- выставит описание;
-- добавит команды `/start`, `/app`, `/propose`, `/help`;
-- поставит Web App Menu Button;
-- зарегистрирует webhook `https://.../telegram/webhook`;
-- передаст Telegram webhook secret;
-- выведет итоговый `getWebhookInfo`.
+Пока `FILES` отсутствует:
 
-После этого отправьте боту `/start` — должна появиться кнопка **«☠️ Открыть Дом Некроманта»**.
+- сайт и D1-функции работают;
+- текстовые publication drafts работают;
+- админка показывает storage как not configured;
+- backend отклоняет загрузку бинарных вложений вместо записи их в D1.
 
-## Ручной deploy (только как fallback)
+## D1 migration
 
-Если Git integration временно отключена:
+Новая схема публикаций находится в:
+
+```text
+migrations/0004_web_admin_publishing.sql
+```
+
+Безопасный локальный порядок:
 
 ```bash
 npm install
-npx wrangler login
-npm run deploy
+npm run db:local
+npm run typecheck
+npm test
 ```
 
-## Локальная разработка
+Remote migration не применять до успешных local checks и проверки target environment.
 
-Создайте `.dev.vars` и выполните:
+## Локальный запуск
 
 ```bash
+npm install
 npm run db:local
 npm run dev
 ```
 
-В обычном браузере дизайн Mini App открывается в режиме гостя. Создание заявок доступно только при запуске через Telegram, потому что сервер проверяет подписанный `initData`.
+Публичные данные можно смотреть сразу. Для реального Telegram Login нужен HTTPS domain, привязанный к боту через BotFather.
 
-## RanobeLib spike
+## Production
 
-Существующая интеграция сохранена:
+Перед production rollout:
 
 ```bash
+npm run typecheck
 npm test
-npm run sync:ranobelib:spike -- --team 11969--dom-nekromanta --limit 3
+npx wrangler deploy --dry-run
 ```
 
-Следующий этап — перенести snapshot RanobeLib в D1, показывать реальные новые главы и активные переводы на главной и запускать sync через Cloudflare Cron.
+Затем отдельно проверить pending D1 migrations, применить migration к правильной DB и только потом deploy согласно совместимости текущей schema/code.
+
+После deploy проверить:
+
+- `/api/health`;
+- `/` и `/admin/`;
+- Telegram Login;
+- admin authorization / negative access;
+- `/start` и webhook secret validation;
+- RanobeLib read/sync;
+- publication test/publish;
+- image/file upload/download и discussion delivery, если `FILES` подключён;
+- Worker logs без token/session leakage.
+
+Worker rollback не откатывает D1/R2 data.
