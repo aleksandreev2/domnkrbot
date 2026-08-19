@@ -16,6 +16,7 @@
     "src/proposal-raw-runtime.ts",
     "src/reader-runtime.ts",
     "src/publication-ops.ts",
-    "src/publication-ops-preflight.ts"
+    "src/publication-ops-preflight.ts",
+    "src/channel-membership-access.ts"
   ]
 }
