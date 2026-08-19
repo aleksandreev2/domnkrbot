@@ -16,6 +16,7 @@
     try{
       const [bootstrap,ranobelib]=await Promise.all([api('/api/bootstrap'),api('/api/ranobelib')]);
       state.bootstrap=bootstrap;state.ranobelib=ranobelib;
+      if(restorePostLoginRoute())return;
       renderSession();renderRanobelib();renderProposals(bootstrap.proposals||[]);
     }catch(error){
       $('#releaseList').innerHTML=emptyState('triangle-alert','Не удалось загрузить релизы',error.message);
@@ -26,6 +27,18 @@
 
   function bind(){
     $('#logoutButton')?.addEventListener('click',async()=>{await api('/auth/logout',{method:'POST'});location.reload();});
+  }
+
+  function restorePostLoginRoute(){
+    if(!state.bootstrap?.user||location.pathname!=='/')return false;
+    try{
+      const target=localStorage.getItem('domnkr:return-after-login');
+      if(target==='/propose/'){
+        localStorage.removeItem('domnkr:return-after-login');
+        location.replace(target);return true;
+      }
+    }catch{}
+    return false;
   }
 
   function renderSession(){
