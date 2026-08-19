@@ -5,6 +5,7 @@ type D1Row = Record<string, unknown>;
 interface D1PreparedStatementLike {
   bind(...values: unknown[]): D1PreparedStatementLike;
   first<T = D1Row>(): Promise<T | null>;
+  run(): Promise<unknown>;
 }
 interface D1DatabaseLike { prepare(query: string): D1PreparedStatementLike }
 interface R2ObjectLike {
