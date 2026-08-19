@@ -45,7 +45,8 @@ jobs:
           grep -Fq 'id="titleApp"' public/title/index.html
           grep -Fq 'id="readerSettings"' public/reader/index.html
           grep -Fq 'id="adminLink" class="admin-entry hidden"' public/index.html
-          grep -Fq 'publishing-analytics.js?v=20260819-ops2' public/admin/index.html
+          grep -Fq 'publishing-analytics.js?v=20260819-ops3' public/admin/index.html
+          grep -Fq 'publishing-analytics.css?v=20260819-ops3' public/admin/index.html
           grep -Fq 'admin-cockpit.js?v=20260819-cockpit1' public/admin/index.html
           grep -Fq 'admin-cockpit.css?v=20260819-cockpit1' public/admin/index.html
           grep -Fq 'publish-editor.js?v=20260819-publish1' public/admin/index.html
@@ -62,10 +63,23 @@ jobs:
           grep -Fq 'boosty.to/domnekromanta/single-payment/donation/818248/target?share=target_link' src/publication-ops.ts
           grep -Fq 'publication_reader_events' migrations/0006_publication_delivery_analytics.sql
           grep -Fq 'channel_access_state' migrations/0007_channel_membership_access.sql
+          grep -Fq 'publication_comment_gates' migrations/0009_publication_comment_gate.sql
           grep -Fq 'getChatMember' src/channel-membership-access.ts
           grep -Fq 'left_within_7d_of_download' src/channel-membership-access.ts
           grep -Fq 'ENFORCEMENT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000' src/channel-membership-access.ts
           grep -Fq "allowed_updates: ['message', 'callback_query', 'chat_member']" scripts/configure-bot.mjs
+          grep -Fq '"main": "src/live-entry-v2.ts"' wrangler.jsonc
+          grep -Fq 'handlePublicationCommentGateWebhook' src/live-entry-v2.ts
+          grep -Fq 'handlePublishingAnalyticsV2' src/live-entry-v2.ts
+          grep -Fq 'gate-download:' src/publication-comment-gate.ts
+          grep -Fq 'Пост опубликован без inline-кнопок' src/publication-comment-gate.ts
+          grep -Fq 'reply_markup: { inline_keyboard: [] }' src/publication-comment-gate.ts
+          grep -Fq 'discussion_gate_bot_private' src/publication-ops-preflight.ts
+          grep -Fq 'echarts@6.1.0' public/admin/publishing-analytics.js
+          grep -Fq 'Воронка релиза' public/admin/publishing-analytics.js
+          grep -Fq 'reconcile-gate' public/admin/publishing-analytics.js
+          grep -Fq 'Выдача через комментарии' public/admin/publishing-analytics.js
+          grep -Fq '.statistics-release-table' public/admin/publishing-analytics.css
           grep -Fq '/api/admin/membership-access' public/admin/publishing-analytics.js
           grep -Fq "querySelectorAll('i[data-lucide]')" public/ui-icons.js
           grep -Fq "nameAttr:'data-domnkr-lucide'" public/ui-icons.js
