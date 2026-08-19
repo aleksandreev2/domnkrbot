@@ -86,14 +86,14 @@ jobs:
           grep -Fq "allowed_updates: ['message', 'callback_query', 'chat_member']" scripts/configure-bot.mjs
           grep -Fq '"main": "src/live-entry-v2.ts"' wrangler.jsonc
           grep -Fq 'handlePublicationCommentGateWebhook' src/live-entry-v2.ts
-          grep -Fq 'handlePublicationReaderDeliveryCacheWebhook' src/live-entry-v2.ts
+          grep -Fq 'handlePublicationReaderDeliveryWebhook' src/live-entry-v2.ts
           grep -Fq 'handlePublicationFileCachePrewarm' src/live-entry-v2.ts
           grep -Fq 'handlePublicationReleaseAnalytics' src/live-entry-v2.ts
           grep -Fq 'handlePublishingAnalyticsV2' src/live-entry-v2.ts
           grep -Fq 'acquireTelegramFileCacheLease' src/telegram-file-cache.ts
           grep -Fq 'waitForTelegramFileId' src/telegram-file-cache.ts
-          grep -Fq 'clearTelegramFileId' src/publication-reader-delivery-cache.ts
-          grep -Fq 'isInvalidCachedFileError' src/publication-reader-delivery-cache.ts
+          grep -Fq 'clearTelegramFileId' src/publication-reader-delivery.ts
+          grep -Fq 'isInvalidCachedFileError' src/publication-reader-delivery.ts
           grep -Fq 'deleteMessage' src/publication-file-cache-prewarm.ts
           grep -Fq 'telegram_cache_prewarmed' src/publication-file-cache-prewarm.ts
           grep -Fq 'gate-download:' src/publication-comment-gate.ts
