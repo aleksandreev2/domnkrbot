@@ -19,7 +19,6 @@
     "src/publication-comment-gate.ts",
     "src/publication-reader-delivery.ts",
     "src/telegram-file-cache.ts",
-    "src/publication-reader-delivery-cache.ts",
     "src/publication-file-cache-prewarm.ts",
     "src/publishing-analytics-v2.ts",
     "src/publication-release-analytics.ts",
