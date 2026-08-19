@@ -36,7 +36,7 @@ class MockStatement{
       this.db.publication.discussion_message_id=Number(this.values[0]);
     }
     if(this.query.startsWith('INSERT INTO publication_comment_gates')){
-      this.db.gate={publication_id:this.db.publication.id,discussion_message_id:Number(this.values[0]),gate_message_id:null,status:'pending',attempts:(this.db.gate?.attempts||0)+1,last_error:null};
+      this.db.gate={publication_id:Number(this.values[0]),discussion_message_id:Number(this.values[1]),gate_message_id:null,status:'pending',attempts:(this.db.gate?.attempts||0)+1,last_error:null};
     }
     if(this.query.startsWith('UPDATE publication_comment_gates SET gate_message_id=')){
       this.db.gate={...(this.db.gate||{}),publication_id:this.db.publication.id,gate_message_id:Number(this.values[0]),status:'sent',last_error:null};
