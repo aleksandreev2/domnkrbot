@@ -1,0 +1,50 @@
+name: RanobeLib live smoke
+
+on:
+  pull_request:
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Inspect team catalog pagination and chapter ownership
+        run: |
+          node --input-type=module <<'NODE'
+          const base = 'https://api.cdnlibs.org/api';
+          const headers = {
+            accept: 'application/json',
+            'Site-Id': '3',
+            'Client-Time-Zone': 'UTC',
+            'Content-Type': 'application/json',
+            origin: 'https://ranobelib.me',
+            referer: 'https://ranobelib.me/'
+          };
+
+          for (const page of [1, 2, 3, 4]) {
+            const url = `${base}/manga?target_id=11969&target_model=team&page=${page}`;
+            const response = await fetch(url, { headers });
+            const json = await response.json();
+            console.log('\nPAGE', page, 'STATUS', response.status, 'COUNT', json.data?.length ?? null);
+            console.log('META', JSON.stringify(json.meta ?? null));
+            console.log('LINKS', JSON.stringify(json.links ?? null));
+            console.log('REFS', (json.data ?? []).map((x) => x.slug_url).join('|'));
+          }
+
+          const chaptersUrl = `${base}/manga/62387--pokemon-master-of-tactics/chapters`;
+          const chapters = await (await fetch(chaptersUrl, { headers })).json();
+          const owned = [];
+          for (const item of chapters.data ?? []) {
+            for (const branch of item.branches ?? []) {
+              if ((branch.teams ?? []).some((team) => team.id === 11969)) {
+                owned.push({ branch_id: branch.id, volume: item.volume, number: item.number, created_at: branch.created_at, top_id: item.id });
+              }
+            }
+          }
+          console.log('\nPOKEMON TOTAL ITEMS', chapters.data?.length ?? null, 'DOMNKR BRANCHES', owned.length);
+          console.log('FIRST OWNED', JSON.stringify(owned.slice(0, 5)));
+          console.log('LAST OWNED', JSON.stringify(owned.slice(-10)));
+          NODE
