@@ -1,8 +1,23 @@
+export interface RanobeLibTeam {
+  id: number;
+  slug: string;
+  ref: string;
+  name: string;
+  ranobeTitleCount: number | null;
+  totalTitleCount: number | null;
+  raw: unknown;
+}
+
 export interface RanobeLibTeamBookRef {
   id: number;
   slug: string;
   ref: string;
   url: string;
+}
+
+export interface RanobeLibTeamCatalog {
+  team: RanobeLibTeam;
+  books: RanobeLibTeamBookRef[];
 }
 
 export interface RanobeLibTitle {
@@ -15,10 +30,12 @@ export interface RanobeLibTitle {
 }
 
 export interface RanobeLibChapter {
+  /** RanobeLib branch/chapter publication id for this team's version. */
   id: number;
   volume: string;
   number: string;
   name: string | null;
+  createdAt?: string | null;
 }
 
 export interface RanobeLibReleaseDelta {

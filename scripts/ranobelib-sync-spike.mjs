@@ -13,10 +13,25 @@ if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
 
 const client = new RanobeLibClient();
 const previousState = await readState(statePath, teamRef);
-const discovered = await client.discoverTeamBooks(teamRef);
+const catalog = await client.getTeamCatalog(teamRef);
+const discovered = catalog.books;
 const books = limit ? discovered.slice(0, limit) : discovered;
 
-console.log(`RanobeLib team ${teamRef}: discovered ${discovered.length} book(s); syncing ${books.length}.`);
+console.log(
+  `RanobeLib team ${catalog.team.name} (${catalog.team.ref}): ` +
+    `discovered ${discovered.length} public Ranobe title(s); syncing ${books.length}.`,
+);
+
+if (
+  catalog.team.ranobeTitleCount !== null &&
+  catalog.team.ranobeTitleCount !== discovered.length
+) {
+  console.warn(
+    `RanobeLib reports ${catalog.team.ranobeTitleCount} Ranobe title(s) for the team, ` +
+      `while the unauthenticated public catalog exposes ${discovered.length}. ` +
+      'The sync keeps last-known-good local records and will not delete missing titles automatically.',
+  );
+}
 
 const nextBooks = { ...previousState.books };
 const releases = [];
@@ -26,7 +41,7 @@ for (const book of books) {
   try {
     const [title, chapters] = await Promise.all([
       client.getTitle(book.ref),
-      client.getChapters(book.ref),
+      client.getChapters(book.ref, catalog.team.id),
     ]);
 
     const previous = previousState.books[book.ref];
@@ -48,7 +63,7 @@ for (const book of books) {
       syncedAt: new Date().toISOString(),
     };
 
-    console.log(`✓ ${title.title ?? book.ref}: ${chapters.length} chapter(s)`);
+    console.log(`✓ ${title.title ?? book.ref}: ${chapters.length} Dom Nekromanta chapter(s)`);
   } catch (error) {
     failures.push({ bookRef: book.ref, error: error instanceof Error ? error.message : String(error) });
     console.error(`✗ ${book.ref}:`, error instanceof Error ? error.message : error);
