@@ -38,20 +38,26 @@ class Statement {
   }
   bind(...values) { this.values = values; return this; }
   async first() {
-    if (this.query.includes('SELECT COUNT(*) AS count FROM ranobelib_titles')) return { count: 0 };
+    if (this.query.includes('SELECT COUNT(*) AS count FROM ranobelib_titles')) {
+      return { count: this.db.activeCount, missing_titles: this.db.missingTitles };
+    }
     return null;
   }
   async all() { return { results: [] }; }
   async run() {
     if (this.query.startsWith('INSERT INTO ranobelib_titles')) {
-      this.db.titleInsert = { query: this.query, values: [...this.values] };
+      this.db.titleInserts.push({ query: this.query, values: [...this.values] });
     }
     return { meta: { changes: 1 } };
   }
 }
 
 class DB {
-  constructor() { this.titleInsert = null; }
+  constructor({ activeCount = 0, missingTitles = 0 } = {}) {
+    this.activeCount = activeCount;
+    this.missingTitles = missingTitles;
+    this.titleInserts = [];
+  }
   prepare(query) { return new Statement(this, query); }
   async batch(statements) {
     for (const statement of statements) await statement.run();
@@ -59,23 +65,42 @@ class DB {
   }
 }
 
-test('Telegram catalog bootstrap stores the discovered title before chapter snapshots exist', async () => {
+async function withCatalogFetch(fn) {
   const originalFetch = globalThis.fetch;
-  const db = new DB();
-  globalThis.fetch = async (url) => String(url) === teamCatalogUrl
-    ? catalogResponse()
-    : new Response('not found', { status: 404 });
+  const requests = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    return String(url) === teamCatalogUrl
+      ? catalogResponse()
+      : new Response('not found', { status: 404 });
+  };
+  try { return await fn(requests); } finally { globalThis.fetch = originalFetch; }
+}
 
-  try {
+test('Telegram catalog bootstrap stores the discovered title before chapter snapshots exist', async () => {
+  const db = new DB();
+  await withCatalogFetch(async () => {
     const count = await ensureTelegramSubscriptionCatalog({
       DB: db,
       RANOBELIB_TEAM_REF: '11969--dom-nekromanta',
     });
     assert.equal(count, 1);
-    assert.ok(db.titleInsert);
-    assert.match(db.titleInsert.query, /\btitle\b/);
-    assert.ok(db.titleInsert.values.includes('Покемон: Мастер тактики'));
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+    assert.equal(db.titleInserts.length, 1);
+    assert.match(db.titleInserts[0].query, /\btitle\b/);
+    assert.ok(db.titleInserts[0].values.includes('Покемон: Мастер тактики'));
+  });
+});
+
+test('Telegram catalog refreshes existing active rows when some titles are still missing', async () => {
+  const db = new DB({ activeCount: 35, missingTitles: 12 });
+  await withCatalogFetch(async (requests) => {
+    const count = await ensureTelegramSubscriptionCatalog({
+      DB: db,
+      RANOBELIB_TEAM_REF: '11969--dom-nekromanta',
+    });
+    assert.equal(count, 1);
+    assert.deepEqual(requests, [teamCatalogUrl]);
+    assert.equal(db.titleInserts.length, 1);
+    assert.ok(db.titleInserts[0].values.includes('Покемон: Мастер тактики'));
+  });
 });
