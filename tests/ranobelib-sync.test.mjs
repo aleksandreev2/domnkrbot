@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   RanobeLibClient,
@@ -158,4 +159,9 @@ test('default fetch is invoked as a plain function for Cloudflare Workers compat
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('production sync batch stays within the proven Cloudflare subrequest budget', () => {
+  const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
+  assert.equal(wrangler.vars.RANOBELIB_SYNC_BATCH_SIZE, '4');
 });
