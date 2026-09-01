@@ -20,6 +20,7 @@ import {
 import { handlePublishingAnalyticsV2, type PublishingAnalyticsV2Env } from './publishing-analytics-v2.js';
 import {
   deliverPendingReleaseNotifications,
+  ensureTelegramSubscriptionSchema,
   type TelegramSubscriptionEnv,
 } from './telegram-subscriptions.js';
 
@@ -58,6 +59,8 @@ export default {
   async scheduled(controller: ScheduledControllerLike, env: Env, ctx: CommentGateExecutionContext): Promise<void> {
     let baseError: unknown = null;
     try {
+      // The release fan-out trigger must exist before RanobeLib sync inserts a release.
+      await ensureTelegramSubscriptionSchema(env);
       await baseWorker.scheduled(controller as never, env as never, ctx as never);
     } catch (error) {
       baseError = error;
