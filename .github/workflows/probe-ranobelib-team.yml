@@ -17,24 +17,50 @@ jobs:
           const page = await fetch(teamUrl, { headers: { 'user-agent': 'Mozilla/5.0', accept: 'text/html' } });
           const html = await page.text();
           console.log('TEAM_PAGE_STATUS', page.status, 'BYTES', html.length);
-          const bookMatches = [...html.matchAll(/(?:https:\/\/ranobelib\.me)?\/ru\/book\/(\d+--[A-Za-z0-9._~-]+)/g)].map(m => m[1]);
-          console.log('RAW_BOOK_LINKS', [...new Set(bookMatches)].length, [...new Set(bookMatches)].slice(0, 10));
-          const scriptSrcs = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m => new URL(m[1], teamUrl).href);
-          console.log('SCRIPT_COUNT', scriptSrcs.length);
-          console.log(scriptSrcs.join('\n'));
-          const apiStrings = new Set();
-          for (const src of scriptSrcs) {
+          const scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m => new URL(m[1], teamUrl).href);
+          console.log('ROOT_SCRIPTS', scripts);
+
+          const queue = [...scripts.filter(u => u.includes('ranobelib.me'))];
+          const seen = new Set();
+          const files = new Map();
+          while (queue.length && seen.size < 250) {
+            const url = queue.shift();
+            if (!url || seen.has(url)) continue;
+            seen.add(url);
             try {
-              const r = await fetch(src, { headers: { 'user-agent': 'Mozilla/5.0' } });
+              const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0' } });
+              if (!r.ok) continue;
               const js = await r.text();
-              for (const m of js.matchAll(/.{0,180}(?:api\/teams|\/teams\/|team_id|teamId|titles_count|team.*titles|titles.*team).{0,260}/gi)) {
-                const s = m[0].replace(/\s+/g, ' ');
-                if (s.includes('api') || s.includes('team')) apiStrings.add(s.slice(0, 700));
+              files.set(url, js);
+              const base = new URL(url);
+              for (const m of js.matchAll(/["'`]([^"'`]*(?:assets\/)?[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{5,}\.js)["'`]/g)) {
+                try {
+                  const child = new URL(m[1], base).href;
+                  if (child.includes('ranobelib.me') && !seen.has(child)) queue.push(child);
+                } catch {}
               }
-            } catch (e) {
-              console.log('SCRIPT_ERROR', src, String(e));
+              for (const m of js.matchAll(/import\(\s*["']([^"']+\.js)["']\s*\)/g)) {
+                try {
+                  const child = new URL(m[1], base).href;
+                  if (child.includes('ranobelib.me') && !seen.has(child)) queue.push(child);
+                } catch {}
+              }
+            } catch (e) { console.log('FETCH_ERROR', url, String(e)); }
+          }
+          console.log('FETCHED_JS', files.size);
+          console.log([...files.keys()].join('\n'));
+
+          console.log('=== RELEVANT SNIPPETS ===');
+          const needle = /(?:\/teams?\/|teams?\?|team_id|teamId|team_slug|teamSlug|titlesCount|titles_count|activities|updates|manga\?|manga\/)/gi;
+          let printed = 0;
+          for (const [url, js] of files) {
+            const matches = [...js.matchAll(needle)];
+            if (!matches.length) continue;
+            console.log('FILE', url, 'MATCHES', matches.length);
+            for (const m of matches.slice(0, 40)) {
+              const at = m.index ?? 0;
+              console.log(js.slice(Math.max(0, at - 260), Math.min(js.length, at + 520)).replace(/\s+/g, ' '));
+              if (++printed >= 220) process.exit(0);
             }
           }
-          console.log('=== TEAM/API BUNDLE SNIPPETS ===');
-          for (const s of [...apiStrings].slice(0, 120)) console.log(s);
           NODE
