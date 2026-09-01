@@ -4,10 +4,15 @@ import {
   type TelegramSubscriptionEnv,
   type TelegramSubscriptionUpdate,
 } from './telegram-subscriptions.js';
+import {
+  ensureTelegramSubscriptionCatalog,
+  withTelegramSubscriptionCatalogDb,
+} from './telegram-subscription-catalog.js';
+import type { RanobeLibRuntimeEnv } from './ranobelib-runtime.js';
 
-export interface TelegramSubscriptionWebhookEnv extends TelegramSubscriptionEnv {
+export type TelegramSubscriptionWebhookEnv = TelegramSubscriptionEnv & RanobeLibRuntimeEnv & {
   TELEGRAM_WEBHOOK_SECRET?: string;
-}
+};
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -30,6 +35,14 @@ function isLegacyExplicitCommand(text: string): boolean {
     || command.startsWith('/help');
 }
 
+async function prepareCatalog(env: TelegramSubscriptionWebhookEnv): Promise<void> {
+  try {
+    await ensureTelegramSubscriptionCatalog(env);
+  } catch (error) {
+    console.error('Telegram subscription catalog bootstrap failed', error);
+  }
+}
+
 export async function handleTelegramSubscriptionWebhookRequest(
   request: Request,
   env: TelegramSubscriptionWebhookEnv,
@@ -43,14 +56,17 @@ export async function handleTelegramSubscriptionWebhookRequest(
   const update = await request.clone().json().catch(() => null) as TelegramSubscriptionUpdate | null;
   if (!update) return null;
 
-  if (await handleTelegramSubscriptionUpdate(update, env)) return json({ ok: true });
+  const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
+  if (update.callback_query?.data?.startsWith('subs:')) await prepareCatalog(env);
+  if (await handleTelegramSubscriptionUpdate(update, subscriptionEnv)) return json({ ok: true });
 
   const message = update.message;
   const text = (message?.text ?? '').trim();
   if (!message?.chat?.id || message.chat.type !== 'private') return null;
 
   if (message.from && (isPlainCommand(text, 'start') || isPlainCommand(text, 'subscriptions'))) {
-    await sendTelegramSubscriptionMenu(env, message.from, message.chat.id, 0);
+    await prepareCatalog(env);
+    await sendTelegramSubscriptionMenu(subscriptionEnv, message.from, message.chat.id, 0);
     return json({ ok: true });
   }
 

@@ -9,6 +9,16 @@ test('Telegram entry routes subscription callbacks and commands before the legac
   assert.match(source, /handleTelegramSubscriptionWebhookRequest/);
 });
 
+test('Telegram subscription commands bootstrap the RanobeLib catalog before rendering', async () => {
+  const webhook = await read('src/telegram-subscription-webhook.ts');
+  const catalog = await read('src/telegram-subscription-catalog.ts');
+  assert.match(webhook, /ensureTelegramSubscriptionCatalog/);
+  assert.match(webhook, /withTelegramSubscriptionCatalogDb/);
+  assert.match(catalog, /discoverTeamBooks/);
+  assert.match(catalog, /INSERT INTO ranobelib_titles/);
+  assert.match(catalog, /replace\(\/\\s\+AND snapshot_ready = 1\/g/);
+});
+
 test('scheduled production entry initializes subscription delivery before RanobeLib sync and drains the outbox afterwards', async () => {
   const source = await read('src/live-entry-v2.ts');
   const ensureIndex = source.indexOf('await ensureTelegramSubscriptionDeliverySchema(env)');

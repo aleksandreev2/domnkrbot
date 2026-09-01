@@ -7,11 +7,12 @@ class Statement {
   bind(...values) { this.values = values; return this; }
   async run() { return { meta: { changes: 1 } }; }
   async first() {
+    if (this.query.includes('SELECT COUNT(*) AS count FROM ranobelib_titles WHERE is_active = 1')) return { count: 1 };
     if (this.query.includes('SELECT all_titles FROM telegram_subscription_settings')) return null;
     return null;
   }
   async all() {
-    if (this.query.includes('FROM ranobelib_titles') && this.query.includes('snapshot_ready = 1')) {
+    if (this.query.includes('FROM ranobelib_titles') && this.query.includes('ORDER BY') && !this.query.includes('snapshot_ready')) {
       return { results: [{ ranobelib_id: 1000, book_ref: '1000--one', title: 'Книга 1' }] };
     }
     if (this.query.includes('FROM title_subscriptions s JOIN ranobelib_titles t')) return { results: [] };
@@ -58,7 +59,7 @@ async function withTelegramCalls(fn) {
   try { return await fn(calls); } finally { globalThis.fetch = original; }
 }
 
-test('plain /start opens the Telegram subscription list', async () => {
+test('plain /start opens the Telegram subscription list without requiring chapter snapshot readiness', async () => {
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/start'), env);
     assert.equal(response?.status, 200);
