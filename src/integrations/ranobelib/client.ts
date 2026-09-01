@@ -130,13 +130,14 @@ function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBook
   if (!ref) return null;
   const slug = explicitSlug ?? (ref.includes('--') ? ref.split('--').slice(1).join('--') : null);
   if (!slug) return null;
+  const title = extractTitle(raw);
 
   return {
     id,
     slug,
     ref,
     url: `${siteBaseUrl}/ru/book/${ref}`,
-    title: extractTitle(raw),
+    ...(title ? { title } : {}),
   };
 }
 
