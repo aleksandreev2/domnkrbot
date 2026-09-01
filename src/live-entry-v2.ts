@@ -18,6 +18,10 @@ import {
   type PublicationReleaseAnalyticsEnv,
 } from './publication-release-analytics.js';
 import { handlePublishingAnalyticsV2, type PublishingAnalyticsV2Env } from './publishing-analytics-v2.js';
+import {
+  deliverPendingReleaseNotifications,
+  type TelegramSubscriptionEnv,
+} from './telegram-subscriptions.js';
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
@@ -25,7 +29,8 @@ type Env = PublicationCommentGateEnv
   & PublishingAnalyticsV2Env
   & PublicationReaderDeliveryEnv
   & PublicationFileCachePrewarmEnv
-  & PublicationReleaseAnalyticsEnv;
+  & PublicationReleaseAnalyticsEnv
+  & TelegramSubscriptionEnv;
 
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
@@ -51,6 +56,20 @@ export default {
   },
 
   async scheduled(controller: ScheduledControllerLike, env: Env, ctx: CommentGateExecutionContext): Promise<void> {
-    await baseWorker.scheduled(controller as never, env as never, ctx as never);
+    let baseError: unknown = null;
+    try {
+      await baseWorker.scheduled(controller as never, env as never, ctx as never);
+    } catch (error) {
+      baseError = error;
+    }
+
+    try {
+      const delivery = await deliverPendingReleaseNotifications(env, 40);
+      console.log('RanobeLib Telegram notification delivery complete', delivery);
+    } catch (error) {
+      console.error('RanobeLib Telegram notification delivery failed', error);
+    }
+
+    if (baseError) throw baseError;
   },
 };
