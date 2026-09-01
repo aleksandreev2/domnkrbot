@@ -9,6 +9,10 @@ export interface RanobeLibClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+export interface RanobeLibChapterOptions {
+  teamRef?: string;
+}
+
 export class RanobeLibClient {
   private readonly apiBaseUrl: string;
   private readonly siteBaseUrl: string;
@@ -16,15 +20,26 @@ export class RanobeLibClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: RanobeLibClientOptions = {}) {
-    this.apiBaseUrl = stripTrailingSlash(options.apiBaseUrl ?? 'https://api2.mangalib.me/api');
+    this.apiBaseUrl = stripTrailingSlash(options.apiBaseUrl ?? 'https://api.cdnlibs.org/api');
     this.siteBaseUrl = stripTrailingSlash(options.siteBaseUrl ?? 'https://ranobelib.me');
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
   async discoverTeamBooks(teamRef: string): Promise<RanobeLibTeamBookRef[]> {
-    const html = await this.getText(`${this.siteBaseUrl}/ru/team/${encodeURIComponent(teamRef)}`);
-    return discoverTeamBooksFromHtml(html);
+    const paths = [`/ru/team/${encodeURIComponent(teamRef)}`, `/team/${encodeURIComponent(teamRef)}`];
+    let lastError: unknown = null;
+    for (const path of paths) {
+      try {
+        const html = await this.getText(`${this.siteBaseUrl}${path}`);
+        const books = discoverTeamBooksFromHtml(html);
+        if (books.length > 0) return books;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (lastError) throw lastError;
+    return [];
   }
 
   async getTitle(bookRef: string): Promise<RanobeLibTitle> {
@@ -34,13 +49,15 @@ export class RanobeLibClient {
     return normalizeTitle(response.data ?? {}, bookRef);
   }
 
-  async getChapters(bookRef: string): Promise<RanobeLibChapter[]> {
+  async getChapters(bookRef: string, options: RanobeLibChapterOptions = {}): Promise<RanobeLibChapter[]> {
     const response = await this.getJson<ApiEnvelope<unknown[]>>(
       `${this.apiBaseUrl}/manga/${encodeURIComponent(bookRef)}/chapters`,
     );
 
     const chapters = Array.isArray(response.data)
-      ? response.data.map(normalizeChapter).filter((value): value is RanobeLibChapter => value !== null)
+      ? response.data
+          .map((value) => normalizeChapter(value, options.teamRef))
+          .filter((value): value is RanobeLibChapter => value !== null)
       : [];
 
     return sortChapters(chapters);
@@ -70,6 +87,7 @@ export class RanobeLibClient {
         headers: {
           accept,
           'accept-language': 'ru,en;q=0.7',
+          'Site-Id': '3',
         },
         signal: controller.signal,
       });
@@ -103,8 +121,9 @@ function normalizeTitle(raw: Record<string, unknown>, bookRef: string): RanobeLi
   };
 }
 
-function normalizeChapter(raw: unknown): RanobeLibChapter | null {
+function normalizeChapter(raw: unknown, teamRef?: string): RanobeLibChapter | null {
   if (!isRecord(raw)) return null;
+  if (teamRef && !chapterHasTeam(raw, teamRef)) return null;
   const id = numberOrNull(raw.id);
   const volume = tokenOrNull(raw.volume);
   const number = tokenOrNull(raw.number);
@@ -116,6 +135,26 @@ function normalizeChapter(raw: unknown): RanobeLibChapter | null {
     number,
     name: stringOrNull(raw.name),
   };
+}
+
+function chapterHasTeam(raw: Record<string, unknown>, teamRef: string): boolean {
+  const teamId = teamIdFromRef(teamRef);
+  const branches = Array.isArray(raw.branches) ? raw.branches : [];
+  return branches.some((branch) => {
+    if (!isRecord(branch)) return false;
+    const teams = Array.isArray(branch.teams) ? branch.teams : [];
+    return teams.some((team) => {
+      if (!isRecord(team)) return false;
+      if (teamId !== null && numberOrNull(team.id) === teamId) return true;
+      const refs = [team.slug_url, team.slug, team.ref].map(stringOrNull).filter((value): value is string => Boolean(value));
+      return refs.some((value) => value === teamRef || `${teamId ?? ''}--${value}` === teamRef);
+    });
+  });
+}
+
+function teamIdFromRef(teamRef: string): number | null {
+  const match = /^(\d+)(?:--|$)/.exec(teamRef.trim());
+  return match?.[1] ? Number(match[1]) : null;
 }
 
 function extractTitle(raw: Record<string, unknown>): string | null {
