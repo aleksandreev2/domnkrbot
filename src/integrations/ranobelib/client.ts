@@ -1,4 +1,3 @@
-import { discoverTeamBooksFromHtml } from './team-discovery.js';
 import { sortChapters } from './release-detector.js';
 import type { RanobeLibChapter, RanobeLibTeamBookRef, RanobeLibTitle } from './types.js';
 
@@ -28,20 +27,32 @@ export class RanobeLibClient {
   }
 
   async discoverTeamBooks(teamRef: string): Promise<RanobeLibTeamBookRef[]> {
-    this.discoveredTeamRef = teamRef.trim() || null;
-    const paths = [`/ru/team/${encodeURIComponent(teamRef)}`, `/team/${encodeURIComponent(teamRef)}`];
-    let lastError: unknown = null;
-    for (const path of paths) {
-      try {
-        const html = await this.getText(`${this.siteBaseUrl}${path}`);
-        const books = discoverTeamBooksFromHtml(html);
-        if (books.length > 0) return books;
-      } catch (error) {
-        lastError = error;
+    const normalizedTeamRef = teamRef.trim();
+    this.discoveredTeamRef = normalizedTeamRef || null;
+    const teamId = teamIdFromRef(normalizedTeamRef);
+    if (teamId === null) throw new Error(`Invalid RanobeLib team ref: ${teamRef}`);
+
+    const books: RanobeLibTeamBookRef[] = [];
+    const seen = new Set<string>();
+    let page = 1;
+
+    for (;;) {
+      const response = await this.getJson<ApiEnvelope<unknown[]>>(
+        `${this.apiBaseUrl}/manga?site_id[]=3&target_id=${teamId}&target_model=team&page=${page}`,
+      );
+
+      for (const raw of Array.isArray(response.data) ? response.data : []) {
+        const book = normalizeTeamBook(raw, this.siteBaseUrl);
+        if (!book || seen.has(book.ref)) continue;
+        seen.add(book.ref);
+        books.push(book);
       }
+
+      if (response.meta?.has_next_page !== true) break;
+      page += 1;
     }
-    if (lastError) throw lastError;
-    return [];
+
+    return books;
   }
 
   async getTitle(bookRef: string): Promise<RanobeLibTitle> {
@@ -76,11 +87,6 @@ export class RanobeLibClient {
     return (await response.json()) as T;
   }
 
-  private async getText(url: string): Promise<string> {
-    const response = await this.request(url, 'text/html,application/xhtml+xml');
-    return response.text();
-  }
-
   private async request(url: string, accept: string): Promise<Response> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -108,6 +114,29 @@ export class RanobeLibClient {
 
 interface ApiEnvelope<T> {
   data?: T;
+  meta?: {
+    has_next_page?: boolean;
+  };
+}
+
+function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBookRef | null {
+  if (!isRecord(raw)) return null;
+  const id = numberOrNull(raw.id);
+  const explicitRef = stringOrNull(raw.slug_url);
+  const explicitSlug = stringOrNull(raw.slug);
+  if (id === null) return null;
+
+  const ref = explicitRef ?? (explicitSlug ? `${id}--${explicitSlug}` : null);
+  if (!ref) return null;
+  const slug = explicitSlug ?? (ref.includes('--') ? ref.split('--').slice(1).join('--') : null);
+  if (!slug) return null;
+
+  return {
+    id,
+    slug,
+    ref,
+    url: `${siteBaseUrl}/ru/book/${ref}`,
+  };
 }
 
 function normalizeTitle(raw: Record<string, unknown>, bookRef: string): RanobeLibTitle {
