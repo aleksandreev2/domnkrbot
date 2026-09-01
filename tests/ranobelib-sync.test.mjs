@@ -100,3 +100,26 @@ test('uses current RanobeLib API scope and keeps only Dom Nekromanta chapter bra
   assert.ok(requests.every((request) => new Headers(request.init.headers).get('Site-Id') === '3'));
   assert.ok(requests.every((request) => new Headers(request.init.headers).get('accept') === 'application/json'));
 });
+
+test('chapter sync inherits the team discovered from the RanobeLib team page', async () => {
+  const responses = new Map([
+    [
+      'https://ranobelib.me/ru/team/11969--dom-nekromanta',
+      new Response('<a href="/ru/book/62387--pokemon-master-of-tactics">Pokemon</a>', { headers: { 'content-type': 'text/html' } }),
+    ],
+    [
+      'https://api.cdnlibs.org/api/manga/62387--pokemon-master-of-tactics/chapters',
+      new Response(JSON.stringify({ data: [
+        { id: 1, volume: '1', number: '1', name: 'Our', branches: [{ teams: [{ id: 11969, slug_url: '11969--dom-nekromanta' }] }] },
+        { id: 2, volume: '1', number: '2', name: 'Foreign', branches: [{ teams: [{ id: 999, slug_url: '999--other-team' }] }] },
+      ] }), { headers: { 'content-type': 'application/json' } }),
+    ],
+  ]);
+  const fetchImpl = async (url) => responses.get(String(url))?.clone() ?? new Response('not found', { status: 404 });
+  const client = new RanobeLibClient({ fetchImpl });
+
+  const books = await client.discoverTeamBooks('11969--dom-nekromanta');
+  assert.equal(books.length, 1);
+  const chapters = await client.getChapters(books[0].ref);
+  assert.deepEqual(chapters.map((chapter) => chapter.number), ['1']);
+});
