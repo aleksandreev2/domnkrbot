@@ -145,10 +145,11 @@ test('builds a paginated Telegram title list directly from synchronized RanobeLi
   const titles = Array.from({ length: 10 }, (_, index) => ({ ranobelib_id: 1000 + index, book_ref: `${1000 + index}--book-${index + 1}`, title: `Книга ${index + 1}` }));
   const menu = buildSubscriptionMenu(titles, { page: 0, pageSize: 8, subscribedIds: new Set([1001]), allTitles: false });
   assert.match(menu.text, /Выберите тайтл/);
-  assert.equal(menu.reply_markup.inline_keyboard.length, 11);
+  assert.equal(menu.reply_markup.inline_keyboard.length, 12);
   assert.deepEqual(menu.reply_markup.inline_keyboard[0], [{ text: '📖 Книга 1', callback_data: 'subs:title:1000:0' }]);
   assert.deepEqual(menu.reply_markup.inline_keyboard[1], [{ text: '✅ Книга 2', callback_data: 'subs:title:1001:0' }]);
   assert.deepEqual(menu.reply_markup.inline_keyboard[8], [{ text: '1 / 2', callback_data: 'subs:noop' }, { text: '▶️', callback_data: 'subs:list:1' }]);
+  assert.deepEqual(menu.reply_markup.inline_keyboard[11], [{ text: '⚙️ Настройки уведомлений', callback_data: 'subs:center' }]);
 });
 
 test('parses compact callback data without putting long RanobeLib refs into Telegram callbacks', () => {
