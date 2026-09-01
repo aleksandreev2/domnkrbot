@@ -18,6 +18,7 @@ export class RanobeLibClient {
   private readonly siteBaseUrl: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
+  private discoveredTeamRef: string | null = null;
 
   constructor(options: RanobeLibClientOptions = {}) {
     this.apiBaseUrl = stripTrailingSlash(options.apiBaseUrl ?? 'https://api.cdnlibs.org/api');
@@ -27,6 +28,7 @@ export class RanobeLibClient {
   }
 
   async discoverTeamBooks(teamRef: string): Promise<RanobeLibTeamBookRef[]> {
+    this.discoveredTeamRef = teamRef.trim() || null;
     const paths = [`/ru/team/${encodeURIComponent(teamRef)}`, `/team/${encodeURIComponent(teamRef)}`];
     let lastError: unknown = null;
     for (const path of paths) {
@@ -53,10 +55,11 @@ export class RanobeLibClient {
     const response = await this.getJson<ApiEnvelope<unknown[]>>(
       `${this.apiBaseUrl}/manga/${encodeURIComponent(bookRef)}/chapters`,
     );
+    const teamRef = options.teamRef ?? this.discoveredTeamRef ?? undefined;
 
     const chapters = Array.isArray(response.data)
       ? response.data
-          .map((value) => normalizeChapter(value, options.teamRef))
+          .map((value) => normalizeChapter(value, teamRef))
           .filter((value): value is RanobeLibChapter => value !== null)
       : [];
 
