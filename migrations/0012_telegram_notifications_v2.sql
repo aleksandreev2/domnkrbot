@@ -1,5 +1,9 @@
-ALTER TABLE telegram_subscription_settings
-  ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'instant';
+CREATE TABLE IF NOT EXISTS telegram_notification_preferences (
+  user_telegram_id TEXT PRIMARY KEY,
+  delivery_mode TEXT NOT NULL DEFAULT 'instant',
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_telegram_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+);
 
 CREATE TABLE IF NOT EXISTS title_subscription_exclusions (
   user_telegram_id TEXT NOT NULL,
