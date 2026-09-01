@@ -24,7 +24,7 @@ export class RanobeLibClient {
     this.apiBaseUrl = stripTrailingSlash(options.apiBaseUrl ?? 'https://api.cdnlibs.org/api');
     this.siteBaseUrl = stripTrailingSlash(options.siteBaseUrl ?? 'https://ranobelib.me');
     this.timeoutMs = options.timeoutMs ?? 15_000;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
   }
 
   async discoverTeamBooks(teamRef: string): Promise<RanobeLibTeamBookRef[]> {
