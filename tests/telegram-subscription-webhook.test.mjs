@@ -39,7 +39,7 @@ function telegramRequest(text) {
         message_id: 5,
         chat: { id: 42, type: 'private' },
         from: { id: 42, first_name: 'Reader' },
-        text,
+        ...(text === null ? {} : { text }),
       },
     }),
   });
@@ -84,4 +84,34 @@ test('download deep-link /start dl_* is left for the existing reader-delivery ha
     assert.equal(response, null);
     assert.equal(calls.length, 0);
   });
+});
+
+test('legacy explicit commands are left for the existing bot handler', async () => {
+  for (const command of ['/site', '/help', '/propose']) {
+    await withTelegramCalls(async (calls) => {
+      const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest(command), env);
+      assert.equal(response, null);
+      assert.equal(calls.length, 0);
+    });
+  }
+});
+
+test('ordinary private text is silently consumed instead of triggering the legacy site fallback', async () => {
+  await withTelegramCalls(async (calls) => {
+    const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('привет'), env);
+    assert.equal(response?.status, 200);
+    assert.deepEqual(await response.json(), { ok: true });
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('unknown private commands and non-text private messages are silently consumed', async () => {
+  for (const text of ['/something_unknown', null]) {
+    await withTelegramCalls(async (calls) => {
+      const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest(text), env);
+      assert.equal(response?.status, 200);
+      assert.deepEqual(await response.json(), { ok: true });
+      assert.equal(calls.length, 0);
+    });
+  }
 });
