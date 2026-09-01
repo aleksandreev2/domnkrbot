@@ -123,3 +123,21 @@ test('chapter sync inherits the team discovered from the RanobeLib team page', a
   const chapters = await client.getChapters(books[0].ref);
   assert.deepEqual(chapters.map((chapter) => chapter.number), ['1']);
 });
+
+test('default fetch is invoked as a plain function for Cloudflare Workers compatibility', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async function (url) {
+    assert.equal(this, undefined, 'native fetch must not be called as a RanobeLibClient method');
+    return new Response(JSON.stringify({ data: { id: 62387, rus_name: 'Покемон' } }), {
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    const client = new RanobeLibClient();
+    const title = await client.getTitle('62387--pokemon-master-of-tactics');
+    assert.equal(title.id, 62387);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
