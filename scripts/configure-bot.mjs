@@ -42,7 +42,8 @@ await call('setMyShortDescription', {
 
 await call('setMyCommands', {
   commands: [
-    { command: 'start', description: 'Открыть Дом Некроманта' },
+    { command: 'start', description: 'Уведомления о новых главах' },
+    { command: 'subscriptions', description: 'Управлять подписками' },
     { command: 'site', description: 'Открыть сайт' },
     { command: 'propose', description: 'Предложить перевод' },
     { command: 'help', description: 'Помощь' },
