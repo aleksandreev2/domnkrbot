@@ -9,58 +9,16 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect current team page and frontend bundles
+      - name: Inspect live RanobeLib sync state
         shell: bash
         run: |
           node <<'NODE'
-          const teamUrl = 'https://ranobelib.me/ru/team/11969--dom-nekromanta';
-          const page = await fetch(teamUrl, { headers: { 'user-agent': 'Mozilla/5.0', accept: 'text/html' } });
-          const html = await page.text();
-          console.log('TEAM_PAGE_STATUS', page.status, 'BYTES', html.length);
-          const scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+)["']/gi)].map(m => new URL(m[1], teamUrl).href);
-          console.log('ROOT_SCRIPTS', scripts);
-
-          const queue = [...scripts.filter(u => u.includes('ranobelib.me'))];
-          const seen = new Set();
-          const files = new Map();
-          while (queue.length && seen.size < 250) {
-            const url = queue.shift();
-            if (!url || seen.has(url)) continue;
-            seen.add(url);
-            try {
-              const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0' } });
-              if (!r.ok) continue;
-              const js = await r.text();
-              files.set(url, js);
-              const base = new URL(url);
-              for (const m of js.matchAll(/["'`]([^"'`]*(?:assets\/)?[A-Za-z0-9_.-]+-[A-Za-z0-9_-]{5,}\.js)["'`]/g)) {
-                try {
-                  const child = new URL(m[1], base).href;
-                  if (child.includes('ranobelib.me') && !seen.has(child)) queue.push(child);
-                } catch {}
-              }
-              for (const m of js.matchAll(/import\(\s*["']([^"']+\.js)["']\s*\)/g)) {
-                try {
-                  const child = new URL(m[1], base).href;
-                  if (child.includes('ranobelib.me') && !seen.has(child)) queue.push(child);
-                } catch {}
-              }
-            } catch (e) { console.log('FETCH_ERROR', url, String(e)); }
-          }
-          console.log('FETCHED_JS', files.size);
-          console.log([...files.keys()].join('\n'));
-
-          console.log('=== RELEVANT SNIPPETS ===');
-          const needle = /(?:\/teams?\/|teams?\?|team_id|teamId|team_slug|teamSlug|titlesCount|titles_count|activities|updates|manga\?|manga\/)/gi;
-          let printed = 0;
-          for (const [url, js] of files) {
-            const matches = [...js.matchAll(needle)];
-            if (!matches.length) continue;
-            console.log('FILE', url, 'MATCHES', matches.length);
-            for (const m of matches.slice(0, 40)) {
-              const at = m.index ?? 0;
-              console.log(js.slice(Math.max(0, at - 260), Math.min(js.length, at + 520)).replace(/\s+/g, ' '));
-              if (++printed >= 220) process.exit(0);
-            }
-          }
+          const url = 'https://domnkrbot.sashahumortele2.workers.dev/api/ranobelib?probe=' + Date.now();
+          const response = await fetch(url, { headers: { accept: 'application/json' } });
+          const body = await response.json();
+          console.log('HTTP', response.status);
+          console.log('TITLE_COUNT', Array.isArray(body.titles) ? body.titles.length : null);
+          console.log('STATS', JSON.stringify(body.stats));
+          console.log('SYNC', JSON.stringify(body.sync));
+          console.log('FIRST_TITLES', JSON.stringify((body.titles || []).slice(0, 5).map(t => ({ book_ref: t.book_ref, title: t.title }))));
           NODE
