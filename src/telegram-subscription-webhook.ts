@@ -1,5 +1,6 @@
 import {
   handleTelegramSubscriptionUpdate,
+  sendTelegramNotificationCenter,
   sendTelegramSubscriptionMenu,
   type TelegramSubscriptionEnv,
   type TelegramSubscriptionUpdate,
@@ -63,6 +64,11 @@ export async function handleTelegramSubscriptionWebhookRequest(
   const message = update.message;
   const text = (message?.text ?? '').trim();
   if (!message?.chat?.id || message.chat.type !== 'private') return null;
+
+  if (message.from && isPlainCommand(text, 'notifications')) {
+    await sendTelegramNotificationCenter(subscriptionEnv, message.from, message.chat.id);
+    return json({ ok: true });
+  }
 
   if (message.from && (isPlainCommand(text, 'start') || isPlainCommand(text, 'subscriptions'))) {
     await prepareCatalog(env);
