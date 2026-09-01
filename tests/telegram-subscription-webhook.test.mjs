@@ -7,6 +7,7 @@ class Statement {
   bind(...values) { this.values = values; return this; }
   async run() { return { meta: { changes: 1 } }; }
   async first() {
+    if (this.query.includes('SELECT COUNT(*) AS count FROM ranobelib_titles WHERE is_active = 1')) return { count: 1 };
     if (this.query.includes('SELECT all_titles FROM telegram_subscription_settings')) return null;
     return null;
   }
