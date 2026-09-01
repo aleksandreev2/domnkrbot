@@ -1,9 +1,20 @@
-CREATE TABLE IF NOT EXISTS telegram_notification_preferences (
+DROP TRIGGER IF EXISTS trg_ranobelib_release_notifications;
+
+DROP TABLE IF EXISTS telegram_subscription_settings_v2;
+CREATE TABLE telegram_subscription_settings_v2 (
   user_telegram_id TEXT PRIMARY KEY,
+  all_titles INTEGER NOT NULL DEFAULT 0 CHECK (all_titles IN (0, 1)),
   delivery_mode TEXT NOT NULL DEFAULT 'instant',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_telegram_id) REFERENCES users(telegram_id) ON DELETE CASCADE
 );
+
+INSERT INTO telegram_subscription_settings_v2 (user_telegram_id, all_titles, delivery_mode, updated_at)
+SELECT user_telegram_id, all_titles, 'instant', updated_at
+FROM telegram_subscription_settings;
+
+DROP TABLE telegram_subscription_settings;
+ALTER TABLE telegram_subscription_settings_v2 RENAME TO telegram_subscription_settings;
 
 CREATE TABLE IF NOT EXISTS title_subscription_exclusions (
   user_telegram_id TEXT NOT NULL,
@@ -16,8 +27,6 @@ CREATE TABLE IF NOT EXISTS title_subscription_exclusions (
 
 CREATE INDEX IF NOT EXISTS idx_title_subscription_exclusions_book
   ON title_subscription_exclusions(book_ref, user_telegram_id);
-
-DROP TRIGGER IF EXISTS trg_ranobelib_release_notifications;
 
 CREATE TRIGGER trg_ranobelib_release_notifications
 AFTER INSERT ON ranobelib_releases
