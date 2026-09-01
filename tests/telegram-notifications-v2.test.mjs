@@ -5,12 +5,15 @@ import test from 'node:test';
 const migrationUrl = new URL('../migrations/0012_telegram_notifications_v2.sql', import.meta.url);
 const notifications = await import('../dist-runtime/telegram-subscriptions.js');
 
-test('notifications v2 migration adds preferences, exclusions, and exclusion-aware release trigger without runtime migration conflicts', () => {
+test('notifications v2 migration rebuilds settings safely, adds exclusions, and recreates the release trigger', () => {
   assert.equal(fs.existsSync(migrationUrl), true, 'migrations/0012_telegram_notifications_v2.sql must exist');
   const sql = fs.readFileSync(migrationUrl, 'utf8');
-  assert.match(sql, /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+telegram_notification_preferences/i);
+  assert.match(sql, /CREATE\s+TABLE\s+telegram_subscription_settings_v2/i);
   assert.match(sql, /delivery_mode\s+TEXT\s+NOT\s+NULL\s+DEFAULT\s+'instant'/i);
-  assert.doesNotMatch(sql, /ALTER\s+TABLE\s+telegram_subscription_settings/i);
+  assert.match(sql, /INSERT\s+INTO\s+telegram_subscription_settings_v2[\s\S]*SELECT\s+user_telegram_id\s*,\s*all_titles/i);
+  assert.match(sql, /DROP\s+TABLE\s+telegram_subscription_settings/i);
+  assert.match(sql, /ALTER\s+TABLE\s+telegram_subscription_settings_v2\s+RENAME\s+TO\s+telegram_subscription_settings/i);
+  assert.doesNotMatch(sql, /ADD\s+COLUMN/i);
   assert.match(sql, /CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+title_subscription_exclusions/i);
   assert.match(sql, /DROP\s+TRIGGER\s+IF\s+EXISTS\s+trg_ranobelib_release_notifications/i);
   assert.match(sql, /NOT\s+EXISTS[\s\S]*title_subscription_exclusions[\s\S]*NEW\.book_ref/i);
