@@ -44,6 +44,7 @@ await call('setMyCommands', {
   commands: [
     { command: 'start', description: 'Уведомления о новых главах' },
     { command: 'subscriptions', description: 'Управлять подписками' },
+    { command: 'notifications', description: 'Настройки уведомлений' },
     { command: 'site', description: 'Открыть сайт' },
     { command: 'propose', description: 'Предложить перевод' },
     { command: 'help', description: 'Помощь' },
