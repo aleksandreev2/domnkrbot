@@ -3,7 +3,7 @@ export interface RanobeLibTeamBookRef {
   slug: string;
   ref: string;
   url: string;
-  title: string | null;
+  title?: string | null;
 }
 
 export interface RanobeLibTitle {
