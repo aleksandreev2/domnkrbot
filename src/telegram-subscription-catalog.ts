@@ -4,7 +4,7 @@ import type { TelegramSubscriptionEnv } from './telegram-subscriptions.js';
 
 type CatalogEnv = TelegramSubscriptionEnv & RanobeLibRuntimeEnv;
 
-type CountRow = { count: number | string };
+type CountRow = { count: number | string; missing_titles?: number | string };
 
 const DEFAULT_TEAM_REF = '11969--dom-nekromanta';
 
@@ -23,11 +23,17 @@ export function withTelegramSubscriptionCatalogDb<T extends TelegramSubscription
 
 export async function ensureTelegramSubscriptionCatalog(env: CatalogEnv): Promise<number> {
   await ensureRanobeLibSchema(env);
-  const existing = await env.DB.prepare(
-    'SELECT COUNT(*) AS count FROM ranobelib_titles WHERE is_active = 1 AND ranobelib_id IS NOT NULL',
-  ).first<CountRow>();
+  const existing = await env.DB.prepare(`
+    SELECT COUNT(*) AS count,
+           COALESCE(SUM(CASE WHEN title IS NULL OR TRIM(title) = '' THEN 1 ELSE 0 END), 0) AS missing_titles
+    FROM ranobelib_titles
+    WHERE is_active = 1 AND ranobelib_id IS NOT NULL
+  `).first<CountRow>();
   const activeCount = Number(existing?.count ?? 0);
-  if (Number.isFinite(activeCount) && activeCount > 0) return activeCount;
+  const missingTitles = Number(existing?.missing_titles ?? 0);
+  if (Number.isFinite(activeCount) && activeCount > 0 && Number.isFinite(missingTitles) && missingTitles === 0) {
+    return activeCount;
+  }
 
   const teamRef = env.RANOBELIB_TEAM_REF?.trim() || DEFAULT_TEAM_REF;
   const client = new RanobeLibClient();
@@ -36,11 +42,12 @@ export async function ensureTelegramSubscriptionCatalog(env: CatalogEnv): Promis
 
   await env.DB.prepare('UPDATE ranobelib_titles SET is_active = 0').run();
   const statements = books.map((book) => env.DB.prepare(`
-    INSERT INTO ranobelib_titles (book_ref, ranobelib_id, slug, url, is_active)
-    VALUES (?, ?, ?, ?, 1)
+    INSERT INTO ranobelib_titles (book_ref, ranobelib_id, slug, url, title, is_active)
+    VALUES (?, ?, ?, ?, ?, 1)
     ON CONFLICT(book_ref) DO UPDATE SET ranobelib_id = excluded.ranobelib_id,
-      slug = excluded.slug, url = excluded.url, is_active = 1
-  `).bind(book.ref, book.id, book.slug, book.url));
+      slug = excluded.slug, url = excluded.url,
+      title = COALESCE(excluded.title, ranobelib_titles.title), is_active = 1
+  `).bind(book.ref, book.id, book.slug, book.url, book.title));
 
   if (env.DB.batch) {
     const chunkSize = 50;
