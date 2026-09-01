@@ -101,11 +101,17 @@ test('uses current RanobeLib API scope and keeps only Dom Nekromanta chapter bra
   assert.ok(requests.every((request) => new Headers(request.init.headers).get('accept') === 'application/json'));
 });
 
-test('chapter sync inherits the team discovered from the RanobeLib team page', async () => {
+test('team discovery uses the current RanobeLib catalog filter and chapter sync inherits that team', async () => {
+  const requests = [];
   const responses = new Map([
     [
-      'https://ranobelib.me/ru/team/11969--dom-nekromanta',
-      new Response('<a href="/ru/book/62387--pokemon-master-of-tactics">Pokemon</a>', { headers: { 'content-type': 'text/html' } }),
+      'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&page=1',
+      new Response(JSON.stringify({
+        data: [
+          { id: 62387, slug: 'pokemon-master-of-tactics', slug_url: '62387--pokemon-master-of-tactics' },
+        ],
+        meta: { current_page: 1, has_next_page: false, per_page: 60 },
+      }), { headers: { 'content-type': 'application/json' } }),
     ],
     [
       'https://api.cdnlibs.org/api/manga/62387--pokemon-master-of-tactics/chapters',
@@ -115,11 +121,23 @@ test('chapter sync inherits the team discovered from the RanobeLib team page', a
       ] }), { headers: { 'content-type': 'application/json' } }),
     ],
   ]);
-  const fetchImpl = async (url) => responses.get(String(url))?.clone() ?? new Response('not found', { status: 404 });
+
+  const fetchImpl = async (url, init = {}) => {
+    requests.push({ url: String(url), init });
+    return responses.get(String(url))?.clone() ?? new Response('not found', { status: 404 });
+  };
   const client = new RanobeLibClient({ fetchImpl });
 
   const books = await client.discoverTeamBooks('11969--dom-nekromanta');
-  assert.equal(books.length, 1);
+  assert.deepEqual(books, [{
+    id: 62387,
+    slug: 'pokemon-master-of-tactics',
+    ref: '62387--pokemon-master-of-tactics',
+    url: 'https://ranobelib.me/ru/book/62387--pokemon-master-of-tactics',
+  }]);
+  assert.ok(requests.every(({ url }) => !url.includes('/team/')));
+  assert.equal(new Headers(requests[0].init.headers).get('accept'), 'application/json');
+
   const chapters = await client.getChapters(books[0].ref);
   assert.deepEqual(chapters.map((chapter) => chapter.number), ['1']);
 });
