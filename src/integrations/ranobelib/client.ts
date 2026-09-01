@@ -136,6 +136,7 @@ function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBook
     slug,
     ref,
     url: `${siteBaseUrl}/ru/book/${ref}`,
+    title: extractTitle(raw),
   };
 }
 
