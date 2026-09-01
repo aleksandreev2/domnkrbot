@@ -9,9 +9,20 @@ test('Telegram entry routes subscription callbacks and commands before the legac
   assert.match(source, /handleTelegramSubscriptionWebhookRequest/);
 });
 
-test('scheduled production entry drains the notification outbox after the base cron', async () => {
+test('scheduled production entry initializes subscriptions before RanobeLib sync and drains the outbox afterwards', async () => {
   const source = await read('src/live-entry-v2.ts');
-  assert.match(source, /deliverPendingReleaseNotifications/);
+  const ensureIndex = source.indexOf('await ensureTelegramSubscriptionSchema(env)');
+  const baseIndex = source.indexOf('await baseWorker.scheduled');
+  const deliveryIndex = source.indexOf('deliverPendingReleaseNotifications');
+  assert.ok(ensureIndex >= 0, 'subscription schema must be initialized in the scheduled entry');
+  assert.ok(baseIndex > ensureIndex, 'subscription schema must exist before RanobeLib cron can insert releases');
+  assert.ok(deliveryIndex >= 0, 'notification outbox must be drained after synchronization');
+});
+
+test('subscription runtime can self-create the release notification trigger without a manual remote migration', async () => {
+  const source = await read('src/telegram-subscriptions.ts');
+  assert.match(source, /CREATE TRIGGER IF NOT EXISTS trg_ranobelib_release_notifications/);
+  assert.match(source, /AFTER INSERT ON ranobelib_releases/);
 });
 
 test('subscription migration atomically fans new RanobeLib releases into the notification outbox', async () => {
