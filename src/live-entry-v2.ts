@@ -18,9 +18,9 @@ import {
   type PublicationReleaseAnalyticsEnv,
 } from './publication-release-analytics.js';
 import { handlePublishingAnalyticsV2, type PublishingAnalyticsV2Env } from './publishing-analytics-v2.js';
+import { ensureTelegramSubscriptionDeliverySchema } from './telegram-subscription-delivery-schema.js';
 import {
   deliverPendingReleaseNotifications,
-  ensureTelegramSubscriptionSchema,
   type TelegramSubscriptionEnv,
 } from './telegram-subscriptions.js';
 
@@ -60,7 +60,7 @@ export default {
     let baseError: unknown = null;
     try {
       // The release fan-out trigger must exist before RanobeLib sync inserts a release.
-      await ensureTelegramSubscriptionSchema(env);
+      await ensureTelegramSubscriptionDeliverySchema(env);
       await baseWorker.scheduled(controller as never, env as never, ctx as never);
     } catch (error) {
       baseError = error;
