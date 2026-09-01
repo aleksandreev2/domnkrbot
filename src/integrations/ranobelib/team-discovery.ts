@@ -1,9 +1,12 @@
 import type { RanobeLibTeamBookRef } from './types.js';
 
-const BOOK_PATH_RE = /(?:https?:\/\/ranobelib\.me)?\/ru\/book\/(\d+)--([^?"'<>\s&]+)/gi;
+const BOOK_PATH_RE = /(?:https?:\/\/ranobelib\.me)?\/(?:ru\/)?book\/(\d+)--([^?"'<>\s&\\}]+)/gi;
 
 export function discoverTeamBooksFromHtml(html: string): RanobeLibTeamBookRef[] {
-  const decoded = decodeHtmlEntities(html);
+  const decoded = decodeHtmlEntities(html)
+    .replaceAll('\\/', '/')
+    .replaceAll('\\u002F', '/')
+    .replaceAll('\\u002f', '/');
   const seen = new Set<string>();
   const books: RanobeLibTeamBookRef[] = [];
 
