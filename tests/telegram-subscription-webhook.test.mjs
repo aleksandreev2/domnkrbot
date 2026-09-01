@@ -9,6 +9,9 @@ class Statement {
   async first() {
     if (this.query.includes('SELECT COUNT(*) AS count FROM ranobelib_titles WHERE is_active = 1')) return { count: 1 };
     if (this.query.includes('SELECT all_titles FROM telegram_subscription_settings')) return null;
+    if (this.query.includes('SELECT delivery_mode')) return { delivery_mode: 'instant' };
+    if (this.query.includes('COUNT(*) AS count') && this.query.includes('title_subscriptions')) return { count: 0 };
+    if (this.query.includes('COUNT(*) AS count') && this.query.includes('title_subscription_exclusions')) return { count: 0 };
     return null;
   }
   async all() {
@@ -16,6 +19,7 @@ class Statement {
       return { results: [{ ranobelib_id: 1000, book_ref: '1000--one', title: 'Книга 1' }] };
     }
     if (this.query.includes('FROM title_subscriptions s JOIN ranobelib_titles t')) return { results: [] };
+    if (this.query.includes('FROM title_subscription_exclusions e JOIN ranobelib_titles t')) return { results: [] };
     return { results: [] };
   }
 }
@@ -76,6 +80,17 @@ test('/subscriptions opens the same Telegram subscription list', async () => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/subscriptions'), env);
     assert.equal(response?.status, 200);
     assert.equal(calls.filter((call) => call.method === 'sendMessage').length, 1);
+  });
+});
+
+test('/notifications opens the notification center instead of being silently swallowed', async () => {
+  await withTelegramCalls(async (calls) => {
+    const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/notifications'), env);
+    assert.equal(response?.status, 200);
+    const send = calls.find((call) => call.method === 'sendMessage');
+    assert.ok(send);
+    assert.match(send.payload.text, /Режим доставки: ⚡ Сразу/);
+    assert.equal(send.payload.reply_markup.inline_keyboard[0][0].callback_data, 'subs:list:0');
   });
 });
 
