@@ -10,9 +10,9 @@ import {
 } from './telegram-subscription-catalog.js';
 import type { RanobeLibRuntimeEnv } from './ranobelib-runtime.js';
 
-export interface TelegramSubscriptionWebhookEnv extends TelegramSubscriptionEnv, RanobeLibRuntimeEnv {
+export type TelegramSubscriptionWebhookEnv = TelegramSubscriptionEnv & RanobeLibRuntimeEnv & {
   TELEGRAM_WEBHOOK_SECRET?: string;
-}
+};
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
