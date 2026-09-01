@@ -9,11 +9,11 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Inspect live RanobeLib sync state
+      - name: Inspect live RanobeLib sync state after batch-4 deploy
         shell: bash
         run: |
           node <<'NODE'
-          const url = 'https://domnkrbot.sashahumortele2.workers.dev/api/ranobelib?probe=' + Date.now();
+          const url = 'https://domnkrbot.sashahumortele2.workers.dev/api/ranobelib?probe=batch4-' + Date.now();
           const response = await fetch(url, { headers: { accept: 'application/json' } });
           const body = await response.json();
           console.log('HTTP', response.status);
