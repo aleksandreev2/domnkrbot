@@ -29,7 +29,13 @@ BEGIN
         AND e.book_ref = NEW.book_ref
     )
   UNION
-  SELECT NEW.id, user_telegram_id
-  FROM title_subscriptions
-  WHERE book_ref = NEW.book_ref;
+  SELECT NEW.id, ts.user_telegram_id
+  FROM title_subscriptions ts
+  WHERE ts.book_ref = NEW.book_ref
+    AND NOT EXISTS (
+      SELECT 1
+      FROM telegram_subscription_settings s
+      WHERE s.user_telegram_id = ts.user_telegram_id
+        AND s.all_titles = 1
+    );
 END;
