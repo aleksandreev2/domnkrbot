@@ -18,6 +18,7 @@ import {
   type PublicationReleaseAnalyticsEnv,
 } from './publication-release-analytics.js';
 import { handlePublishingAnalyticsV2, type PublishingAnalyticsV2Env } from './publishing-analytics-v2.js';
+import { runRanobeLibDiagnostic } from './ranobelib-diagnostic.js';
 import { ensureTelegramSubscriptionDeliverySchema } from './telegram-subscription-delivery-schema.js';
 import {
   deliverPendingReleaseNotifications,
@@ -35,6 +36,13 @@ type Env = PublicationCommentGateEnv
 
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method === 'GET' && url.pathname === '/api/diag/ranobelib') {
+      return Response.json(await runRanobeLibDiagnostic(), {
+        headers: { 'cache-control': 'no-store' },
+      });
+    }
+
     const readerDelivery = await handlePublicationReaderDeliveryWebhook(request, env, ctx);
     if (readerDelivery) return readerDelivery;
 
