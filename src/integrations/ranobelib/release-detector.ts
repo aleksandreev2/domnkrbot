@@ -31,6 +31,27 @@ export function detectReleaseDelta(
   };
 }
 
+/**
+ * Repairs snapshots created by the old sync logic, which could persist a scheduled
+ * chapter before its RanobeLib branch publication time. Once that publication time
+ * is reached, firstSeenAt < releasedAt proves the row was observed prematurely.
+ */
+export function detectScheduledReleaseTransitions(
+  previous: RanobeLibChapter[],
+  current: RanobeLibChapter[],
+  nowMs = Date.now(),
+): RanobeLibChapter[] {
+  const previousById = new Map(previous.map((chapter) => [chapter.id, chapter]));
+  return sortChapters(current.filter((chapter) => {
+    const stored = previousById.get(chapter.id);
+    if (!stored) return false;
+    const firstSeenMs = parseTimestamp(stored.firstSeenAt);
+    const releasedMs = parseTimestamp(chapter.releasedAt);
+    if (firstSeenMs === null || releasedMs === null) return false;
+    return firstSeenMs < releasedMs && releasedMs <= nowMs;
+  }));
+}
+
 export function sortChapters(chapters: RanobeLibChapter[]): RanobeLibChapter[] {
   return [...chapters].sort((a, b) => {
     const volumeComparison = compareChapterToken(a.volume, b.volume);
@@ -55,6 +76,12 @@ export function summarizeAdded(chapters: RanobeLibChapter[]): string {
   }
 
   return `${chapters.length} new chapters`;
+}
+
+function parseTimestamp(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
 }
 
 function compareChapterToken(a: string, b: string): number {
