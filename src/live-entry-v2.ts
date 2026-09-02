@@ -20,6 +20,10 @@ import {
 import { handlePublishingAnalyticsV2, type PublishingAnalyticsV2Env } from './publishing-analytics-v2.js';
 import { ensureTelegramSubscriptionDeliverySchema } from './telegram-subscription-delivery-schema.js';
 import {
+  handleTelegramNotificationDiagnostics,
+  type TelegramNotificationDiagnosticsEnv,
+} from './telegram-notification-diagnostics.js';
+import {
   deliverPendingReleaseNotifications,
   type TelegramSubscriptionEnv,
 } from './telegram-subscriptions.js';
@@ -31,10 +35,14 @@ type Env = PublicationCommentGateEnv
   & PublicationReaderDeliveryEnv
   & PublicationFileCachePrewarmEnv
   & PublicationReleaseAnalyticsEnv
-  & TelegramSubscriptionEnv;
+  & TelegramSubscriptionEnv
+  & TelegramNotificationDiagnosticsEnv;
 
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
+    const notificationDiagnostics = await handleTelegramNotificationDiagnostics(request, env);
+    if (notificationDiagnostics) return notificationDiagnostics;
+
     const readerDelivery = await handlePublicationReaderDeliveryWebhook(request, env, ctx);
     if (readerDelivery) return readerDelivery;
 
