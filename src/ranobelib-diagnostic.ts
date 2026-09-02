@@ -1,4 +1,9 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
+import {
+  getRanobeLibHome,
+  syncRanobeLib,
+  type RanobeLibRuntimeEnv,
+} from './ranobelib-runtime.js';
 
 const CATALOG_URL = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&page=1';
 const TEAM_REF = '11969--dom-nekromanta';
@@ -9,6 +14,7 @@ type Probe = {
   count?: number;
   error?: string;
   stack?: string;
+  value?: unknown;
 };
 
 function failed(error: unknown): Probe {
@@ -19,7 +25,7 @@ function failed(error: unknown): Probe {
   };
 }
 
-export async function runRanobeLibDiagnostic(): Promise<Record<string, Probe>> {
+export async function runRanobeLibDiagnostic(env: RanobeLibRuntimeEnv): Promise<Record<string, Probe>> {
   const result: Record<string, Probe> = {};
 
   try {
@@ -52,6 +58,27 @@ export async function runRanobeLibDiagnostic(): Promise<Record<string, Probe>> {
     result.clientExplicitArrowFetch = { ok: true, count: books.length };
   } catch (error) {
     result.clientExplicitArrowFetch = failed(error);
+  }
+
+  try {
+    const home = await getRanobeLibHome(env);
+    result.d1Before = { ok: true, value: { stats: home.stats, sync: home.sync } };
+  } catch (error) {
+    result.d1Before = failed(error);
+  }
+
+  try {
+    const sync = await syncRanobeLib(env);
+    result.runtimeSync = { ok: true, value: sync };
+  } catch (error) {
+    result.runtimeSync = failed(error);
+  }
+
+  try {
+    const home = await getRanobeLibHome(env);
+    result.d1After = { ok: true, value: { stats: home.stats, sync: home.sync } };
+  } catch (error) {
+    result.d1After = failed(error);
   }
 
   return result;
