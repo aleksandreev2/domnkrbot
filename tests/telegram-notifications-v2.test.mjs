@@ -66,7 +66,7 @@ test('release notification v2 has reading and direct subscription controls', () 
   assert.equal(off.reply_markup.inline_keyboard[1][0].text, '🔔 Подписаться');
 });
 
-test('notification center summarizes instant delivery and subscription scope', () => {
+test('notification center shows instant delivery as status, not a fake interactive mode control', () => {
   assert.equal(typeof notifications.buildNotificationCenter, 'function');
   const all = notifications.buildNotificationCenter({
     deliveryMode: 'instant',
@@ -79,9 +79,13 @@ test('notification center summarizes instant delivery and subscription scope', (
   assert.match(all.text, /Все переводы, кроме 2/);
   assert.deepEqual(all.reply_markup.inline_keyboard, [
     [{ text: '📚 Управлять тайтлами', callback_data: 'subs:list:0' }],
-    [{ text: '⚡ Режим: сразу', callback_data: 'subs:noop' }],
     [{ text: '🔕 Отключить все', callback_data: 'subs:all:clear' }],
   ]);
+  assert.equal(
+    all.reply_markup.inline_keyboard.flat().some((button) => button.text.includes('Режим')),
+    false,
+    'instant-only delivery status must not look like a toggleable button',
+  );
 
   const selected = notifications.buildNotificationCenter({
     deliveryMode: 'instant',
