@@ -102,6 +102,30 @@ test('uses current RanobeLib API scope and keeps only Dom Nekromanta chapter bra
   assert.ok(requests.every((request) => new Headers(request.init.headers).get('accept') === 'application/json'));
 });
 
+test('does not snapshot our scheduled RanobeLib branch before its release time', async () => {
+  const future = '2999-01-01T00:00:00.000000Z';
+  const past = '2000-01-01T00:00:00.000000Z';
+  const response = new Response(JSON.stringify({ data: [
+    { id: 1, volume: '1', number: '1', name: 'Published', branches: [
+      { id: 101, branch_id: 500, created_at: past, teams: [{ id: 11969, slug_url: '11969--dom-nekromanta' }] },
+    ] },
+    { id: 2, volume: '1', number: '2', name: 'Scheduled', branches: [
+      { id: 102, branch_id: 500, created_at: future, teams: [{ id: 11969, slug_url: '11969--dom-nekromanta' }] },
+    ] },
+    { id: 3, volume: '1', number: '3', name: 'Foreign published, ours scheduled', branches: [
+      { id: 103, branch_id: 700, created_at: past, teams: [{ id: 999, slug_url: '999--other-team' }] },
+      { id: 104, branch_id: 500, created_at: future, teams: [{ id: 11969, slug_url: '11969--dom-nekromanta' }] },
+    ] },
+  ] }), { headers: { 'content-type': 'application/json' } });
+
+  const client = new RanobeLibClient({
+    fetchImpl: async () => response.clone(),
+  });
+  const chapters = await client.getChapters('62387--pokemon-master-of-tactics', { teamRef: '11969--dom-nekromanta' });
+
+  assert.deepEqual(chapters.map((chapter) => chapter.number), ['1']);
+});
+
 test('team discovery uses the current RanobeLib catalog filter and chapter sync inherits that team', async () => {
   const requests = [];
   const responses = new Map([
