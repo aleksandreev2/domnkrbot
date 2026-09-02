@@ -1,5 +1,6 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
 import {
+  detectRecentBootstrapReleaseCandidates,
   detectReleaseDelta,
   detectScheduledReleaseTransitions,
   sortChapters,
@@ -296,9 +297,10 @@ async function runSync(env: RanobeLibRuntimeEnv, options: { full?: boolean }): P
 }
 
 async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book: RanobeLibTeamBookRef): Promise<boolean> {
-  const state = await env.DB.prepare('SELECT snapshot_ready FROM ranobelib_titles WHERE book_ref = ?')
-    .bind(book.ref).first<{ snapshot_ready: number | string }>();
+  const state = await env.DB.prepare('SELECT snapshot_ready, last_release_at FROM ranobelib_titles WHERE book_ref = ?')
+    .bind(book.ref).first<{ snapshot_ready: number | string; last_release_at: string | null }>();
   const snapshotReady = numberFrom(state?.snapshot_ready, 0) === 1;
+  const hasRecordedRelease = typeof state?.last_release_at === 'string' && state.last_release_at.trim().length > 0;
   const previousRows = snapshotReady
     ? (await env.DB.prepare(`
         SELECT chapter_id AS id, volume, number, name, first_seen_at AS firstSeenAt
@@ -315,9 +317,12 @@ async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book:
   const recoveredScheduled = snapshotReady && previousRows
     ? detectScheduledReleaseTransitions(previousRows, chapters)
     : [];
+  const recentBootstrap = hasRecordedRelease
+    ? []
+    : detectRecentBootstrapReleaseCandidates(chapters);
   const releaseChapters = snapshotReady
-    ? uniqueChapters([...(delta?.added ?? []), ...recoveredScheduled])
-    : [];
+    ? uniqueChapters([...(delta?.added ?? []), ...recoveredScheduled, ...recentBootstrap])
+    : recentBootstrap;
 
   if (!snapshotReady) {
     await insertChapters(env, book.ref, chapters);
