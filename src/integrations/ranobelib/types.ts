@@ -4,6 +4,7 @@ export interface RanobeLibTeamBookRef {
   ref: string;
   url: string;
   title?: string | null;
+  coverUrl?: string | null;
 }
 
 export interface RanobeLibTitle {
