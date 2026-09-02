@@ -26,6 +26,8 @@ import {
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
+const NOTIFICATION_DELIVERY_CRON = '* * * * *';
+
 type Env = PublicationCommentGateEnv
   & PublishingAnalyticsV2Env
   & PublicationReaderDeliveryEnv
@@ -57,22 +59,17 @@ export default {
   },
 
   async scheduled(controller: ScheduledControllerLike, env: Env, ctx: CommentGateExecutionContext): Promise<void> {
-    let baseError: unknown = null;
-    try {
-      // The release fan-out trigger must exist before RanobeLib sync inserts a release.
+    // Keep Telegram sends in their own Worker invocation so RanobeLib sync and membership
+    // maintenance cannot consume the Free-plan external-subrequest budget first.
+    if (controller.cron === NOTIFICATION_DELIVERY_CRON) {
       await ensureTelegramSubscriptionDeliverySchema(env);
-      await baseWorker.scheduled(controller as never, env as never, ctx as never);
-    } catch (error) {
-      baseError = error;
-    }
-
-    try {
       const delivery = await deliverPendingReleaseNotifications(env, 40);
       console.log('RanobeLib Telegram notification delivery complete', delivery);
-    } catch (error) {
-      console.error('RanobeLib Telegram notification delivery failed', error);
+      return;
     }
 
-    if (baseError) throw baseError;
+    // The release fan-out trigger must exist before RanobeLib sync inserts a release.
+    await ensureTelegramSubscriptionDeliverySchema(env);
+    await baseWorker.scheduled(controller as never, env as never, ctx as never);
   },
 };
