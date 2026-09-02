@@ -81,14 +81,18 @@ export async function handleTelegramNotificationDiagnostics(
   if (latestRelease?.id) {
     const result = await env.DB.prepare(`
       SELECT status, COUNT(*) AS count, MAX(attempts) AS max_attempts,
-             MAX(last_error) AS last_error, MAX(updated_at) AS updated_at,
-             MAX(delivered_at) AS delivered_at
+             MAX(available_at) AS available_at, MAX(last_error) AS last_error,
+             MAX(updated_at) AS updated_at, MAX(delivered_at) AS delivered_at
       FROM ranobelib_notification_outbox
       WHERE release_id = ?
       GROUP BY status
       ORDER BY status
     `).bind(String(latestRelease.id)).all<Record<string, unknown>>();
     outbox = result.results;
+  }
+
+  if (url.searchParams.get('compact') === '1') {
+    return json({ bookRef, releaseId: latestRelease?.id ?? null, outbox });
   }
 
   return json({
