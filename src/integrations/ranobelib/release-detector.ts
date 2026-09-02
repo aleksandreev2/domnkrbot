@@ -4,6 +4,8 @@ export interface DetectReleaseOptions {
   emitOnBootstrap?: boolean;
 }
 
+const DEFAULT_BOOTSTRAP_RECOVERY_MS = 6 * 60 * 60 * 1000;
+
 export function detectReleaseDelta(
   bookRef: string,
   previous: RanobeLibChapter[] | undefined,
@@ -29,6 +31,25 @@ export function detectReleaseDelta(
     removed,
     summary: added.length > 0 ? summarizeAdded(added) : 'No new chapters; existing chapter set changed',
   };
+}
+
+/**
+ * Recovers genuinely recent releases when a title is being rebuilt after an empty
+ * snapshot/outage. Chapters without a trustworthy publication timestamp are never
+ * guessed, and old history stays suppressed.
+ */
+export function detectRecentBootstrapReleaseCandidates(
+  current: RanobeLibChapter[],
+  nowMs = Date.now(),
+  maxAgeMs = DEFAULT_BOOTSTRAP_RECOVERY_MS,
+): RanobeLibChapter[] {
+  const boundedAgeMs = Number.isFinite(maxAgeMs) ? Math.max(0, maxAgeMs) : DEFAULT_BOOTSTRAP_RECOVERY_MS;
+  const lowerBound = nowMs - boundedAgeMs;
+  return sortChapters(current.filter((chapter) => {
+    const releasedMs = parseTimestamp(chapter.releasedAt);
+    if (releasedMs === null) return false;
+    return releasedMs <= nowMs && releasedMs >= lowerBound;
+  }));
 }
 
 /**
