@@ -58,7 +58,8 @@ export async function handleTelegramSubscriptionWebhookRequest(
   if (!update) return null;
 
   const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
-  if (update.callback_query?.data?.startsWith('subs:')) await prepareCatalog(env);
+  // Telegram callbacks must stay responsive even when RanobeLib is slow or unavailable.
+  // Catalog bootstrap is only needed by commands that render the full synchronized title list.
   if (await handleTelegramSubscriptionUpdate(update, subscriptionEnv)) return json({ ok: true });
 
   const message = update.message;
