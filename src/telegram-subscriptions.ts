@@ -246,7 +246,6 @@ export function buildNotificationCenter(state: NotificationCenterState): Telegra
     reply_markup: {
       inline_keyboard: [
         [{ text: '📚 Управлять тайтлами', callback_data: 'subs:list:0' }],
-        [{ text: '⚡ Режим: сразу', callback_data: 'subs:noop' }],
         [{ text: '🔕 Отключить все', callback_data: 'subs:all:clear' }],
       ],
     },
