@@ -38,7 +38,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === 'GET' && url.pathname === '/api/diag/ranobelib') {
-      return Response.json(await runRanobeLibDiagnostic(), {
+      return Response.json(await runRanobeLibDiagnostic(env), {
         headers: { 'cache-control': 'no-store' },
       });
     }
