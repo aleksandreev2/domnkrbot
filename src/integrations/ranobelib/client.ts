@@ -132,6 +132,8 @@ function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBook
   const slug = explicitSlug ?? (ref.includes('--') ? ref.split('--').slice(1).join('--') : null);
   if (!slug) return null;
   const title = extractTitle(raw);
+  const cover = isRecord(raw.cover) ? raw.cover : {};
+  const coverUrl = stringOrNull(cover.default) ?? stringOrNull(cover.thumbnail);
 
   return {
     id,
@@ -139,6 +141,7 @@ function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBook
     ref,
     url: `${siteBaseUrl}/ru/book/${ref}`,
     ...(title ? { title } : {}),
+    ...(coverUrl ? { coverUrl } : {}),
   };
 }
 
