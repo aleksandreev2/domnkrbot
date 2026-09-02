@@ -67,10 +67,11 @@ export class RanobeLibClient {
       `${this.apiBaseUrl}/manga/${encodeURIComponent(bookRef)}/chapters`,
     );
     const teamRef = options.teamRef ?? this.discoveredTeamRef ?? undefined;
+    const nowMs = Date.now();
 
     const chapters = Array.isArray(response.data)
       ? response.data
-          .map((value) => normalizeChapter(value, teamRef))
+          .map((value) => normalizeChapter(value, teamRef, nowMs))
           .filter((value): value is RanobeLibChapter => value !== null)
       : [];
 
@@ -155,9 +156,10 @@ function normalizeTitle(raw: Record<string, unknown>, bookRef: string): RanobeLi
   };
 }
 
-function normalizeChapter(raw: unknown, teamRef?: string): RanobeLibChapter | null {
+function normalizeChapter(raw: unknown, teamRef: string | undefined, nowMs: number): RanobeLibChapter | null {
   if (!isRecord(raw)) return null;
-  if (teamRef && !chapterHasTeam(raw, teamRef)) return null;
+  const matchingBranch = teamRef ? releasedTeamBranch(raw, teamRef, nowMs) : null;
+  if (teamRef && !matchingBranch) return null;
   const id = numberOrNull(raw.id);
   const volume = tokenOrNull(raw.volume);
   const number = tokenOrNull(raw.number);
@@ -168,21 +170,32 @@ function normalizeChapter(raw: unknown, teamRef?: string): RanobeLibChapter | nu
     volume,
     number,
     name: stringOrNull(raw.name),
+    ...(matchingBranch ? { releasedAt: stringOrNull(matchingBranch.created_at) } : {}),
   };
 }
 
-function chapterHasTeam(raw: Record<string, unknown>, teamRef: string): boolean {
-  const teamId = teamIdFromRef(teamRef);
+function releasedTeamBranch(raw: Record<string, unknown>, teamRef: string, nowMs: number): Record<string, unknown> | null {
   const branches = Array.isArray(raw.branches) ? raw.branches : [];
-  return branches.some((branch) => {
-    if (!isRecord(branch)) return false;
-    const teams = Array.isArray(branch.teams) ? branch.teams : [];
-    return teams.some((team) => {
-      if (!isRecord(team)) return false;
-      if (teamId !== null && numberOrNull(team.id) === teamId) return true;
-      const refs = [team.slug_url, team.slug, team.ref].map(stringOrNull).filter((value): value is string => Boolean(value));
-      return refs.some((value) => value === teamRef || `${teamId ?? ''}--${value}` === teamRef);
-    });
+  for (const branch of branches) {
+    if (!isRecord(branch) || !branchHasTeam(branch, teamRef)) continue;
+    const createdAt = stringOrNull(branch.created_at);
+    if (!createdAt) return branch;
+    const releaseMs = Date.parse(createdAt);
+    // Preserve compatibility if RanobeLib returns an unexpected timestamp format, but
+    // never expose a branch whose parseable publication time is still in the future.
+    if (!Number.isFinite(releaseMs) || releaseMs <= nowMs) return branch;
+  }
+  return null;
+}
+
+function branchHasTeam(branch: Record<string, unknown>, teamRef: string): boolean {
+  const teamId = teamIdFromRef(teamRef);
+  const teams = Array.isArray(branch.teams) ? branch.teams : [];
+  return teams.some((team) => {
+    if (!isRecord(team)) return false;
+    if (teamId !== null && numberOrNull(team.id) === teamId) return true;
+    const refs = [team.slug_url, team.slug, team.ref].map(stringOrNull).filter((value): value is string => Boolean(value));
+    return refs.some((value) => value === teamRef || `${teamId ?? ''}--${value}` === teamRef);
   });
 }
 

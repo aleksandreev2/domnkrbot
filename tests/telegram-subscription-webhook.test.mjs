@@ -50,11 +50,38 @@ function telegramRequest(text) {
   });
 }
 
+function callbackRequest(data) {
+  return new Request('https://bot.example/telegram/webhook', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-telegram-bot-api-secret-token': 'secret',
+    },
+    body: JSON.stringify({
+      update_id: 2,
+      callback_query: {
+        id: 'cb-1',
+        from: { id: 42, first_name: 'Reader' },
+        data,
+        message: { message_id: 9, chat: { id: 42, type: 'private' } },
+      },
+    }),
+  });
+}
+
 async function withTelegramCalls(fn) {
   const original = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, options = {}) => {
-    calls.push({ method: String(url).split('/').pop(), payload: JSON.parse(String(options.body || '{}')) });
+    const href = String(url);
+    if (href.startsWith('https://api.cdnlibs.org/')) {
+      calls.push({ kind: 'ranobelib', url: href });
+      return new Response(JSON.stringify({ data: [], meta: { has_next_page: false } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    calls.push({ kind: 'telegram', method: href.split('/').pop(), payload: JSON.parse(String(options.body || '{}')) });
     return new Response(JSON.stringify({ ok: true, result: { message_id: 10 } }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -67,7 +94,7 @@ test('plain /start opens the Telegram subscription list without requiring chapte
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/start'), env);
     assert.equal(response?.status, 200);
-    const send = calls.find((call) => call.method === 'sendMessage');
+    const send = calls.find((call) => call.kind === 'telegram' && call.method === 'sendMessage');
     assert.ok(send);
     assert.equal(send.payload.chat_id, 42);
     assert.match(send.payload.text, /Уведомления о новых главах/);
@@ -79,7 +106,7 @@ test('/subscriptions opens the same Telegram subscription list', async () => {
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/subscriptions'), env);
     assert.equal(response?.status, 200);
-    assert.equal(calls.filter((call) => call.method === 'sendMessage').length, 1);
+    assert.equal(calls.filter((call) => call.kind === 'telegram' && call.method === 'sendMessage').length, 1);
   });
 });
 
@@ -87,10 +114,20 @@ test('/notifications opens the notification center instead of being silently swa
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/notifications'), env);
     assert.equal(response?.status, 200);
-    const send = calls.find((call) => call.method === 'sendMessage');
+    const send = calls.find((call) => call.kind === 'telegram' && call.method === 'sendMessage');
     assert.ok(send);
     assert.match(send.payload.text, /Режим доставки: ⚡ Сразу/);
     assert.equal(send.payload.reply_markup.inline_keyboard[0][0].callback_data, 'subs:list:0');
+  });
+});
+
+test('subscription callbacks are handled without blocking on RanobeLib catalog bootstrap', async () => {
+  await withTelegramCalls(async (calls) => {
+    const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:center'), env);
+    assert.equal(response?.status, 200);
+    assert.equal(calls.some((call) => call.kind === 'ranobelib'), false, 'button callbacks must not wait for external RanobeLib requests');
+    assert.ok(calls.some((call) => call.kind === 'telegram' && call.method === 'editMessageText'));
+    assert.ok(calls.some((call) => call.kind === 'telegram' && call.method === 'answerCallbackQuery'));
   });
 });
 

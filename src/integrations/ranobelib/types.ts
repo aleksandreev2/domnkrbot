@@ -20,6 +20,10 @@ export interface RanobeLibChapter {
   volume: string;
   number: string;
   name: string | null;
+  /** RanobeLib branch visibility/publication timestamp when the API exposes one. */
+  releasedAt?: string | null;
+  /** Local D1 timestamp used only when reconciling snapshots created before a scheduled release. */
+  firstSeenAt?: string | null;
 }
 
 export interface RanobeLibReleaseDelta {

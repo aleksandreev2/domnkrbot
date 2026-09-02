@@ -1,5 +1,10 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
-import { detectReleaseDelta } from './integrations/ranobelib/release-detector.js';
+import {
+  detectReleaseDelta,
+  detectScheduledReleaseTransitions,
+  sortChapters,
+  summarizeAdded,
+} from './integrations/ranobelib/release-detector.js';
 import type { RanobeLibChapter, RanobeLibTeamBookRef } from './integrations/ranobelib/types.js';
 
 type D1Row = Record<string, unknown>;
@@ -296,7 +301,7 @@ async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book:
   const snapshotReady = numberFrom(state?.snapshot_ready, 0) === 1;
   const previousRows = snapshotReady
     ? (await env.DB.prepare(`
-        SELECT chapter_id AS id, volume, number, name
+        SELECT chapter_id AS id, volume, number, name, first_seen_at AS firstSeenAt
         FROM ranobelib_chapters WHERE book_ref = ?
       `).bind(book.ref).all<RanobeLibChapter>()).results
     : undefined;
@@ -307,6 +312,12 @@ async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book:
   ]);
   const latest = chapters.length ? chapters[chapters.length - 1]! : null;
   const delta = detectReleaseDelta(book.ref, previousRows, chapters);
+  const recoveredScheduled = snapshotReady && previousRows
+    ? detectScheduledReleaseTransitions(previousRows, chapters)
+    : [];
+  const releaseChapters = snapshotReady
+    ? uniqueChapters([...(delta?.added ?? []), ...recoveredScheduled])
+    : [];
 
   if (!snapshotReady) {
     await insertChapters(env, book.ref, chapters);
@@ -320,13 +331,12 @@ async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book:
   }
 
   const displayTitle = title.title || humanizeSlug(book.slug);
-  const hasRelease = Boolean(snapshotReady && delta && delta.added.length > 0);
-  if (hasRelease && delta) {
-    const added = delta.added;
-    const first = added[0]!;
-    const last = added[added.length - 1]!;
-    const releaseId = `${book.ref}:${first.id}-${last.id}:${added.length}`;
-    await env.DB.prepare(`
+  let releaseCreated = false;
+  if (releaseChapters.length > 0) {
+    const first = releaseChapters[0]!;
+    const last = releaseChapters[releaseChapters.length - 1]!;
+    const releaseId = `${book.ref}:${first.id}-${last.id}:${releaseChapters.length}`;
+    const result = await env.DB.prepare(`
       INSERT OR IGNORE INTO ranobelib_releases (
         id, book_ref, title_snapshot, chapter_count, first_chapter_id, first_volume,
         first_number, last_chapter_id, last_volume, last_number, summary
@@ -335,15 +345,16 @@ async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book:
       releaseId,
       book.ref,
       displayTitle,
-      added.length,
+      releaseChapters.length,
       first.id,
       first.volume,
       first.number,
       last.id,
       last.volume,
       last.number,
-      delta.summary,
+      summarizeAdded(releaseChapters),
     ).run();
+    releaseCreated = runChanges(result) > 0;
   }
 
   await env.DB.prepare(`
@@ -366,11 +377,11 @@ async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book:
     latest?.volume ?? null,
     latest?.number ?? null,
     latest?.name ?? null,
-    hasRelease ? 1 : 0,
+    releaseCreated ? 1 : 0,
     book.ref,
   ).run();
 
-  return hasRelease;
+  return releaseCreated;
 }
 
 async function insertChapters(env: RanobeLibRuntimeEnv, bookRef: string, chapters: RanobeLibChapter[]): Promise<void> {
@@ -381,6 +392,21 @@ async function insertChapters(env: RanobeLibRuntimeEnv, bookRef: string, chapter
       volume = excluded.volume, number = excluded.number, name = excluded.name
   `).bind(bookRef, chapter.id, chapter.volume, chapter.number, chapter.name));
   await executeStatements(env, statements);
+}
+
+function uniqueChapters(chapters: RanobeLibChapter[]): RanobeLibChapter[] {
+  const byId = new Map<number, RanobeLibChapter>();
+  for (const chapter of chapters) byId.set(chapter.id, chapter);
+  return sortChapters([...byId.values()]);
+}
+
+function runChanges(result: unknown): number {
+  if (!result || typeof result !== 'object') return 0;
+  const meta = 'meta' in result && result.meta && typeof result.meta === 'object'
+    ? result.meta as Record<string, unknown>
+    : null;
+  const changes = Number(meta?.changes ?? 0);
+  return Number.isFinite(changes) ? changes : 0;
 }
 
 async function executeStatements(env: RanobeLibRuntimeEnv, statements: D1PreparedStatementLike[]): Promise<void> {
