@@ -13,12 +13,16 @@ function catalogResponse() {
       slug_url: '62387--pokemon-master-of-tactics',
       rus_name: 'Покемон: Мастер тактики',
       name: 'Pokemon: Master of Tactics',
+      cover: {
+        default: 'https://cover.cdnlibs.org/uploads/cover/pokemon-master-of-tactics/cover/default.jpg',
+        thumbnail: 'https://cover.cdnlibs.org/uploads/cover/pokemon-master-of-tactics/cover/thumb.jpg',
+      },
     }],
     meta: { current_page: 1, has_next_page: false, per_page: 60 },
   }), { headers: { 'content-type': 'application/json' } });
 }
 
-test('team discovery preserves the human-readable RanobeLib title from catalog data', async () => {
+test('team discovery preserves title and cover metadata needed by one-request-per-title sync', async () => {
   const client = new RanobeLibClient({
     fetchImpl: async (url) => String(url) === teamCatalogUrl
       ? catalogResponse()
@@ -28,6 +32,10 @@ test('team discovery preserves the human-readable RanobeLib title from catalog d
   const books = await client.discoverTeamBooks('11969--dom-nekromanta');
   assert.equal(books.length, 1);
   assert.equal(books[0].title, 'Покемон: Мастер тактики');
+  assert.equal(
+    books[0].coverUrl,
+    'https://cover.cdnlibs.org/uploads/cover/pokemon-master-of-tactics/cover/default.jpg',
+  );
 });
 
 class Statement {

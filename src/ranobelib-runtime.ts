@@ -1,5 +1,6 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
 import {
+  detectRecentBootstrapReleaseCandidates,
   detectReleaseDelta,
   detectScheduledReleaseTransitions,
   sortChapters,
@@ -249,11 +250,21 @@ async function runSync(env: RanobeLibRuntimeEnv, options: { full?: boolean }): P
 
   await env.DB.prepare('UPDATE ranobelib_titles SET is_active = 0').run();
   await executeStatements(env, books.map((book) => env.DB.prepare(`
-    INSERT INTO ranobelib_titles (book_ref, ranobelib_id, slug, url, is_active)
-    VALUES (?, ?, ?, ?, 1)
+    INSERT INTO ranobelib_titles (book_ref, ranobelib_id, slug, url, title, cover_url, is_active)
+    VALUES (?, ?, ?, ?, ?, ?, 1)
     ON CONFLICT(book_ref) DO UPDATE SET ranobelib_id = excluded.ranobelib_id,
-      slug = excluded.slug, url = excluded.url, is_active = 1
-  `).bind(book.ref, book.id, book.slug, book.url)));
+      slug = excluded.slug, url = excluded.url,
+      title = COALESCE(excluded.title, ranobelib_titles.title),
+      cover_url = COALESCE(excluded.cover_url, ranobelib_titles.cover_url),
+      is_active = 1
+  `).bind(
+    book.ref,
+    book.id,
+    book.slug,
+    book.url,
+    book.title ?? null,
+    normalizeCoverUrl(book.coverUrl ?? null),
+  )));
 
   const oldCursor = numberFrom(await getSetting(env, 'ranobelib_sync_cursor'), 0);
   const batchSize = options.full ? books.length : Math.min(batchSizeFor(env), books.length);
@@ -296,9 +307,19 @@ async function runSync(env: RanobeLibRuntimeEnv, options: { full?: boolean }): P
 }
 
 async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book: RanobeLibTeamBookRef): Promise<boolean> {
-  const state = await env.DB.prepare('SELECT snapshot_ready FROM ranobelib_titles WHERE book_ref = ?')
-    .bind(book.ref).first<{ snapshot_ready: number | string }>();
+  const state = await env.DB.prepare(`
+    SELECT snapshot_ready, last_release_at, title, summary, cover_url
+    FROM ranobelib_titles
+    WHERE book_ref = ?
+  `).bind(book.ref).first<{
+    snapshot_ready: number | string;
+    last_release_at: string | null;
+    title: string | null;
+    summary: string | null;
+    cover_url: string | null;
+  }>();
   const snapshotReady = numberFrom(state?.snapshot_ready, 0) === 1;
+  const hasRecordedRelease = typeof state?.last_release_at === 'string' && state.last_release_at.trim().length > 0;
   const previousRows = snapshotReady
     ? (await env.DB.prepare(`
         SELECT chapter_id AS id, volume, number, name, first_seen_at AS firstSeenAt
@@ -306,18 +327,18 @@ async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book:
       `).bind(book.ref).all<RanobeLibChapter>()).results
     : undefined;
 
-  const [title, chapters] = await Promise.all([
-    client.getTitle(book.ref),
-    client.getChapters(book.ref),
-  ]);
+  const chapters = await client.getChapters(book.ref);
   const latest = chapters.length ? chapters[chapters.length - 1]! : null;
   const delta = detectReleaseDelta(book.ref, previousRows, chapters);
   const recoveredScheduled = snapshotReady && previousRows
     ? detectScheduledReleaseTransitions(previousRows, chapters)
     : [];
+  const recentBootstrap = hasRecordedRelease
+    ? []
+    : detectRecentBootstrapReleaseCandidates(chapters);
   const releaseChapters = snapshotReady
-    ? uniqueChapters([...(delta?.added ?? []), ...recoveredScheduled])
-    : [];
+    ? uniqueChapters([...(delta?.added ?? []), ...recoveredScheduled, ...recentBootstrap])
+    : recentBootstrap;
 
   if (!snapshotReady) {
     await insertChapters(env, book.ref, chapters);
@@ -330,7 +351,9 @@ async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book:
     }
   }
 
-  const displayTitle = title.title || humanizeSlug(book.slug);
+  const displayTitle = book.title || state?.title || humanizeSlug(book.slug);
+  const summary = state?.summary ?? null;
+  const coverUrl = normalizeCoverUrl(book.coverUrl ?? state?.cover_url ?? null);
   let releaseCreated = false;
   if (releaseChapters.length > 0) {
     const first = releaseChapters[0]!;
@@ -366,12 +389,12 @@ async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book:
       sync_error = NULL
     WHERE book_ref = ?
   `).bind(
-    title.id ?? book.id,
-    title.slug ?? book.slug,
+    book.id,
+    book.slug,
     book.url,
     displayTitle,
-    title.summary,
-    normalizeCoverUrl(title.coverUrl),
+    summary,
+    coverUrl,
     chapters.length,
     latest?.id ?? null,
     latest?.volume ?? null,

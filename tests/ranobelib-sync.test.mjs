@@ -185,7 +185,13 @@ test('default fetch is invoked as a plain function for Cloudflare Workers compat
   }
 });
 
-test('production sync batch stays within the proven Cloudflare subrequest budget', () => {
+test('production sync checks the whole current team while staying below the 50 external-subrequest ceiling', () => {
   const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
-  assert.equal(wrangler.vars.RANOBELIB_SYNC_BATCH_SIZE, '4');
+  assert.equal(wrangler.vars.RANOBELIB_SYNC_BATCH_SIZE, '40');
+});
+
+test('runtime spends only one RanobeLib HTTP request per processed title', () => {
+  const runtime = readFileSync(new URL('../src/ranobelib-runtime.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(runtime, /client\.getTitle\(/);
+  assert.match(runtime, /client\.getChapters\(book\.ref\)/);
 });
