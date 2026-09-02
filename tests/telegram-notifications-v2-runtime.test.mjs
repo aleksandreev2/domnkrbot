@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   enqueueReleaseNotifications,
   isEffectivelySubscribed,
+  sendTelegramNotificationSelfTest,
   setEffectiveTitleSubscription,
 } from '../dist-runtime/telegram-subscriptions.js';
 
@@ -101,4 +102,29 @@ test('all-mode user can opt out of exactly one title and release fanout respects
   assert.equal(await isEffectivelySubscribed(env, '42', bookRef), true);
   assert.equal(await enqueueReleaseNotifications(env, 'release-on', bookRef), 1);
   assert.ok(db.outbox.has('release-on:42'));
+});
+
+test('notification self-test sends a real Telegram sendMessage to the requesting chat', async () => {
+  assert.equal(typeof sendTelegramNotificationSelfTest, 'function');
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), payload: JSON.parse(String(init?.body || '{}')) });
+    return new Response(JSON.stringify({ ok: true, result: { message_id: 77 } }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+
+  try {
+    await sendTelegramNotificationSelfTest({ DB: new DB(), TELEGRAM_BOT_TOKEN: 'test-token' }, 42);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/bottest-token\/sendMessage$/);
+  assert.equal(calls[0].payload.chat_id, 42);
+  assert.match(calls[0].payload.text, /Тест уведомлений/);
+  assert.match(calls[0].payload.text, /доставка сообщений ботом работает/i);
 });
