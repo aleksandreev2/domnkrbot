@@ -57,9 +57,9 @@ type Env = PublicationCommentGateEnv
   };
 
 async function queueNotificationWakeup(env: Env): Promise<boolean> {
-  const send = env.NOTIFICATION_QUEUE?.send({ kind: 'drain' });
-  if (!send) return false;
   try {
+    const send = env.NOTIFICATION_QUEUE?.send({ kind: 'drain' });
+    if (!send) return false;
     await send;
     return true;
   } catch (error) {
