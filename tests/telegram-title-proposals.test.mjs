@@ -87,7 +87,7 @@ test('plain /start opens the Dom Nekromanta main menu', async () => {
     assert.match(send.payload.text, /Дом Некроманта/);
     const rows = send.payload.reply_markup.inline_keyboard;
     assert.equal(rows[0][0].callback_data, 'prop:new');
-    assert.equal(rows[1][0].callback_data, 'subs:center');
+    assert.equal(rows[1][0].callback_data, 'prop:notifications');
     assert.equal(rows[1][1].callback_data, 'prop:mine');
     assert.equal(rows[2][0].url, 'https://bot.example/');
   });
