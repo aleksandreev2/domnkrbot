@@ -26,6 +26,7 @@
     "src/channel-membership-access.ts",
     "src/admin-user-workspace.ts",
     "src/telegram-subscriptions.ts",
+    "src/telegram-title-proposals.ts",
     "src/telegram-subscription-webhook.ts"
   ]
 }
