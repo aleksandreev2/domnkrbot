@@ -34,19 +34,19 @@ console.log(`Configuring @${me.username} (${me.id})…`);
 
 await call('setMyName', { name: 'Дом Некроманта' });
 await call('setMyDescription', {
-  description: 'Переводы, новые главы и предложения сообщества. Каталог и управление доступны на сайте «Дом Некроманта».',
+  description: 'Переводы, новые главы и предложения сообщества. Предложить новеллу можно прямо в Telegram, каталог и управление доступны на сайте.',
 });
 await call('setMyShortDescription', {
-  short_description: 'Переводы и предложения сообщества «Дом Некроманта».',
+  short_description: 'Переводы, уведомления и предложения новелл «Дом Некроманта».',
 });
 
 await call('setMyCommands', {
   commands: [
-    { command: 'start', description: 'Уведомления о новых главах' },
+    { command: 'start', description: 'Открыть главное меню' },
+    { command: 'propose', description: 'Предложить новеллу на перевод' },
     { command: 'subscriptions', description: 'Управлять подписками' },
     { command: 'notifications', description: 'Настройки уведомлений' },
     { command: 'site', description: 'Открыть сайт' },
-    { command: 'propose', description: 'Предложить перевод' },
     { command: 'help', description: 'Помощь' },
   ],
 });

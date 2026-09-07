@@ -4,9 +4,14 @@ import test from 'node:test';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-test('Telegram entry routes subscription callbacks and commands before the legacy worker', async () => {
+test('Telegram entry routes title proposals before subscriptions and the legacy worker', async () => {
   const source = await read('src/entry.ts');
-  assert.match(source, /handleTelegramSubscriptionWebhookRequest/);
+  const proposalIndex = source.indexOf('handleTelegramTitleProposalWebhookRequest');
+  const subscriptionIndex = source.indexOf('handleTelegramSubscriptionWebhookRequest');
+  const legacyIndex = source.indexOf('baseWorker.fetch');
+  assert.ok(proposalIndex >= 0, 'Telegram title proposal handler must be wired into entry.ts');
+  assert.ok(subscriptionIndex > proposalIndex, 'proposal handler must run before subscription handler');
+  assert.ok(legacyIndex > subscriptionIndex, 'legacy worker must remain the final fallback');
 });
 
 test('Telegram subscription commands bootstrap the RanobeLib catalog before rendering', async () => {

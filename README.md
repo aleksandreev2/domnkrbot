@@ -2,16 +2,37 @@
 
 Обычный web-сайт + Telegram-бот + web-админка для команды переводов «Дом Некроманта».
 
-Telegram Mini App больше не является частью runtime: сайт открывается как обычный HTTPS URL, а Telegram используется для входа, webhook бота и доставки публикаций.
+Telegram Mini App больше не является частью runtime: сайт открывается как обычный HTTPS URL, а Telegram используется для входа, webhook бота, уведомлений, доставки публикаций и предложений новелл на перевод.
 
 ## Архитектура
 
 - Cloudflare Worker — API, Telegram webhook и серверная авторизация;
 - Workers Static Assets — публичный сайт `/` и админка `/admin/`;
-- D1 — пользователи, заявки, RanobeLib snapshot, публикации и metadata файлов;
-- R2 binding `FILES` — изображения и файлы публикаций (опционально до настройки bucket);
+- D1 — пользователи, заявки, состояния Telegram-мастера, RanobeLib snapshot, публикации и metadata файлов;
+- R2 binding `FILES` — изображения, файлы публикаций и RAW заявок;
 - Telegram Login Widget — вход на обычном сайте;
 - RanobeLib sync — Cron + ручной запуск из админки.
+
+## Telegram-бот
+
+`/start` открывает главное меню бота. Основные команды:
+
+- `/propose` — предложить новеллу на перевод;
+- `/subscriptions` — выбрать уведомления по переводам;
+- `/notifications` — настройки уведомлений;
+- `/site` — открыть обычный web-сайт;
+- `/help` — помощь.
+
+Мастер предложения новеллы полностью работает в Telegram и предлагает два пути:
+
+1. **Есть на RanobeLib** — пользователь отправляет название или ссылку, бот ищет произведение в глобальном каталоге RanobeLib и просит подтвердить найденную карточку.
+2. **Нет на RanobeLib** — пользователь вводит название и ссылку на оригинальный источник.
+
+После выбора источника можно приложить RAW именно как Telegram-документ. Поддерживаются `.epub`, `.txt`, `.zip`, `.fb2`, `.docx`; лимит Telegram-мастера — 20 MiB. RAW не подменяется URL: файл можно приложить либо явно пропустить.
+
+Незавершённый мастер хранится серверно и может быть продолжен после следующего сообщения. Активные дубликаты не создаются повторно: существующую заявку можно поддержать голосом. Через `🗂 Мои заявки` пользователь видит свои последние предложения и их статусы.
+
+Сайт при этом остаётся доступен и существующий web-flow заявок продолжает работать.
 
 ## Публичный сайт
 
@@ -30,7 +51,11 @@ Telegram Mini App больше не является частью runtime: са�
 `/admin/` использует интерфейс и publishing workflow, адаптированные из `dollartlbot`:
 
 - обзор и метрики;
-- заявки и смена статусов;
+- единая очередь заявок с вкладками `Новые / Одобрено / В плане / В работе / Закрытые`;
+- фильтры заявок по наличию RanobeLib и поиск по названию;
+- детальная панель заявки с пользователем, голосами, RAW, ссылками и комментариями;
+- глобальный поиск RanobeLib для внешней заявки и привязка найденной карточки без пересоздания заявки;
+- смена статуса с уведомлением автора заявки в Telegram для рабочих/финальных статусов;
 - Publishing Center;
 - автосохранение рабочего черновика;
 - встроенные и пользовательские шаблоны;
@@ -58,7 +83,7 @@ WEBHOOK_URL=https://domnkrbot.<account>.workers.dev
 
 `BOT_USERNAME` и RanobeLib config находятся в `wrangler.jsonc` как обычные non-secret vars.
 
-## Telegram Login для сайта
+## Telegram Login и BotFather
 
 После появления production HTTPS domain:
 
@@ -68,13 +93,13 @@ WEBHOOK_URL=https://domnkrbot.<account>.workers.dev
 
 `configure-bot`:
 
-- настраивает имя/описание и команды `/start`, `/site`, `/propose`, `/help`;
-- сбрасывает старый Web App menu button в обычное меню;
-- устанавливает webhook с `secret_token`.
+- настраивает имя/описание и команды `/start`, `/propose`, `/subscriptions`, `/notifications`, `/site`, `/help`;
+- сбрасывает старый Web App menu button в обычное меню команд;
+- устанавливает webhook с `secret_token` и updates `message`, `callback_query`, `chat_member`.
 
-## R2 для публикаций и файлов
+## R2 для публикаций и RAW
 
-Код файлового workflow уже работает через binding `FILES`, но repository намеренно не содержит выдуманного production bucket name.
+Код файлового workflow работает через binding `FILES`, но repository намеренно не содержит выдуманного production bucket name.
 
 Создайте или выберите отдельный R2 bucket для этого проекта, затем добавьте binding в `wrangler.jsonc`:
 
@@ -94,15 +119,18 @@ WEBHOOK_URL=https://domnkrbot.<account>.workers.dev
 - сайт и D1-функции работают;
 - текстовые publication drafts работают;
 - админка показывает storage как not configured;
-- backend отклоняет загрузку бинарных вложений вместо записи их в D1.
+- backend отклоняет загрузку бинарных вложений вместо записи их в D1;
+- Telegram-заявка без RAW остаётся возможной, но прикреплённый RAW никогда не отбрасывается молча.
 
-## D1 migration
+## D1 migrations
 
-Новая схема публикаций находится в:
+Telegram-предложения добавляются forward-only миграцией:
 
 ```text
-migrations/0004_web_admin_publishing.sql
+migrations/0013_telegram_title_proposals.sql
 ```
+
+Она расширяет существующую модель заявок и добавляет серверное состояние Telegram-мастера; существующие таблицы и колонки не переименовываются и не удаляются.
 
 Безопасный локальный порядок:
 
@@ -132,6 +160,7 @@ npm run dev
 ```bash
 npm run typecheck
 npm test
+npm run build:runtime-test
 npx wrangler deploy --dry-run
 ```
 
@@ -143,7 +172,11 @@ npx wrangler deploy --dry-run
 - `/` и `/admin/`;
 - Telegram Login;
 - admin authorization / negative access;
-- `/start` и webhook secret validation;
+- `/start`, `/propose`, `/subscriptions`, `/notifications` и webhook secret validation;
+- оба пути предложения новеллы: RanobeLib и внешний источник;
+- RAW upload/persist и повторное открытие заявки;
+- admin RanobeLib search/link и конфликт активного дубликата;
+- уведомление автора после смены статуса заявки;
 - RanobeLib read/sync;
 - publication test/publish;
 - image/file upload/download и discussion delivery, если `FILES` подключён;

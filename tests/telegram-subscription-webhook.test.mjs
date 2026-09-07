@@ -90,19 +90,15 @@ async function withTelegramCalls(fn) {
   try { return await fn(calls); } finally { globalThis.fetch = original; }
 }
 
-test('plain /start opens the Telegram subscription list without requiring chapter snapshot readiness', async () => {
+test('plain /start is left for the main Telegram menu handler', async () => {
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/start'), env);
-    assert.equal(response?.status, 200);
-    const send = calls.find((call) => call.kind === 'telegram' && call.method === 'sendMessage');
-    assert.ok(send);
-    assert.equal(send.payload.chat_id, 42);
-    assert.match(send.payload.text, /Уведомления о новых главах/);
-    assert.match(send.payload.reply_markup.inline_keyboard[0][0].text, /Книга 1/);
+    assert.equal(response, null);
+    assert.equal(calls.length, 0);
   });
 });
 
-test('/subscriptions opens the same Telegram subscription list', async () => {
+test('/subscriptions opens the Telegram subscription list', async () => {
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/subscriptions'), env);
     assert.equal(response?.status, 200);
