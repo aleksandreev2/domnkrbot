@@ -3,6 +3,7 @@ import { formatReleaseNotification } from './telegram-subscriptions.js';
 export const DELIVERY_BATCH_LIMIT = 20;
 export const TELEGRAM_SEND_CONCURRENCY = 5;
 export const TELEGRAM_START_INTERVAL_MS = 100;
+const TELEGRAM_STARTS_PER_INTERVAL = 2;
 const CLAIM_LEASE_MINUTES = 10;
 
 type D1AllResult<T> = { results: T[] };
@@ -332,7 +333,9 @@ async function mapWithConcurrency<T, R>(
 }
 
 export function computeTelegramStartDelayMs(index: number, startedAt: number): number {
-  const target = startedAt + Math.max(0, Math.floor(index)) * TELEGRAM_START_INTERVAL_MS;
+  const safeIndex = Math.max(0, Math.floor(index));
+  const intervalIndex = Math.floor(safeIndex / TELEGRAM_STARTS_PER_INTERVAL);
+  const target = startedAt + intervalIndex * TELEGRAM_START_INTERVAL_MS;
   return Math.max(0, target - Date.now());
 }
 
