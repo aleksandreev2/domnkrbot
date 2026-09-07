@@ -127,7 +127,7 @@ class ScanDB {
   }
 }
 
-function chapter(id, number, teamId) {
+function chapter(id, number, teamId, createdAt = '2026-09-07T08:00:00.000Z') {
   return {
     id,
     volume: '1',
@@ -136,7 +136,7 @@ function chapter(id, number, teamId) {
     branches: [{
       id: id + 1000,
       branch_id: 9,
-      created_at: '2026-09-07T08:00:00.000Z',
+      created_at: createdAt,
       teams: [{ id: teamId, slug: teamId === 11969 ? 'dom-nekromanta' : 'other', slug_url: `${teamId}--team` }],
       user: { id: 1, username: 'uploader' },
     }],
@@ -151,7 +151,11 @@ test('fast scan checks only due titles, preserves team filtering and wakes exact
   globalThis.fetch = async (url) => {
     requests.push(String(url));
     if (String(url) === 'https://api.cdnlibs.org/api/manga/77--fast-book/chapters') {
-      return new Response(JSON.stringify({ data: [chapter(101, 1, 11969), chapter(102, 2, 11969), chapter(999, 99, 555)] }), {
+      return new Response(JSON.stringify({ data: [
+        chapter(101, 1, 11969, '2026-09-06T09:00:00.000Z'),
+        chapter(102, 2, 11969),
+        chapter(999, 99, 555),
+      ] }), {
         headers: { 'content-type': 'application/json' },
       });
     }
