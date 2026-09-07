@@ -1,3 +1,9 @@
+import {
+  markTelegramUserBlocked,
+  markTelegramUserReachable,
+  refreshAllNotificationDemand,
+} from './notification-demand.js';
+import type { D1DatabaseLike, D1PreparedStatementLike } from './ranobelib-runtime.js';
 import { formatReleaseNotification } from './telegram-subscriptions.js';
 
 export const DELIVERY_BATCH_LIMIT = 20;
@@ -5,17 +11,6 @@ export const TELEGRAM_SEND_CONCURRENCY = 5;
 export const TELEGRAM_START_INTERVAL_MS = 100;
 const TELEGRAM_STARTS_PER_INTERVAL = 2;
 const CLAIM_LEASE_MINUTES = 10;
-
-type D1AllResult<T> = { results: T[] };
-type D1PreparedStatementLike = {
-  bind(...values: unknown[]): D1PreparedStatementLike;
-  all<T = Record<string, unknown>>(): Promise<D1AllResult<T>>;
-  run(): Promise<unknown>;
-};
-type D1DatabaseLike = {
-  prepare(query: string): D1PreparedStatementLike;
-  batch?(statements: D1PreparedStatementLike[]): Promise<unknown[]>;
-};
 
 export type NotificationDeliveryEnv = {
   DB: D1DatabaseLike;
@@ -112,6 +107,21 @@ export async function drainNotificationOutbox(
   const mutations = outcomes.map((outcome) => outcomeMutation(env, outcome, claimToken));
   await executeStatements(env.DB, mutations);
 
+  // A known blocked user is excluded by the eligibility query below, so a successful send
+  // can only keep an active/missing reachability state active while recording last_success_at.
+  // A 403 is the delivery-side transition that changes effective demand; refresh it once for
+  // the whole drain rather than once per failed recipient.
+  let reachabilityChanged = false;
+  for (const outcome of outcomes) {
+    if (outcome.kind === 'sent') {
+      await markTelegramUserReachable(env, outcome.row.user_telegram_id);
+    } else if (outcome.kind === 'disabled') {
+      await markTelegramUserBlocked(env, outcome.row.user_telegram_id);
+      reachabilityChanged = true;
+    }
+  }
+  if (reachabilityChanged) await refreshAllNotificationDemand(env);
+
   let sent = 0;
   let retry = 0;
   let disabled = 0;
@@ -172,29 +182,37 @@ async function loadClaimedDeliveryRows(
            COALESCE(t.title, r.title_snapshot) AS title, t.url,
            r.chapter_count, r.first_number, r.last_number, r.summary,
            CASE WHEN (
-             EXISTS (
-               SELECT 1
-               FROM telegram_subscription_settings s
-               WHERE s.user_telegram_id = o.user_telegram_id
-                 AND s.all_titles = 1
-                 AND NOT EXISTS (
-                   SELECT 1
-                   FROM title_subscription_exclusions e
-                   WHERE e.user_telegram_id = o.user_telegram_id
-                     AND e.book_ref = r.book_ref
-                 )
+             (
+               EXISTS (
+                 SELECT 1
+                 FROM telegram_subscription_settings s
+                 WHERE s.user_telegram_id = o.user_telegram_id
+                   AND s.all_titles = 1
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM title_subscription_exclusions e
+                     WHERE e.user_telegram_id = o.user_telegram_id
+                       AND e.book_ref = r.book_ref
+                   )
+               )
+               OR EXISTS (
+                 SELECT 1
+                 FROM title_subscriptions ts
+                 WHERE ts.user_telegram_id = o.user_telegram_id
+                   AND ts.book_ref = r.book_ref
+                   AND NOT EXISTS (
+                     SELECT 1
+                     FROM telegram_subscription_settings s2
+                     WHERE s2.user_telegram_id = o.user_telegram_id
+                       AND s2.all_titles = 1
+                   )
+               )
              )
-             OR EXISTS (
+             AND NOT EXISTS (
                SELECT 1
-               FROM title_subscriptions ts
-               WHERE ts.user_telegram_id = o.user_telegram_id
-                 AND ts.book_ref = r.book_ref
-                 AND NOT EXISTS (
-                   SELECT 1
-                   FROM telegram_subscription_settings s2
-                   WHERE s2.user_telegram_id = o.user_telegram_id
-                     AND s2.all_titles = 1
-                 )
+               FROM telegram_delivery_reachability reach
+               WHERE reach.user_telegram_id = o.user_telegram_id
+                 AND reach.state = 'blocked'
              )
            ) THEN 1 ELSE 0 END AS eligible,
            EXISTS (
