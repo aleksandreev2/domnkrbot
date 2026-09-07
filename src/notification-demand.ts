@@ -4,8 +4,21 @@ export const IDLE_SCAN_DELAY_MINUTES = 180;
 export const DEMAND_WAKE_PRIORITY_BOOST = 10;
 
 type NotificationDemandEnv = { DB: D1DatabaseLike };
+type NotificationDemandWebhookEnv = NotificationDemandEnv & { TELEGRAM_WEBHOOK_SECRET?: string };
 
 type DemandCountRow = { notification_subscriber_count: number | string };
+type ReachabilityRow = { user_telegram_id: string };
+type TelegramWebhookActor = { id: number | string };
+type TelegramWebhookUpdate = {
+  message?: {
+    chat?: { type?: string };
+    from?: TelegramWebhookActor;
+  };
+  callback_query?: {
+    from?: TelegramWebhookActor;
+    message?: { chat?: { type?: string } };
+  };
+};
 
 export type TelegramDeliveryReachabilityOutcome = {
   userTelegramId: string;
@@ -148,19 +161,47 @@ export async function markTelegramUserBlocked(env: NotificationDemandEnv, userId
   `).bind(id).run();
 }
 
-export async function markTelegramUserReachable(env: NotificationDemandEnv, userId: string): Promise<void> {
+export async function markTelegramUserReachable(env: NotificationDemandEnv, userId: string): Promise<boolean> {
   const id = String(userId || '').trim();
-  if (!id) return;
-  await env.DB.prepare(`
-    INSERT INTO telegram_delivery_reachability (
-      user_telegram_id, state, blocked_at, last_success_at, updated_at
-    ) VALUES (?, 'active', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    ON CONFLICT(user_telegram_id) DO UPDATE SET
-      state = 'active',
-      blocked_at = NULL,
-      last_success_at = CURRENT_TIMESTAMP,
-      updated_at = CURRENT_TIMESTAMP
-  `).bind(id).run();
+  if (!id) return false;
+
+  // Missing reachability rows are already treated as active everywhere. Only persist an
+  // actual blocked→active transition, so ordinary bot interactions do not create D1 churn.
+  const row = await env.DB.prepare(`
+    UPDATE telegram_delivery_reachability
+    SET state = 'active', blocked_at = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE user_telegram_id = ? AND state = 'blocked'
+    RETURNING user_telegram_id
+  `).bind(id).first<ReachabilityRow>();
+  return Boolean(row?.user_telegram_id);
+}
+
+export async function reactivateTelegramUserFromWebhookRequest(
+  request: Request,
+  env: NotificationDemandWebhookEnv,
+): Promise<boolean> {
+  const url = new URL(request.url);
+  if (request.method !== 'POST' || url.pathname !== '/telegram/webhook') return false;
+
+  const expected = env.TELEGRAM_WEBHOOK_SECRET?.trim() ?? '';
+  if (!expected || request.headers.get('x-telegram-bot-api-secret-token') !== expected) return false;
+
+  const update = await request.clone().json().catch(() => null) as TelegramWebhookUpdate | null;
+  if (!update) return false;
+
+  let actor: TelegramWebhookActor | undefined;
+  if (update.message?.chat?.type === 'private') {
+    actor = update.message.from;
+  } else if (update.callback_query?.message?.chat?.type === 'private') {
+    actor = update.callback_query.from;
+  }
+
+  const userId = String(actor?.id ?? '').trim();
+  if (!userId) return false;
+
+  const changed = await markTelegramUserReachable(env, userId);
+  if (changed) await refreshAllNotificationDemand(env);
+  return changed;
 }
 
 export async function recordTelegramDeliveryReachability(
@@ -169,14 +210,17 @@ export async function recordTelegramDeliveryReachability(
 ): Promise<void> {
   if (!outcomes.length) return;
 
-  // Last delivery result wins for duplicate users in the same drain. This keeps the JSON
-  // payload unique by primary key and guarantees a single bounded D1 write for the batch.
+  // Delivery requests are concurrent, so array order is not a reliable chronology. A 403
+  // must win over any success observed for the same user in this drain; a later real user
+  // interaction can explicitly reactivate that recipient.
   const byUser = new Map<string, 'active' | 'blocked'>();
   for (const outcome of outcomes) {
     const userTelegramId = String(outcome?.userTelegramId || '').trim();
     if (!userTelegramId) continue;
     if (outcome.state !== 'active' && outcome.state !== 'blocked') continue;
-    byUser.set(userTelegramId, outcome.state);
+    const previous = byUser.get(userTelegramId);
+    if (previous === 'blocked') continue;
+    if (!previous || outcome.state === 'blocked') byUser.set(userTelegramId, outcome.state);
   }
   if (!byUser.size) return;
 
