@@ -71,7 +71,7 @@ export async function handleTelegramSubscriptionWebhookRequest(
     return json({ ok: true });
   }
 
-  if (message.from && (isPlainCommand(text, 'start') || isPlainCommand(text, 'subscriptions'))) {
+  if (message.from && isPlainCommand(text, 'subscriptions')) {
     await prepareCatalog(env);
     await sendTelegramSubscriptionMenu(subscriptionEnv, message.from, message.chat.id, 0);
     return json({ ok: true });
