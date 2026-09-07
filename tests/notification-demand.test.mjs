@@ -96,6 +96,30 @@ test('reachability helpers persist blocked and active states without changing su
   }
 });
 
+test('delivery reachability outcomes are deduplicated and persisted with one JSON D1 write', async () => {
+  const demand = await loadDemand();
+  const db = new CaptureDB();
+
+  await demand.recordTelegramDeliveryReachability({ DB: db }, [
+    { userTelegramId: '123', state: 'active' },
+    { userTelegramId: '456', state: 'blocked' },
+    { userTelegramId: '123', state: 'blocked' },
+    { userTelegramId: '', state: 'active' },
+  ]);
+
+  assert.equal(db.calls.length, 1, 'a delivery batch must update reachability with one D1 statement');
+  const call = db.calls[0];
+  assert.match(call.query, /json_each/i);
+  assert.match(call.query, /INSERT\s+INTO\s+telegram_delivery_reachability/i);
+  assert.match(call.query, /ON\s+CONFLICT\s*\(\s*user_telegram_id\s*\)/i);
+  assert.equal(call.values.length, 1);
+  const payload = JSON.parse(call.values[0]);
+  assert.deepEqual(payload, [
+    { userTelegramId: '123', state: 'blocked' },
+    { userTelegramId: '456', state: 'blocked' },
+  ]);
+});
+
 test('migration 0015 is forward-only, adds demand/reachability state, and initializes effective demand', () => {
   const sql = readFileSync(new URL('../migrations/0015_paid_backend_demand_aware.sql', import.meta.url), 'utf8');
   assert.match(sql, /ADD COLUMN notification_subscriber_count INTEGER NOT NULL DEFAULT 0/i);
