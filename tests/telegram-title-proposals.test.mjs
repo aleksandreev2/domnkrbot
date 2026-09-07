@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { handleTelegramTitleProposalWebhookRequest } from '../dist-runtime/telegram-title-proposals.js';
 
@@ -62,4 +63,16 @@ test('invalid Telegram webhook secret is not claimed by the proposal handler', a
     assert.equal(response, null);
     assert.equal(calls.length, 0);
   });
+});
+
+test('proposal migration extends existing proposals and creates resumable Telegram sessions', async () => {
+  const sql = await readFile(new URL('../migrations/0013_telegram_title_proposals.sql', import.meta.url), 'utf8');
+  assert.match(sql, /ALTER TABLE chapter_proposals ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'legacy'/);
+  assert.match(sql, /ALTER TABLE chapter_proposals ADD COLUMN ranobelib_book_ref TEXT/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS telegram_proposal_sessions/);
+  assert.match(sql, /candidates_json TEXT NOT NULL DEFAULT '\[\]'/);
+  assert.match(sql, /raw_file_id TEXT/);
+  assert.match(sql, /raw_file_unique_id TEXT/);
+  assert.match(sql, /updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP/);
+  assert.doesNotMatch(sql, /FOREIGN KEY \(ranobelib_book_ref\)/, 'global RanobeLib proposals must not depend on the team-only local catalog');
 });
