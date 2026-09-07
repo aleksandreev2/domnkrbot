@@ -32,6 +32,9 @@ test('compatibility auto-kick is permanently disabled while manual admin sync us
   assert.match(runtime, /import\('\.\/ranobelib-fast-scanner\.js'\)/);
   assert.match(runtime, /discoverRanobeLibTeam\(env\)/);
   assert.match(runtime, /scanDueRanobeLibTitles\(env/);
+  assert.match(runtime, /scanIdleRanobeLibTitles\(env/);
+  assert.match(runtime, /processed:\s*hotScan\.selected\s*\+\s*idleScan\.selected/);
+  assert.match(runtime, /newReleases:\s*hotScan\.newReleases\s*\+\s*idleScan\.newReleases/);
 });
 
 test('obsolete legacy sync batch configuration is removed', () => {
