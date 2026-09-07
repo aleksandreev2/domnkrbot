@@ -24,14 +24,15 @@ test('Telegram subscription commands bootstrap the RanobeLib catalog before rend
   assert.match(catalog, /replace\(\/\\s\+AND snapshot_ready = 1\/g/);
 });
 
-test('scheduled production entry initializes subscription delivery before RanobeLib sync and drains the outbox afterwards', async () => {
+test('scheduled production entry routes notification v3 jobs directly without the legacy combined cron', async () => {
   const source = await read('src/live-entry-v2.ts');
-  const ensureIndex = source.indexOf('await ensureTelegramSubscriptionDeliverySchema(env)');
-  const baseIndex = source.indexOf('await baseWorker.scheduled');
-  const deliveryIndex = source.indexOf('deliverPendingReleaseNotifications');
-  assert.ok(ensureIndex >= 0, 'subscription delivery schema must be initialized in the scheduled entry');
-  assert.ok(baseIndex > ensureIndex, 'notification trigger must exist before RanobeLib cron can insert releases');
-  assert.ok(deliveryIndex >= 0, 'notification outbox must be drained after synchronization');
+  const scheduled = source.slice(source.indexOf('async scheduled('));
+  assert.match(scheduled, /scanDueRanobeLibTitles/);
+  assert.match(scheduled, /discoverRanobeLibTeam/);
+  assert.match(scheduled, /drainNotificationOutbox/);
+  assert.match(scheduled, /runChannelMembershipMaintenance/);
+  assert.doesNotMatch(scheduled, /baseWorker\.scheduled/);
+  assert.doesNotMatch(scheduled, /deliverPendingReleaseNotifications/);
 });
 
 test('subscription delivery runtime leaves the release fanout trigger to migrations', async () => {
