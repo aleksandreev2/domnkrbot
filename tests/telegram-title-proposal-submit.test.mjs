@@ -15,6 +15,10 @@ class SubmitStatement {
     const q = this.query;
     if (q.includes('FROM telegram_proposal_sessions')) return this.db.session;
     if (q.includes('ranobelib_book_ref') && q.includes('FROM chapter_proposals')) return this.db.ranobelibDuplicate;
+    if (q.includes('FROM chapter_proposals') && q.includes('WHERE id=?')) {
+      const id = String(this.values[0] ?? '');
+      return this.db.proposals.get(id) ?? null;
+    }
     if (q.includes('FROM proposal_votes') && !q.includes('COUNT(')) {
       const [proposalId, userId] = this.values.map(String);
       return this.db.votes.has(`${proposalId}:${userId}`) ? { proposal_id: proposalId } : null;
@@ -24,10 +28,6 @@ class SubmitStatement {
       let count = 0;
       for (const vote of this.db.votes) if (vote.startsWith(`${proposalId}:`)) count += 1;
       return { count };
-    }
-    if (q.includes('FROM chapter_proposals') && q.includes('WHERE id=?')) {
-      const id = String(this.values[0] ?? '');
-      return this.db.proposals.get(id) ?? null;
     }
     return null;
   }
