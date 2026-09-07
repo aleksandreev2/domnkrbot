@@ -86,8 +86,9 @@ test('recovers only fresh chapters after an empty snapshot outage instead of rep
   assert.deepEqual(recovered.map((chapter) => chapter.number), ['15']);
 });
 
-test('runtime wires recent bootstrap recovery into release creation', () => {
-  const runtime = readFileSync(new URL('../src/ranobelib-runtime.ts', import.meta.url), 'utf8');
-  assert.match(runtime, /detectRecentBootstrapReleaseCandidates/);
-  assert.match(runtime, /last_release_at/);
+test('fast scanner wires recent bootstrap recovery into release creation', () => {
+  const scanner = readFileSync(new URL('../src/ranobelib-fast-scanner.ts', import.meta.url), 'utf8');
+  assert.match(scanner, /detectRecentBootstrapReleaseCandidates/);
+  assert.match(scanner, /hasRecordedRelease/);
+  assert.match(scanner, /releaseChapters/);
 });
