@@ -146,6 +146,6 @@ test('migration 0016 is forward-only and owns delivery-mode production schema', 
   assert.match(migration, /ALTER TABLE telegram_subscription_settings ADD COLUMN stack_size INTEGER/i);
   assert.match(migration, /CREATE TABLE telegram_title_delivery_settings/i);
   assert.match(migration, /CREATE TABLE telegram_notification_input_state/i);
-  assert.match(migration, /delivery_mode='stack'[\s\S]*stack_size BETWEEN 2 AND 100/i);
+  assert.match(migration, /delivery_mode\s*=\s*'stack'[\s\S]*stack_size BETWEEN 2 AND 100/i);
   assert.doesNotMatch(migration, /DROP\s+(TABLE|TRIGGER)/i);
 });
