@@ -140,13 +140,14 @@ async function handleStatusUpdate(
     WHERE id=? LIMIT 1
   `).bind(proposalId).first<ProposalStatusRow>();
   if (!existing) return json({ error: 'Заявка не найдена.' }, 404);
+  const previousStatus = existing.status;
 
   await env.DB.prepare(`
     UPDATE chapter_proposals SET status=?,admin_note=?,updated_at=CURRENT_TIMESTAMP WHERE id=?
   `).bind(status, adminNote, proposalId).run();
 
   let notificationSent = false;
-  if (existing.status !== status && NOTIFIED_STATUSES.has(status)) {
+  if (previousStatus !== status && NOTIFIED_STATUSES.has(status)) {
     try {
       await sendStatusNotification(env, existing, status, adminNote);
       notificationSent = true;
