@@ -1,5 +1,9 @@
 import baseWorker from './live-entry.js';
 import {
+  runChannelMembershipMaintenance,
+  type ChannelMembershipEnv,
+} from './channel-membership-access.js';
+import {
   handlePublicationCommentGateRequest,
   handlePublicationCommentGateWebhook,
   type CommentGateExecutionContext,
@@ -18,22 +22,58 @@ import {
   type PublicationReleaseAnalyticsEnv,
 } from './publication-release-analytics.js';
 import { handlePublishingAnalyticsV2, type PublishingAnalyticsV2Env } from './publishing-analytics-v2.js';
-import { ensureTelegramSubscriptionDeliverySchema } from './telegram-subscription-delivery-schema.js';
+import { discoverRanobeLibTeam } from './ranobelib-discovery-scheduler.js';
+import { FAST_SCAN_LIMIT, scanDueRanobeLibTitles } from './ranobelib-fast-scanner.js';
 import {
-  deliverPendingReleaseNotifications,
-  type TelegramSubscriptionEnv,
-} from './telegram-subscriptions.js';
+  DELIVERY_BATCH_LIMIT,
+  drainNotificationOutbox,
+  type NotificationDeliveryEnv,
+} from './telegram-notification-delivery.js';
+import { type TelegramSubscriptionEnv } from './telegram-subscriptions.js';
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
-const NOTIFICATION_DELIVERY_CRON = '* * * * *';
+type NotificationWakeup = { kind: 'drain' };
+type QueueProducerLike = { send(message: NotificationWakeup): Promise<void> };
+type QueueMessageLike = { body: unknown };
+type QueueBatchLike = { messages: QueueMessageLike[] };
+
+const FAST_SCAN_CRON = '* * * * *';
+const DISCOVERY_CRON = '*/30 * * * *';
+const FALLBACK_DELIVERY_CRON = '*/5 * * * *';
+const MEMBERSHIP_CRON = '0 * * * *';
 
 type Env = PublicationCommentGateEnv
   & PublishingAnalyticsV2Env
   & PublicationReaderDeliveryEnv
   & PublicationFileCachePrewarmEnv
   & PublicationReleaseAnalyticsEnv
-  & TelegramSubscriptionEnv;
+  & TelegramSubscriptionEnv
+  & ChannelMembershipEnv
+  & NotificationDeliveryEnv
+  & {
+    RANOBELIB_TEAM_REF?: string;
+    NOTIFICATION_QUEUE?: QueueProducerLike;
+  };
+
+async function queueNotificationWakeup(env: Env): Promise<boolean> {
+  try {
+    const send = env.NOTIFICATION_QUEUE?.send({ kind: 'drain' });
+    if (!send) return false;
+    await send;
+    return true;
+  } catch (error) {
+    console.error('Notification Queue wake-up failed', error);
+    return false;
+  }
+}
+
+function parseWakeup(body: unknown): NotificationWakeup | null {
+  if (!body || typeof body !== 'object') return null;
+  const value = body as Record<string, unknown>;
+  if (value.kind !== 'drain') return null;
+  return { kind: 'drain' };
+}
 
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
@@ -58,18 +98,44 @@ export default {
     return baseWorker.fetch(request, env as never, ctx as never);
   },
 
-  async scheduled(controller: ScheduledControllerLike, env: Env, ctx: CommentGateExecutionContext): Promise<void> {
-    // Keep Telegram sends in their own Worker invocation so RanobeLib sync and membership
-    // maintenance cannot consume the Free-plan external-subrequest budget first.
-    if (controller.cron === NOTIFICATION_DELIVERY_CRON) {
-      await ensureTelegramSubscriptionDeliverySchema(env);
-      const delivery = await deliverPendingReleaseNotifications(env, 40);
-      console.log('RanobeLib Telegram notification delivery complete', delivery);
+  async scheduled(controller: ScheduledControllerLike, env: Env, _ctx: CommentGateExecutionContext): Promise<void> {
+    if (controller.cron === FAST_SCAN_CRON) {
+      const scan = await scanDueRanobeLibTitles(env, { limit: FAST_SCAN_LIMIT });
+      if (scan.newReleases > 0) await queueNotificationWakeup(env);
+      console.log('RanobeLib fast scan complete', { cron: controller.cron, ...scan });
       return;
     }
 
-    // The release fan-out trigger must exist before RanobeLib sync inserts a release.
-    await ensureTelegramSubscriptionDeliverySchema(env);
-    await baseWorker.scheduled(controller as never, env as never, ctx as never);
+    if (controller.cron === DISCOVERY_CRON) {
+      const discovery = await discoverRanobeLibTeam(env);
+      console.log('RanobeLib team discovery complete', { cron: controller.cron, ...discovery });
+      return;
+    }
+
+    if (controller.cron === FALLBACK_DELIVERY_CRON) {
+      const delivery = await drainNotificationOutbox(env, { limit: DELIVERY_BATCH_LIMIT });
+      console.log('Telegram notification fallback delivery complete', delivery);
+      return;
+    }
+
+    if (controller.cron === MEMBERSHIP_CRON) {
+      const membership = await runChannelMembershipMaintenance(env, 40);
+      console.log('Channel membership maintenance complete', membership);
+      return;
+    }
+
+    console.warn('Unknown scheduled cron ignored', controller.cron);
+  },
+
+  async queue(batch: QueueBatchLike, env: Env, _ctx: CommentGateExecutionContext): Promise<void> {
+    const message = batch.messages[0];
+    const wakeup = parseWakeup(message?.body);
+    if (!wakeup) return;
+
+    if (wakeup.kind === 'drain') {
+      const delivery = await drainNotificationOutbox(env, { limit: DELIVERY_BATCH_LIMIT });
+      console.log('Telegram notification Queue delivery complete', delivery);
+      if (delivery.hasMoreDue) await queueNotificationWakeup(env);
+    }
   },
 };

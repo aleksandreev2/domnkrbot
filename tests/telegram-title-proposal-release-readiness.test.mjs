@@ -21,7 +21,8 @@ test('README documents Telegram proposal wizard, document RAW limits, and the we
   assert.match(readme, /внешн/i);
   assert.match(readme, /RAW/i);
   assert.match(readme, /20\s*MiB/i);
-  for (const ext of ['.epub', '.txt', '.zip', '.fb2', '.docx']) assert.ok(readme.includes(ext), `README must mention ${ext}`);
+  for (const ext of ['.epub', '.txt', '.zip', '.pdf', '.docx']) assert.ok(readme.includes(ext), `README must mention ${ext}`);
+  assert.equal(readme.includes('.fb2'), false, 'README must not claim unsupported .fb2 RAW uploads');
   assert.match(readme, /сайт/i);
 });
 
