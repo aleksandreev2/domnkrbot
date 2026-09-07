@@ -2,6 +2,7 @@ import { formatReleaseNotification } from './telegram-subscriptions.js';
 
 export const DELIVERY_BATCH_LIMIT = 20;
 export const TELEGRAM_SEND_CONCURRENCY = 5;
+export const TELEGRAM_START_INTERVAL_MS = 100;
 const CLAIM_LEASE_MINUTES = 10;
 
 type D1AllResult<T> = { results: T[] };
@@ -22,7 +23,6 @@ export type NotificationDeliveryEnv = {
 
 export type NotificationDrainOptions = {
   limit?: number;
-  releaseId?: string;
 };
 
 export type NotificationDeliveryResult = {
@@ -32,6 +32,7 @@ export type NotificationDeliveryResult = {
   disabled: number;
   skipped: number;
   rateLimited: number;
+  hasMoreDue: boolean;
 };
 
 type ClaimedKey = {
@@ -53,6 +54,7 @@ type DeliveryRow = {
   last_number: string | null;
   summary: string;
   eligible: number | string;
+  has_more_due: number | string;
 };
 
 type DeliveryOutcome =
@@ -85,18 +87,24 @@ export async function drainNotificationOutbox(
 ): Promise<NotificationDeliveryResult> {
   const limit = clampInt(options.limit ?? DELIVERY_BATCH_LIMIT, 1, DELIVERY_BATCH_LIMIT);
   const claimToken = crypto.randomUUID();
-  const claimedKeys = await claimDeliveryRows(env, limit, options.releaseId, claimToken);
+  const claimedKeys = await claimDeliveryRows(env, limit, claimToken);
   if (!claimedKeys.length) return emptyDeliveryResult();
 
   const rows = await loadClaimedDeliveryRows(env, claimToken);
+  const hasMoreDue = rows.some((row) => Number(row.has_more_due) === 1);
   const eligibleRows = rows.filter((row) => Number(row.eligible) === 1);
   const skippedRows = rows.filter((row) => Number(row.eligible) !== 1);
 
   const outcomes: DeliveryOutcome[] = skippedRows.map((row) => ({ kind: 'skipped', row }));
+  const deliveryStartedAt = Date.now();
   const sendOutcomes = await mapWithConcurrency(
     eligibleRows,
     TELEGRAM_SEND_CONCURRENCY,
-    (row) => deliverOne(env, row),
+    async (row, index) => {
+      const delayMs = computeTelegramStartDelayMs(index, deliveryStartedAt);
+      if (delayMs > 0) await sleep(delayMs);
+      return deliverOne(env, row);
+    },
   );
   outcomes.push(...sendOutcomes);
 
@@ -125,16 +133,15 @@ export async function drainNotificationOutbox(
     disabled,
     skipped,
     rateLimited,
+    hasMoreDue,
   };
 }
 
 async function claimDeliveryRows(
   env: NotificationDeliveryEnv,
   limit: number,
-  releaseId: string | undefined,
   claimToken: string,
 ): Promise<ClaimedKey[]> {
-  const releaseFilter = releaseId ? 'AND release_id = ?' : '';
   const statement = env.DB.prepare(`
     UPDATE ranobelib_notification_outbox
     SET claim_token = ?,
@@ -146,16 +153,12 @@ async function claimDeliveryRows(
       WHERE status IN ('pending','retry')
         AND available_at <= CURRENT_TIMESTAMP
         AND (claim_token IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= CURRENT_TIMESTAMP)
-        ${releaseFilter}
       ORDER BY created_at ASC
       LIMIT ?
     )
     RETURNING release_id, user_telegram_id
   `);
-  const bound = releaseId
-    ? statement.bind(claimToken, releaseId, limit)
-    : statement.bind(claimToken, limit);
-  return resultRows<ClaimedKey>(await bound.run());
+  return resultRows<ClaimedKey>(await statement.bind(claimToken, limit).run());
 }
 
 async function loadClaimedDeliveryRows(
@@ -192,7 +195,19 @@ async function loadClaimedDeliveryRows(
                      AND s2.all_titles = 1
                  )
              )
-           ) THEN 1 ELSE 0 END AS eligible
+           ) THEN 1 ELSE 0 END AS eligible,
+           EXISTS (
+             SELECT 1 AS due
+             FROM ranobelib_notification_outbox pending
+             WHERE pending.status IN ('pending','retry')
+               AND pending.available_at <= CURRENT_TIMESTAMP
+               AND (
+                 pending.claim_token IS NULL
+                 OR pending.claim_expires_at IS NULL
+                 OR pending.claim_expires_at <= CURRENT_TIMESTAMP
+               )
+             LIMIT 1
+           ) AS has_more_due
     FROM ranobelib_notification_outbox o
     JOIN ranobelib_releases r ON r.id = o.release_id
     JOIN ranobelib_titles t ON t.book_ref = r.book_ref
@@ -228,8 +243,8 @@ async function deliverOne(env: NotificationDeliveryEnv, row: DeliveryRow): Promi
       if (error.status === 403 || error.errorCode === 403) {
         return { kind: 'disabled', row, error: message };
       }
-      if (error.status === 429 || error.errorCode === 429) {
-        const retryAfter = clampInt(error.retryAfter ?? 60, 1, 3600);
+      if ((error.status === 429 || error.errorCode === 429) && error.retryAfter !== null) {
+        const retryAfter = clampInt(error.retryAfter, 1, 3600);
         return { kind: 'retry', row, error: message, retryAfterSeconds: retryAfter };
       }
     }
@@ -280,7 +295,7 @@ function outcomeMutation(
   return env.DB.prepare(`
     UPDATE ranobelib_notification_outbox
     SET status='retry', attempts=attempts+1,
-        available_at=datetime('now', '+' || MIN(attempts + 1, 10) || ' minutes'),
+        available_at=datetime('now', '+' || MIN(30, MAX(1, attempts + 1)) || ' minutes'),
         claim_token=NULL, claim_expires_at=NULL,
         last_error=?, updated_at=CURRENT_TIMESTAMP
     WHERE release_id = ? AND user_telegram_id = ? AND claim_token = ?
@@ -316,6 +331,16 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+export function computeTelegramStartDelayMs(index: number, startedAt: number): number {
+  const target = startedAt + Math.max(0, Math.floor(index)) * TELEGRAM_START_INTERVAL_MS;
+  return Math.max(0, target - Date.now());
+}
+
+async function sleep(ms: number): Promise<void> {
+  if (ms <= 0) return;
+  await new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 async function telegramCall<T>(
   env: NotificationDeliveryEnv,
   method: string,
@@ -345,7 +370,15 @@ function resultRows<T>(result: unknown): T[] {
 }
 
 function emptyDeliveryResult(): NotificationDeliveryResult {
-  return { claimed: 0, sent: 0, retry: 0, disabled: 0, skipped: 0, rateLimited: 0 };
+  return {
+    claimed: 0,
+    sent: 0,
+    retry: 0,
+    disabled: 0,
+    skipped: 0,
+    rateLimited: 0,
+    hasMoreDue: false,
+  };
 }
 
 function clampInt(value: number, min: number, max: number): number {
