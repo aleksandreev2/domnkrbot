@@ -7,6 +7,15 @@ type D1PreparedStatement = {
 
 type D1Database = { prepare(query: string): D1PreparedStatement };
 
+type R2PutResult = { etag?: string } | unknown;
+type R2BucketLike = {
+  put(
+    key: string,
+    value: ReadableStream | ArrayBuffer | Uint8Array,
+    options?: { httpMetadata?: { contentType?: string } },
+  ): Promise<R2PutResult>;
+};
+
 type TelegramUser = {
   id: number;
   first_name: string;
@@ -62,6 +71,22 @@ type ProposalSession = {
   updated_at: string;
 };
 
+type ProposalRecord = {
+  id: string;
+  user_telegram_id: string;
+  proposal_type?: string;
+  title: string;
+  source_url?: string;
+  source_kind?: string;
+  ranobelib_book_ref?: string | null;
+  comment?: string;
+  status: string;
+  admin_note?: string;
+  created_at?: string;
+  updated_at?: string;
+  vote_count?: number | string;
+};
+
 type RanobeLibTeam = {
   id?: number;
   name?: string;
@@ -92,6 +117,7 @@ type RanobeLibChapter = {
 
 export interface TelegramTitleProposalEnv {
   DB: D1Database;
+  FILES?: R2BucketLike;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_WEBHOOK_SECRET?: string;
 }
@@ -104,6 +130,7 @@ const MAX_TELEGRAM_RAW_BYTES = 20 * 1024 * 1024;
 const ALLOWED_RAW_EXTENSIONS = new Set([
   'zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'txt', 'md', 'rtf', 'pdf', 'epub', 'doc', 'docx',
 ]);
+const ACTIVE_PROPOSAL_STATUSES = new Set(['pending', 'approved', 'planned', 'in_progress']);
 const RANOBELIB_API_BASE = 'https://api.cdnlibs.org/api';
 const RANOBELIB_SITE_ID = '3';
 
@@ -124,10 +151,43 @@ function extensionFor(filename: string): string {
   return match?.[1]?.toLowerCase() ?? '';
 }
 
+function safeFilename(filename: string): string {
+  return filename.replace(/[\r\n"\\/]/g, '_').slice(0, 180) || 'raw.bin';
+}
+
 function escapeHtml(value: unknown): string {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[char] ?? char));
+}
+
+function normalizeTitleKey(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function normalizeSourceKey(value: string): string {
+  if (!value.trim()) return '';
+  try {
+    const url = new URL(value.trim());
+    const host = url.hostname.toLowerCase();
+    let path = url.pathname.replace(/\/{2,}/g, '/');
+    if (path.length > 1) path = path.replace(/\/+$/, '');
+    return `${host}${path || '/'}`;
+  } catch {
+    return '';
+  }
+}
+
+function localizedStatus(status: string): string {
+  switch (status) {
+    case 'pending': return '🟡 На рассмотрении';
+    case 'approved': return '🟣 Одобрено';
+    case 'planned': return '🔵 В плане';
+    case 'in_progress': return '🟢 Перевод начат';
+    case 'done': return '✅ Готово';
+    case 'rejected': return '🔴 Отклонено';
+    default: return status || 'Неизвестно';
+  }
 }
 
 function parseRanobeLibBookRef(value: string): string | null {
@@ -288,6 +348,36 @@ async function telegramCall(
   if (!response.ok || !body?.ok) {
     throw new Error(body?.description || `Telegram ${method} failed with HTTP ${response.status}`);
   }
+}
+
+async function telegramGetFilePath(env: TelegramTitleProposalEnv, fileId: string): Promise<string> {
+  const token = env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
+  const response = await fetch(`https://api.telegram.org/bot${token}/getFile`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ file_id: fileId }),
+  });
+  const body = await response.json().catch(() => null) as {
+    ok?: boolean;
+    description?: string;
+    result?: { file_path?: string };
+  } | null;
+  const path = body?.result?.file_path?.trim();
+  if (!response.ok || !body?.ok || !path) {
+    throw new Error(body?.description || `Telegram getFile failed with HTTP ${response.status}`);
+  }
+  return path;
+}
+
+async function downloadTelegramFile(env: TelegramTitleProposalEnv, filePath: string): Promise<ArrayBuffer> {
+  const token = env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
+  const response = await fetch(`https://api.telegram.org/file/bot${token}/${filePath.replace(/^\/+/, '')}`);
+  if (!response.ok) throw new Error(`Telegram file download failed with HTTP ${response.status}`);
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength > MAX_TELEGRAM_RAW_BYTES) throw new Error('Telegram RAW exceeded 20 MiB after download');
+  return bytes;
 }
 
 async function sendMessage(
@@ -480,6 +570,235 @@ async function skipComment(env: TelegramTitleProposalEnv, userId: number): Promi
   `).bind('review', String(userId)).run();
 }
 
+async function findActiveDuplicate(
+  env: TelegramTitleProposalEnv,
+  session: ProposalSession,
+): Promise<ProposalRecord | null> {
+  if (session.source_kind === 'ranobelib' && session.ranobelib_book_ref) {
+    return env.DB.prepare(`
+      SELECT id,user_telegram_id,title,source_url,status,
+             (SELECT COUNT(*) FROM proposal_votes WHERE proposal_id=chapter_proposals.id) AS vote_count
+      FROM chapter_proposals
+      WHERE ranobelib_book_ref=? AND status IN ('pending','approved','planned','in_progress')
+      ORDER BY created_at ASC LIMIT 1
+    `).bind(session.ranobelib_book_ref).first<ProposalRecord>();
+  }
+
+  const titleKey = normalizeTitleKey(session.title);
+  const sourceKey = normalizeSourceKey(session.source_url);
+  const { results } = await env.DB.prepare(`
+    SELECT id,user_telegram_id,title,source_url,status,
+           (SELECT COUNT(*) FROM proposal_votes WHERE proposal_id=chapter_proposals.id) AS vote_count
+    FROM chapter_proposals
+    WHERE proposal_type='title' AND status IN ('pending','approved','planned','in_progress')
+    ORDER BY created_at ASC LIMIT 80
+  `).all<ProposalRecord>();
+  for (const candidate of results) {
+    if (normalizeTitleKey(candidate.title) !== titleKey) continue;
+    const candidateSourceKey = normalizeSourceKey(candidate.source_url ?? '');
+    if (sourceKey && candidateSourceKey && sourceKey !== candidateSourceKey) continue;
+    if (sourceKey && !candidateSourceKey) continue;
+    return candidate;
+  }
+  return null;
+}
+
+function buildDuplicateMessage(duplicate: ProposalRecord, currentUserId: number): Record<string, unknown> {
+  const votes = Number(duplicate.vote_count || 0);
+  const buttons: Record<string, string>[][] = [];
+  if (duplicate.user_telegram_id !== String(currentUserId)) {
+    buttons.push([{ text: '👍 Поддержать заявку', callback_data: `prop:support:${duplicate.id}` }]);
+  }
+  buttons.push([{ text: '👁 Посмотреть', callback_data: `prop:view:${duplicate.id}` }]);
+  buttons.push([{ text: '↩️ В меню', callback_data: 'prop:cancel' }]);
+  return {
+    text: `<b>Этот тайтл уже предлагали.</b>\n\n«${escapeHtml(duplicate.title)}»\nСейчас у заявки голосов: <b>${votes}</b>.`,
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: buttons },
+  };
+}
+
+async function persistTelegramRawToR2(
+  env: TelegramTitleProposalEnv,
+  userId: number,
+  session: ProposalSession,
+): Promise<{ id: string; objectKey: string; bytes: number; etag: string | null } | null> {
+  if (!session.raw_file_id) return null;
+  if (!env.FILES) throw new Error('FILES binding is unavailable');
+  const filePath = await telegramGetFilePath(env, session.raw_file_id);
+  const bytes = await downloadTelegramFile(env, filePath);
+  const rawId = `tgraw-${crypto.randomUUID()}`;
+  const objectKey = `proposal-raw/${userId}/${crypto.randomUUID()}/${safeFilename(session.raw_file_name || 'raw.bin')}`;
+  const result = await env.FILES.put(objectKey, bytes, {
+    httpMetadata: { contentType: session.raw_mime_type || 'application/octet-stream' },
+  });
+  const etag = typeof result === 'object' && result !== null && 'etag' in result
+    ? String((result as { etag?: unknown }).etag ?? '') || null
+    : null;
+  return { id: rawId, objectKey, bytes: bytes.byteLength, etag };
+}
+
+async function createProposalFromSession(
+  env: TelegramTitleProposalEnv,
+  user: TelegramUser,
+  session: ProposalSession,
+  forceNoRaw: boolean,
+): Promise<{ kind: 'duplicate'; duplicate: ProposalRecord } | { kind: 'created'; id: string }> {
+  await upsertTelegramUser(env, user);
+  const duplicate = await findActiveDuplicate(env, session);
+  if (duplicate) return { kind: 'duplicate', duplicate };
+
+  const useRaw = Boolean(session.raw_file_id) && !forceNoRaw;
+  if (useRaw && !env.FILES) throw new Error('RAW_STORAGE_UNAVAILABLE');
+
+  const raw = useRaw ? await persistTelegramRawToR2(env, user.id, session) : null;
+  const proposalId = crypto.randomUUID();
+  await env.DB.prepare(`
+    INSERT INTO chapter_proposals (
+      id,user_telegram_id,proposal_type,title,source_url,chapter_from,chapter_to,comment,source_kind,ranobelib_book_ref
+    ) VALUES (?,?,?,?,?,NULL,NULL,?,?,?)
+  `).bind(
+    proposalId,
+    String(user.id),
+    'title',
+    session.title.trim(),
+    session.source_url.trim(),
+    session.comment.trim(),
+    session.source_kind || 'external',
+    session.ranobelib_book_ref,
+  ).run();
+
+  if (raw) {
+    await env.DB.prepare(`
+      INSERT INTO proposal_raw_uploads (
+        id,user_telegram_id,object_key,original_name,content_type,expected_size,part_size,r2_upload_id,status,etag,
+        attached_proposal_id,completed_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+    `).bind(
+      raw.id,
+      String(user.id),
+      raw.objectKey,
+      safeFilename(session.raw_file_name || 'raw.bin'),
+      session.raw_mime_type || 'application/octet-stream',
+      raw.bytes,
+      Math.max(1, raw.bytes),
+      `telegram:${session.raw_file_unique_id || session.raw_file_id}`,
+      'ready',
+      raw.etag,
+      proposalId,
+    ).run();
+  }
+
+  await env.DB.prepare(`
+    INSERT INTO title_proposal_details (proposal_id,original_title,extra_url,raw_upload_id)
+    VALUES (?,?,?,?)
+    ON CONFLICT(proposal_id) DO UPDATE SET
+      original_title=excluded.original_title,extra_url=excluded.extra_url,raw_upload_id=excluded.raw_upload_id
+  `).bind(
+    proposalId,
+    (session.original_title || session.title).trim(),
+    session.source_kind === 'external' ? session.source_url.trim() : '',
+    raw?.id ?? null,
+  ).run();
+
+  await env.DB.prepare('DELETE FROM telegram_proposal_sessions WHERE user_telegram_id=?')
+    .bind(String(user.id)).run();
+  return { kind: 'created', id: proposalId };
+}
+
+function buildProposalCreated(id: string): Record<string, unknown> {
+  return {
+    text: '<b>✅ Заявка принята</b>\n\nОна добавлена в общую очередь «Дома Некроманта». За изменениями статуса можно следить в разделе «Мои заявки».',
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '👁 Посмотреть заявку', callback_data: `prop:view:${id}` }],
+        [{ text: '🗂 Мои заявки', callback_data: 'prop:mine' }],
+        [{ text: '☠️ Главное меню', callback_data: 'prop:cancel' }],
+      ],
+    },
+  };
+}
+
+function buildRawStorageUnavailable(): Record<string, unknown> {
+  return {
+    text: '<b>RAW не удалось сохранить.</b>\n\nХранилище файлов сейчас недоступно. Я не буду молча выбрасывать приложенный файл. Можно отправить заявку без RAW или повторить позже.',
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📨 Отправить без RAW', callback_data: 'prop:submit:no-raw' }],
+        [{ text: '↩️ Оставить заявку', callback_data: 'prop:edit' }],
+        [{ text: '❌ Отмена', callback_data: 'prop:cancel' }],
+      ],
+    },
+  };
+}
+
+async function listMyProposals(env: TelegramTitleProposalEnv, userId: number): Promise<ProposalRecord[]> {
+  const { results } = await env.DB.prepare(`
+    SELECT chapter_proposals.id,chapter_proposals.title,chapter_proposals.status,chapter_proposals.created_at,
+           (SELECT COUNT(*) FROM proposal_votes WHERE proposal_id=chapter_proposals.id) AS vote_count
+    FROM chapter_proposals
+    WHERE user_telegram_id=?
+    ORDER BY created_at DESC LIMIT 10
+  `).bind(String(userId)).all<ProposalRecord>();
+  return results;
+}
+
+function buildMyProposals(rows: ProposalRecord[]): Record<string, unknown> {
+  if (!rows.length) {
+    return {
+      text: '<b>🗂 Мои заявки</b>\n\nПока заявок нет.',
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [[{ text: '📚 Предложить новеллу', callback_data: 'prop:new' }]] },
+    };
+  }
+  const lines = ['<b>🗂 Мои заявки</b>', ''];
+  for (const row of rows) {
+    lines.push(`${localizedStatus(row.status)} · <b>${escapeHtml(row.title)}</b> · 👍 ${Number(row.vote_count || 0)}`);
+  }
+  return {
+    text: lines.join('\n'),
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        ...rows.map((row) => [{ text: row.title.slice(0, 55), callback_data: `prop:view:${row.id}` }]),
+        [{ text: '☠️ Главное меню', callback_data: 'prop:cancel' }],
+      ],
+    },
+  };
+}
+
+async function loadProposal(env: TelegramTitleProposalEnv, id: string): Promise<ProposalRecord | null> {
+  return env.DB.prepare(`
+    SELECT chapter_proposals.*,
+           (SELECT COUNT(*) FROM proposal_votes WHERE proposal_id=chapter_proposals.id) AS vote_count
+    FROM chapter_proposals WHERE id=? LIMIT 1
+  `).bind(id).first<ProposalRecord>();
+}
+
+function buildProposalView(row: ProposalRecord, viewerId: number): Record<string, unknown> {
+  const lines = [
+    `<b>${escapeHtml(row.title)}</b>`,
+    '',
+    `Статус: ${localizedStatus(row.status)}`,
+    `Голосов: <b>${Number(row.vote_count || 0)}</b>`,
+    `Источник: ${row.source_kind === 'ranobelib' ? 'RanobeLib' : 'внешний'}`,
+  ];
+  if (row.source_url) lines.push(`Ссылка: ${escapeHtml(row.source_url)}`);
+  if (row.comment) lines.push(`Комментарий: ${escapeHtml(row.comment)}`);
+  if (row.admin_note && row.user_telegram_id === String(viewerId)) {
+    lines.push(`Комментарий команды: ${escapeHtml(row.admin_note)}`);
+  }
+  if (row.created_at) lines.push(`Подана: ${escapeHtml(row.created_at)}`);
+  const buttons: Record<string, string>[][] = [];
+  if (ACTIVE_PROPOSAL_STATUSES.has(row.status) && row.user_telegram_id !== String(viewerId)) {
+    buttons.push([{ text: '👍 Поддержать', callback_data: `prop:support:${row.id}` }]);
+  }
+  buttons.push([{ text: '🗂 Мои заявки', callback_data: 'prop:mine' }]);
+  return { text: lines.join('\n'), parse_mode: 'HTML', reply_markup: { inline_keyboard: buttons } };
+}
+
 export function buildProposalMainMenu(origin: string): Record<string, unknown> {
   return {
     text: '<b>☠️ Дом Некроманта</b>\n\nЧто хотите сделать?',
@@ -669,6 +988,78 @@ async function handleProposalCallback(
     await confirmRanobeLib(env, callback.from.id);
     await editCallbackMessage(env, callback, buildRawPrompt());
     await answerCallback(env, callback.id);
+    return json({ ok: true });
+  }
+
+  if (data === 'prop:submit' || data === 'prop:submit:no-raw') {
+    const session = await loadProposalSession(env, callback.from.id);
+    if (!session || session.step !== 'review') {
+      await answerCallback(env, callback.id, 'Начните заявку заново.');
+      return json({ ok: true });
+    }
+    try {
+      const result = await createProposalFromSession(env, callback.from, session, data === 'prop:submit:no-raw');
+      if (result.kind === 'duplicate') {
+        await editCallbackMessage(env, callback, buildDuplicateMessage(result.duplicate, callback.from.id));
+      } else {
+        await editCallbackMessage(env, callback, buildProposalCreated(result.id));
+      }
+      await answerCallback(env, callback.id);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'RAW_STORAGE_UNAVAILABLE') {
+        await editCallbackMessage(env, callback, buildRawStorageUnavailable());
+        await answerCallback(env, callback.id, 'RAW не сохранён.');
+      } else {
+        await answerCallback(env, callback.id, 'Не удалось отправить заявку. Попробуйте ещё раз.');
+      }
+    }
+    return json({ ok: true });
+  }
+
+  if (data === 'prop:mine') {
+    await upsertTelegramUser(env, callback.from);
+    const rows = await listMyProposals(env, callback.from.id);
+    await editCallbackMessage(env, callback, buildMyProposals(rows));
+    await answerCallback(env, callback.id);
+    return json({ ok: true });
+  }
+
+  if (data.startsWith('prop:view:')) {
+    const proposalId = data.slice('prop:view:'.length);
+    const row = proposalId ? await loadProposal(env, proposalId) : null;
+    if (!row || (row.status === 'rejected' && row.user_telegram_id !== String(callback.from.id))) {
+      await answerCallback(env, callback.id, 'Заявка не найдена или недоступна.');
+      return json({ ok: true });
+    }
+    await editCallbackMessage(env, callback, buildProposalView(row, callback.from.id));
+    await answerCallback(env, callback.id);
+    return json({ ok: true });
+  }
+
+  if (data.startsWith('prop:support:')) {
+    const proposalId = data.slice('prop:support:'.length);
+    const proposal = proposalId
+      ? await env.DB.prepare('SELECT id,user_telegram_id,title,status FROM chapter_proposals WHERE id=? LIMIT 1')
+          .bind(proposalId).first<ProposalRecord>()
+      : null;
+    if (!proposal || !ACTIVE_PROPOSAL_STATUSES.has(proposal.status)) {
+      await answerCallback(env, callback.id, 'Заявка не найдена или голосование закрыто.');
+      return json({ ok: true });
+    }
+    if (proposal.user_telegram_id === String(callback.from.id)) {
+      await answerCallback(env, callback.id, 'Автор заявки уже считается сторонником своей заявки.');
+      return json({ ok: true });
+    }
+    await upsertTelegramUser(env, callback.from);
+    const existing = await env.DB.prepare('SELECT proposal_id FROM proposal_votes WHERE proposal_id=? AND user_telegram_id=?')
+      .bind(proposalId, String(callback.from.id)).first<{ proposal_id: string }>();
+    if (existing) {
+      await answerCallback(env, callback.id, 'Вы уже поддержали эту заявку.');
+      return json({ ok: true });
+    }
+    await env.DB.prepare('INSERT INTO proposal_votes (proposal_id,user_telegram_id) VALUES (?,?)')
+      .bind(proposalId, String(callback.from.id)).run();
+    await answerCallback(env, callback.id, 'Спасибо! Поддержка учтена.');
     return json({ ok: true });
   }
 
