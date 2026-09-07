@@ -1,10 +1,14 @@
 import {
   handleTelegramSubscriptionUpdate,
-  sendTelegramNotificationCenter,
   sendTelegramSubscriptionMenu,
   type TelegramSubscriptionEnv,
   type TelegramSubscriptionUpdate,
 } from './telegram-subscriptions.js';
+import {
+  handleNotificationCustomInput,
+  handleTelegramNotificationModeUpdate,
+  sendTelegramDeliveryModeCenter,
+} from './telegram-notification-mode-runtime.js';
 import {
   ensureTelegramSubscriptionCatalog,
   withTelegramSubscriptionCatalogDb,
@@ -70,16 +74,21 @@ export async function handleTelegramSubscriptionWebhookRequest(
 
   const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
   // Telegram callbacks must stay responsive even when RanobeLib is slow or unavailable.
-  // Catalog bootstrap is only needed by commands that render the full synchronized title list.
+  // Delivery-mode callbacks are resolved entirely from D1 before the legacy subscription router.
   const subscriptionUpdate = normalizeSubscriptionCallback(update);
+  if (await handleTelegramNotificationModeUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
   if (await handleTelegramSubscriptionUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
 
   const message = update.message;
   const text = (message?.text ?? '').trim();
   if (!message?.chat?.id || message.chat.type !== 'private') return null;
 
+  // An active custom-size prompt gets first chance at ordinary private text. Slash commands
+  // intentionally pass through so /notifications, /subscriptions and legacy flows keep working.
+  if (await handleNotificationCustomInput(update, subscriptionEnv)) return json({ ok: true });
+
   if (message.from && isPlainCommand(text, 'notifications')) {
-    await sendTelegramNotificationCenter(subscriptionEnv, message.from, message.chat.id);
+    await sendTelegramDeliveryModeCenter(subscriptionEnv, message.from, message.chat.id);
     return json({ ok: true });
   }
 
