@@ -65,8 +65,8 @@ export function computeNextCheckDelayMinutes(input: NextCheckInput): number {
   if (lastChangeAt !== null) {
     const nowMs = (input.now ?? new Date()).getTime();
     const ageMinutes = Math.max(0, (nowMs - lastChangeAt) / 60_000);
-    if (ageMinutes <= 15) return 2;
-    if (ageMinutes <= 120) return 5;
+    if (ageMinutes <= 60) return 2;
+    if (ageMinutes <= 360) return 5;
   }
 
   const misses = Math.max(0, Math.floor(Number(input.consecutiveNoChange) || 0));
