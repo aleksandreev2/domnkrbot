@@ -191,16 +191,16 @@ test('production scanner uses the Paid bounded batch and concurrency instead of 
 
   assert.equal(wrangler.vars.RANOBELIB_SYNC_BATCH_SIZE, undefined);
   assert.match(scanner, /export const FAST_SCAN_LIMIT = 24/);
-  assert.match(scanner, /const SCAN_CONCURRENCY = 4/);
+  assert.match(scanner, /export const FAST_SCAN_CONCURRENCY = 4/);
 });
 
 test('fast scanner spends one RanobeLib chapter request per selected title and never fetches title details', () => {
   const scanner = readFileSync(new URL('../src/ranobelib-fast-scanner.ts', import.meta.url), 'utf8');
-  const scanBookStart = scanner.indexOf('async function scanBook');
+  const scanBookStart = scanner.indexOf('async function scanOneBook');
   const scanBookEnd = scanner.indexOf('\nasync function ', scanBookStart + 1);
   const scanBook = scanner.slice(scanBookStart, scanBookEnd > scanBookStart ? scanBookEnd : undefined);
 
-  const chapterCalls = scanBook.match(/getChapters\(row\.book_ref/g) || [];
+  const chapterCalls = scanBook.match(/getChapters\(book\.ref/g) || [];
   assert.equal(chapterCalls.length, 1);
   assert.doesNotMatch(scanBook, /getBookDetails|getTitle\(/);
 });
