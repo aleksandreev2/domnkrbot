@@ -24,7 +24,9 @@ export type DueTitle = {
   url: string;
   title: string | null;
   cover_url: string | null;
+  snapshot_ready: number | string;
   consecutive_no_change: number | string;
+  consecutive_failures: number | string;
   last_change_at: string | null;
   next_check_at: string | null;
   scan_priority: number | string;
@@ -33,8 +35,10 @@ export type DueTitle = {
 export type NextCheckInput = {
   changed: boolean;
   consecutiveNoChange: number;
+  consecutiveFailures: number;
   lastChangeAt?: string | null;
   failed?: boolean;
+  now?: Date;
 };
 
 export type FastScanResult = {
@@ -48,44 +52,36 @@ export type FastScanResult = {
 export type FastScanOptions = {
   limit?: number;
   now?: Date;
-  onRelease?: (releaseId: string) => Promise<void>;
 };
 
 export function computeNextCheckDelayMinutes(input: NextCheckInput): number {
-  if (input.failed) return 10;
+  if (input.failed) {
+    const failures = Math.max(1, Math.floor(Number(input.consecutiveFailures) || 1));
+    return Math.min(30, 5 * (2 ** Math.min(3, failures - 1)));
+  }
   if (input.changed) return 1;
 
+  const lastChangeAt = timestampMs(input.lastChangeAt ?? null);
+  if (lastChangeAt !== null) {
+    const nowMs = (input.now ?? new Date()).getTime();
+    const ageMinutes = Math.max(0, (nowMs - lastChangeAt) / 60_000);
+    if (ageMinutes <= 15) return 2;
+    if (ageMinutes <= 120) return 5;
+  }
+
   const misses = Math.max(0, Math.floor(Number(input.consecutiveNoChange) || 0));
-  if (misses <= 2) return 3;
-  if (misses <= 5) return 10;
-  if (misses <= 11) return 20;
-  return 30;
+  return misses <= 2 ? 10 : 30;
 }
 
 export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT): Promise<DueTitle[]> {
   const safeLimit = clampScanLimit(limit);
   const { results } = await env.DB.prepare(`
-    SELECT book_ref, ranobelib_id, slug, url, title, cover_url,
-           consecutive_no_change, last_change_at, next_check_at, scan_priority
+    SELECT book_ref, ranobelib_id, slug, url, title, cover_url, snapshot_ready,
+           consecutive_no_change, consecutive_failures, last_change_at, next_check_at, scan_priority
     FROM ranobelib_titles
     WHERE is_active = 1
-      AND snapshot_ready = 1
-      AND (next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
-    ORDER BY next_check_at ASC, scan_priority DESC, book_ref ASC
-    LIMIT ?
-  `).bind(safeLimit).all<DueTitle>();
-  return results.slice(0, safeLimit);
-}
-
-export async function selectBootstrapTitles(env: ScannerEnv, limit = 1): Promise<DueTitle[]> {
-  const safeLimit = Math.max(1, Math.min(1, Math.floor(Number(limit) || 1)));
-  const { results } = await env.DB.prepare(`
-    SELECT book_ref, ranobelib_id, slug, url, title, cover_url,
-           consecutive_no_change, last_change_at, next_check_at, scan_priority
-    FROM ranobelib_titles
-    WHERE is_active = 1
-      AND snapshot_ready = 0
-    ORDER BY first_seen_at ASC, scan_priority DESC, book_ref ASC
+      AND (snapshot_ready = 0 OR next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
+    ORDER BY COALESCE(next_check_at, '') ASC, scan_priority DESC, book_ref ASC
     LIMIT ?
   `).bind(safeLimit).all<DueTitle>();
   return results.slice(0, safeLimit);
@@ -96,13 +92,7 @@ export async function scanDueRanobeLibTitles(
   options: FastScanOptions = {},
 ): Promise<FastScanResult> {
   const totalLimit = clampScanLimit(options.limit ?? FAST_SCAN_LIMIT);
-  // Reserve at most one of the six HTTP/D1 scan slots for a title that has just been
-  // discovered. This prevents a new title from staying snapshot_ready=0 forever after
-  // discovery was split from scanning.
-  const bootstrap = await selectBootstrapTitles(env, 1);
-  const remaining = Math.max(0, totalLimit - bootstrap.length);
-  const due = remaining > 0 ? await selectDueTitles(env, remaining) : [];
-  const selected = [...bootstrap, ...due];
+  const selected = await selectDueTitles(env, totalLimit);
   const client = new RanobeLibClient();
   const teamRef = env.RANOBELIB_TEAM_REF?.trim() || DEFAULT_TEAM_REF;
   const now = options.now ?? new Date();
@@ -111,30 +101,27 @@ export async function scanDueRanobeLibTitles(
   let newReleases = 0;
   const errors: string[] = [];
 
-  // Six titles is already a small Free-plan-safe batch. Keep scans sequential for now so
-  // chapter polling never competes for the six-connection ceiling with Queue/Telegram work.
+  // Six titles is already a small Free-plan-safe batch. Keep scans sequential so chapter
+  // polling never competes for the six-connection ceiling with unrelated Worker work.
   for (const row of selected) {
     const book = dueTitleToBook(row);
     if (!book) {
       failed += 1;
       const message = `${row.book_ref}: incomplete RanobeLib title metadata`;
       errors.push(message);
-      await scheduleFailure(env, row.book_ref, message);
+      await scheduleFailure(env, row, message, now);
       continue;
     }
 
     try {
       const sync = await scanOneBook(env, client, book, row, teamRef, now);
       succeeded += 1;
-      if (sync.releaseCreated && sync.releaseId) {
-        newReleases += 1;
-        if (options.onRelease) await options.onRelease(sync.releaseId);
-      }
+      if (sync.releaseCreated) newReleases += 1;
     } catch (error) {
       failed += 1;
       const message = `${row.book_ref}: ${errorMessage(error)}`;
       errors.push(message);
-      await scheduleFailure(env, row.book_ref, message);
+      await scheduleFailure(env, row, message, now);
     }
   }
 
@@ -160,7 +147,7 @@ async function scanOneBook(
     summary: string | null;
     cover_url: string | null;
   }>();
-  const snapshotReady = Number(state?.snapshot_ready ?? 0) === 1;
+  const snapshotReady = Number(state?.snapshot_ready ?? due.snapshot_ready ?? 0) === 1;
   const previousRows = snapshotReady
     ? (await env.DB.prepare(`
         SELECT chapter_id AS id, volume, number, name, first_seen_at AS firstSeenAt
@@ -168,8 +155,7 @@ async function scanOneBook(
       `).bind(book.ref).all<RanobeLibChapter>()).results
     : undefined;
 
-  // Unlike the legacy sync, this client has not performed team discovery first. Pass the
-  // team explicitly so the chapter list cannot accidentally include another translation.
+  // Discovery is intentionally separate, so explicitly scope chapter polling to our team.
   const chapters = await client.getChapters(book.ref, { teamRef });
   const latest = chapters.length ? chapters[chapters.length - 1]! : null;
   const delta = detectReleaseDelta(book.ref, previousRows, chapters);
@@ -228,7 +214,9 @@ async function scanOneBook(
   const delayMinutes = computeNextCheckDelayMinutes({
     changed: releaseCreated,
     consecutiveNoChange: misses,
+    consecutiveFailures: 0,
     lastChangeAt: due.last_change_at,
+    now,
   });
 
   await env.DB.prepare(`
@@ -237,7 +225,7 @@ async function scanOneBook(
       chapter_count = ?, latest_chapter_id = ?, latest_volume = ?, latest_number = ?, latest_name = ?,
       snapshot_ready = 1, is_active = 1, last_synced_at = CURRENT_TIMESTAMP,
       last_release_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE last_release_at END,
-      consecutive_no_change = ?,
+      consecutive_no_change = ?, consecutive_failures = 0,
       last_change_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE last_change_at END,
       next_check_at = datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes'),
       scan_priority = CASE WHEN ? = 1 THEN scan_priority + 1 ELSE MAX(scan_priority - 1, 0) END,
@@ -266,14 +254,23 @@ async function scanOneBook(
   return { releaseCreated, releaseId };
 }
 
-async function scheduleFailure(env: ScannerEnv, bookRef: string, message: string): Promise<void> {
-  const delayMinutes = computeNextCheckDelayMinutes({ changed: false, consecutiveNoChange: 0, failed: true });
+async function scheduleFailure(env: ScannerEnv, row: DueTitle, message: string, now: Date): Promise<void> {
+  const failures = Math.max(0, Math.floor(Number(row.consecutive_failures) || 0)) + 1;
+  const delayMinutes = computeNextCheckDelayMinutes({
+    changed: false,
+    consecutiveNoChange: Math.max(0, Math.floor(Number(row.consecutive_no_change) || 0)),
+    consecutiveFailures: failures,
+    lastChangeAt: row.last_change_at,
+    failed: true,
+    now,
+  });
   await env.DB.prepare(`
     UPDATE ranobelib_titles SET
+      consecutive_failures = consecutive_failures + 1,
       next_check_at = datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes'),
       sync_error = ?
     WHERE book_ref = ?
-  `).bind(delayMinutes, message.slice(0, 1000), bookRef).run();
+  `).bind(delayMinutes, message.slice(0, 1000), row.book_ref).run();
 }
 
 async function insertChapters(env: ScannerEnv, bookRef: string, chapters: RanobeLibChapter[]): Promise<void> {
@@ -284,8 +281,6 @@ async function insertChapters(env: ScannerEnv, bookRef: string, chapters: Ranobe
     number: chapter.number,
     name: chapter.name ?? null,
   })));
-  // D1 supports SQLite's JSON extension. One json_each() write keeps a 100+ chapter first
-  // snapshot to one D1 statement instead of consuming one query per chapter.
   await env.DB.prepare(`
     INSERT INTO ranobelib_chapters (book_ref, chapter_id, volume, number, name)
     SELECT ?,
@@ -341,6 +336,17 @@ function runChanges(result: unknown): number {
 function clampScanLimit(value: number): number {
   const numeric = Number.isFinite(value) ? Math.floor(value) : FAST_SCAN_LIMIT;
   return Math.max(1, Math.min(FAST_SCAN_LIMIT, numeric));
+}
+
+function timestampMs(value: string | null): number | null {
+  if (!value) return null;
+  const raw = value.trim();
+  if (!raw) return null;
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)
+    ? `${raw.replace(' ', 'T')}Z`
+    : raw;
+  const parsed = Date.parse(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function normalizeCoverUrl(value: string | null): string | null {
