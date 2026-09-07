@@ -65,12 +65,26 @@ class DB {
   prepare(query) { return new Statement(this, query); }
 }
 
-function env(db) {
+function env(db, extra = {}) {
   return {
     DB: db,
     TELEGRAM_BOT_TOKEN: 'unit-test-token',
     TELEGRAM_WEBHOOK_SECRET: 'secret',
     BOT_USERNAME: 'domnekromanta_bot',
+    ...extra,
+  };
+}
+
+function queueRecorder({ fail = false } = {}) {
+  const messages = [];
+  return {
+    messages,
+    queue: {
+      async send(message) {
+        messages.push(message);
+        if (fail) throw new Error('queue unavailable');
+      },
+    },
   };
 }
 
@@ -134,12 +148,17 @@ test('/notifications uses the interactive delivery-mode center', async () => {
   });
 });
 
-test('global preset callback persists the mode and redraws the center', async () => {
+test('global preset callback persists the mode, redraws the center and wakes delivery', async () => {
   const db = new DB();
+  const recorder = queueRecorder();
   await withTelegramCalls(async (calls) => {
-    const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:mode:g:10'), env(db));
+    const response = await handleTelegramSubscriptionWebhookRequest(
+      callbackRequest('subs:mode:g:10'),
+      env(db, { NOTIFICATION_QUEUE: recorder.queue }),
+    );
     assert.equal(response?.status, 200);
     assert.deepEqual(db.global, { mode: 'stack', stackSize: 10 });
+    assert.deepEqual(recorder.messages, [{ kind: 'drain' }]);
     const edit = calls.find((call) => call.method === 'editMessageText');
     assert.ok(edit);
     assert.match(edit.payload.text, /Режим по умолчанию: 📦 По 10/);
@@ -147,36 +166,54 @@ test('global preset callback persists the mode and redraws the center', async ()
   });
 });
 
-test('per-title preset creates an override and inherit removes it', async () => {
+test('per-title preset and inherit both wake delivery after persisting the change', async () => {
   const db = new DB();
+  const recorder = queueRecorder();
   await withTelegramCalls(async (calls) => {
-    await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:mode:t:1000:5'), env(db));
+    await handleTelegramSubscriptionWebhookRequest(
+      callbackRequest('subs:mode:t:1000:5'),
+      env(db, { NOTIFICATION_QUEUE: recorder.queue }),
+    );
     assert.deepEqual(db.override, { mode: 'stack', stackSize: 5 });
+    assert.deepEqual(recorder.messages, [{ kind: 'drain' }]);
     const edit = calls.find((call) => call.method === 'editMessageText');
     assert.ok(edit);
     assert.match(edit.payload.text, /Режим: 📦 По 5/);
   });
 
   await withTelegramCalls(async () => {
-    await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:mode:t:1000:inherit'), env(db));
+    await handleTelegramSubscriptionWebhookRequest(
+      callbackRequest('subs:mode:t:1000:inherit'),
+      env(db, { NOTIFICATION_QUEUE: recorder.queue }),
+    );
     assert.equal(db.override, null);
+    assert.deepEqual(recorder.messages, [{ kind: 'drain' }, { kind: 'drain' }]);
   });
 });
 
-test('custom global stack input accepts 2..100 and consumes only an active input state', async () => {
+test('custom global stack input wakes only after a valid value is saved', async () => {
   const db = new DB();
+  const recorder = queueRecorder();
   await withTelegramCalls(async (calls) => {
-    await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:mode:g:c'), env(db));
+    await handleTelegramSubscriptionWebhookRequest(
+      callbackRequest('subs:mode:g:c'),
+      env(db, { NOTIFICATION_QUEUE: recorder.queue }),
+    );
     assert.deepEqual(db.customInput, { scope: 'global', bookRef: null });
+    assert.deepEqual(recorder.messages, []);
     const prompt = calls.find((call) => call.method === 'sendMessage');
     assert.ok(prompt);
     assert.match(prompt.payload.text, /от 2 до 100/);
   });
 
   await withTelegramCalls(async (calls) => {
-    await handleTelegramSubscriptionWebhookRequest(messageRequest('37'), env(db));
+    await handleTelegramSubscriptionWebhookRequest(
+      messageRequest('37'),
+      env(db, { NOTIFICATION_QUEUE: recorder.queue }),
+    );
     assert.deepEqual(db.global, { mode: 'stack', stackSize: 37 });
     assert.equal(db.customInput, null);
+    assert.deepEqual(recorder.messages, [{ kind: 'drain' }]);
     const confirmation = calls.find((call) => call.method === 'sendMessage');
     assert.ok(confirmation);
     assert.match(confirmation.payload.text, /37 глав/);
@@ -184,13 +221,32 @@ test('custom global stack input accepts 2..100 and consumes only an active input
   });
 });
 
-test('invalid custom stack value keeps the input state active', async () => {
+test('queue wake failure is best-effort and does not roll back a saved mode', async () => {
   const db = new DB();
+  const recorder = queueRecorder({ fail: true });
+  await withTelegramCalls(async () => {
+    const response = await handleTelegramSubscriptionWebhookRequest(
+      callbackRequest('subs:mode:g:20'),
+      env(db, { NOTIFICATION_QUEUE: recorder.queue }),
+    );
+    assert.equal(response?.status, 200);
+    assert.deepEqual(db.global, { mode: 'stack', stackSize: 20 });
+    assert.deepEqual(recorder.messages, [{ kind: 'drain' }]);
+  });
+});
+
+test('invalid custom stack value keeps the input state active and does not wake delivery', async () => {
+  const db = new DB();
+  const recorder = queueRecorder();
   db.customInput = { scope: 'global', bookRef: null };
   await withTelegramCalls(async (calls) => {
-    await handleTelegramSubscriptionWebhookRequest(messageRequest('101'), env(db));
+    await handleTelegramSubscriptionWebhookRequest(
+      messageRequest('101'),
+      env(db, { NOTIFICATION_QUEUE: recorder.queue }),
+    );
     assert.deepEqual(db.global, { mode: 'instant', stackSize: null });
     assert.deepEqual(db.customInput, { scope: 'global', bookRef: null });
+    assert.deepEqual(recorder.messages, []);
     const error = calls.find((call) => call.method === 'sendMessage');
     assert.ok(error);
     assert.match(error.payload.text, /2 до 100/);
