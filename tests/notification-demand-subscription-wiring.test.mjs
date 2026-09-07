@@ -25,8 +25,16 @@ test('single-title subscription mutations refresh only that title demand', () =>
   const refreshCalls = source.match(/await refreshTitleNotificationDemand\(env, title\.book_ref\)/g) || [];
   assert.ok(refreshCalls.length >= 2, 'both direct notify toggle and title-list toggle must refresh title demand');
 
-  const directToggle = source.match(/await setEffectiveTitleSubscription\(env, userId, title\.book_ref, enabled\);[\s\S]{0,180}await refreshTitleNotificationDemand\(env, title\.book_ref\)/g) || [];
-  assert.ok(directToggle.length >= 2, 'every title-scoped mutation must immediately refresh demand');
+  assert.match(
+    source,
+    /await setEffectiveTitleSubscription\(env, userId, title\.book_ref, enabled\);[\s\S]{0,180}await refreshTitleNotificationDemand\(env, title\.book_ref\)/,
+    'direct notification toggle must immediately refresh that title demand',
+  );
+  assert.match(
+    source,
+    /await setEffectiveTitleSubscription\(env, userId, title\.book_ref, !before\);[\s\S]{0,180}await refreshTitleNotificationDemand\(env, title\.book_ref\)/,
+    'title-list toggle must immediately refresh that title demand',
+  );
 });
 
 test('all-title on and clear mutations refresh demand across active titles once per branch', () => {
