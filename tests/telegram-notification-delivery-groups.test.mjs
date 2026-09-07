@@ -83,6 +83,28 @@ test('claimed release rows aggregate by user and title and sum chapter counts', 
   assert.equal(book.lastNumber, '13');
 });
 
+test('aggregated range is hidden when chapter continuity cannot be proven', async () => {
+  const delivery = await loadDelivery();
+  const rows = [
+    {
+      release_id: 'r1', user_telegram_id: '42', book_ref: '77--book', ranobelib_id: 77,
+      title: 'Book', url: 'https://ranobelib.me/ru/book/77--book', chapter_count: 3,
+      first_volume: '1', first_number: '101', last_volume: '1', last_number: '103', summary: '101-103',
+    },
+    {
+      release_id: 'r2', user_telegram_id: '42', book_ref: '77--book', ranobelib_id: 77,
+      title: 'Book', url: 'https://ranobelib.me/ru/book/77--book', chapter_count: 2,
+      first_volume: '1', first_number: '105', last_volume: '1', last_number: '106', summary: '105-106',
+    },
+  ];
+
+  const [group] = delivery.aggregateClaimedDeliveryRows(rows);
+  assert.ok(group);
+  assert.equal(group.chapterCount, 5);
+  assert.equal(group.firstNumber, null);
+  assert.equal(group.lastNumber, null);
+});
+
 test('delivery claim SQL limits ready user-title groups instead of individual outbox rows', () => {
   const source = readFileSync(new URL('../src/telegram-notification-delivery.ts', import.meta.url), 'utf8');
   assert.match(source, /WITH\s+ready_groups\s+AS\s*\(/i);
