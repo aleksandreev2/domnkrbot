@@ -170,8 +170,9 @@ export async function handleTitleProposalAdminApi(request: Request, env: TitlePr
   }
 
   const statusMatch = url.pathname.match(/^\/api\/admin\/proposals\/([^/]+)\/status$/);
-  if (request.method === 'POST' && statusMatch) {
-    return handleStatusUpdate(request, env, decodeURIComponent(statusMatch[1]));
+  const proposalId = statusMatch?.[1];
+  if (request.method === 'POST' && proposalId) {
+    return handleStatusUpdate(request, env, decodeURIComponent(proposalId));
   }
 
   return null;
