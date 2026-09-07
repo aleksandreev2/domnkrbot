@@ -10,8 +10,9 @@ Telegram Mini App больше не является частью runtime: са�
 - Workers Static Assets — публичный сайт `/` и админка `/admin/`;
 - D1 — пользователи, заявки, состояния Telegram-мастера, RanobeLib snapshot, публикации и metadata файлов;
 - R2 binding `FILES` — изображения, файлы публикаций и RAW заявок;
+- Cloudflare Queue — быстрый wake-up доставки уведомлений о новых главах;
 - Telegram Login Widget — вход на обычном сайте;
-- RanobeLib sync — Cron + ручной запуск из админки.
+- RanobeLib — адаптивный fast scan + отдельный team discovery + ручной sync из админки.
 
 ## Telegram-бот
 
@@ -28,11 +29,40 @@ Telegram Mini App больше не является частью runtime: са�
 1. **Есть на RanobeLib** — пользователь отправляет название или ссылку, бот ищет произведение в глобальном каталоге RanobeLib и просит подтвердить найденную карточку.
 2. **Нет на RanobeLib** — пользователь вводит название и ссылку на оригинальный источник.
 
-После выбора источника можно приложить RAW именно как Telegram-документ. Поддерживаются `.epub`, `.txt`, `.zip`, `.fb2`, `.docx`; лимит Telegram-мастера — 20 MiB. RAW не подменяется URL: файл можно приложить либо явно пропустить.
+После выбора источника можно приложить RAW именно как Telegram-документ. Поддерживаются `.zip`, `.rar`, `.7z`, `.tar`, `.gz`, `.tgz`, `.txt`, `.md`, `.rtf`, `.pdf`, `.epub`, `.doc`, `.docx`; лимит Telegram-мастера — 20 MiB. RAW не подменяется URL: файл можно приложить либо явно пропустить.
 
 Незавершённый мастер хранится серверно и может быть продолжен после следующего сообщения. Активные дубликаты не создаются повторно: существующую заявку можно поддержать голосом. Через `🗂 Мои заявки` пользователь видит свои последние предложения и их статусы.
 
 Сайт при этом остаётся доступен и существующий web-flow заявок продолжает работать.
+
+## Telegram Notifications v3
+
+Уведомления о новых главах разделены на независимые короткие jobs, чтобы один тяжёлый проход не съедал лимиты Workers Free и не задерживал доставку:
+
+- `* * * * *` — fast scanner: за invocation проверяет не более 6 due-title, а интервал каждого тайтла адаптивно меняется по лестнице 1 / 3 / 10 / 20 / 30 минут;
+- `*/30 * * * *` — team discovery: обновляет состав тайтлов команды без обхода глав всех книг;
+- `*/5 * * * *` — fallback delivery: независимо дренирует pending/retry строки из D1 outbox;
+- `0 * * * *` — reconciliation membership: проверяет ограниченную пачку до 20 известных пользователей канала.
+
+D1 outbox — источник истины (source of truth) для состояния доставки. Queue не хранит состояние уведомления: сообщение в `NOTIFICATION_QUEUE` только будит consumer после создания релиза. Если Queue недоступна или отправка wake-up завершается ошибкой, уведомления не теряются: pending строки остаются в D1 и будут подобраны пяти-минутным fallback cron.
+
+Delivery engine берёт до 20 адресатов одним eligibility query и отправляет в Telegram максимум 5 запросов одновременно. `403` помечает адресата как недоступного, `429` переносит повтор на Telegram `retry_after`, остальные временные ошибки остаются в retry-состоянии и не срывают всю пачку.
+
+Queue настроена в `wrangler.jsonc`:
+
+- binding producer: `NOTIFICATION_QUEUE`;
+- queue: `domnkrbot-notifications-v3`;
+- consumer batch: 1 сообщение;
+- consumer concurrency: 1 invocation;
+- Queue-сообщение содержит только `{ kind: "drain", releaseId? }` и может быть продублировано без потери корректности, потому что фактический статус хранится в D1.
+
+Перед первым production deploy Queue должна существовать в том же Cloudflare account:
+
+```bash
+npx wrangler queues create domnkrbot-notifications-v3
+```
+
+Новый тайтл после discovery получает первый chapter snapshot через fast scanner. Bootstrap не создаёт релиз из всей исторической главы книги и не делает сотни отдельных D1 round-trip: массовый snapshot записывается одним JSON-expansion statement.
 
 ## Публичный сайт
 
@@ -130,7 +160,13 @@ Telegram-предложения добавляются forward-only миграц
 migrations/0013_telegram_title_proposals.sql
 ```
 
-Она расширяет существующую модель заявок и добавляет серверное состояние Telegram-мастера; существующие таблицы и колонки не переименовываются и не удаляются.
+Notifications v3 добавляет только scheduler-поля и индексы forward-only миграцией:
+
+```text
+migrations/0014_telegram_notifications_v3.sql
+```
+
+`0014` добавляет `next_check_at`, `last_change_at`, `consecutive_no_change`, `scan_priority` и индексы для due-title scanner / notification outbox. Существующие таблицы не переименовываются и не удаляются.
 
 Безопасный локальный порядок:
 
@@ -164,7 +200,7 @@ npm run build:runtime-test
 npx wrangler deploy --dry-run
 ```
 
-Затем отдельно проверить pending D1 migrations, применить migration к правильной DB и только потом deploy согласно совместимости текущей schema/code.
+Для первого rollout Notifications v3 отдельно убедитесь, что Queue `domnkrbot-notifications-v3` уже создана, затем проверьте pending D1 migrations и примените migration к правильной DB до deploy согласно совместимости текущей schema/code.
 
 После deploy проверить:
 
@@ -177,7 +213,12 @@ npx wrangler deploy --dry-run
 - RAW upload/persist и повторное открытие заявки;
 - admin RanobeLib search/link и конфликт активного дубликата;
 - уведомление автора после смены статуса заявки;
-- RanobeLib read/sync;
+- fast scanner и обновление `next_check_at`;
+- Queue wake-up и доставка нового релиза;
+- пяти-минутный fallback из D1 при недоступной Queue;
+- RanobeLib team discovery;
+- hourly membership reconciliation;
+- RanobeLib read/manual sync;
 - publication test/publish;
 - image/file upload/download и discussion delivery, если `FILES` подключён;
 - Worker logs без token/session leakage.
