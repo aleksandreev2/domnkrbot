@@ -2,6 +2,7 @@ import { formatReleaseNotification } from './telegram-subscriptions.js';
 
 export const DELIVERY_BATCH_LIMIT = 20;
 export const TELEGRAM_SEND_CONCURRENCY = 5;
+const CLAIM_LEASE_MINUTES = 10;
 
 type D1AllResult<T> = { results: T[] };
 type D1PreparedStatementLike = {
@@ -31,6 +32,11 @@ export type NotificationDeliveryResult = {
   disabled: number;
   skipped: number;
   rateLimited: number;
+};
+
+type ClaimedKey = {
+  release_id: string;
+  user_telegram_id: string;
 };
 
 type DeliveryRow = {
@@ -78,7 +84,11 @@ export async function drainNotificationOutbox(
   options: NotificationDrainOptions = {},
 ): Promise<NotificationDeliveryResult> {
   const limit = clampInt(options.limit ?? DELIVERY_BATCH_LIMIT, 1, DELIVERY_BATCH_LIMIT);
-  const rows = await loadDeliveryRows(env, limit, options.releaseId);
+  const claimToken = crypto.randomUUID();
+  const claimedKeys = await claimDeliveryRows(env, limit, options.releaseId, claimToken);
+  if (!claimedKeys.length) return emptyDeliveryResult();
+
+  const rows = await loadClaimedDeliveryRows(env, claimToken);
   const eligibleRows = rows.filter((row) => Number(row.eligible) === 1);
   const skippedRows = rows.filter((row) => Number(row.eligible) !== 1);
 
@@ -90,7 +100,7 @@ export async function drainNotificationOutbox(
   );
   outcomes.push(...sendOutcomes);
 
-  const mutations = outcomes.map((outcome) => outcomeMutation(env, outcome));
+  const mutations = outcomes.map((outcome) => outcomeMutation(env, outcome, claimToken));
   await executeStatements(env.DB, mutations);
 
   let sent = 0;
@@ -108,16 +118,51 @@ export async function drainNotificationOutbox(
     }
   }
 
-  return { claimed: rows.length, sent, retry, disabled, skipped, rateLimited };
+  return {
+    claimed: claimedKeys.length,
+    sent,
+    retry,
+    disabled,
+    skipped,
+    rateLimited,
+  };
 }
 
-async function loadDeliveryRows(
+async function claimDeliveryRows(
   env: NotificationDeliveryEnv,
   limit: number,
-  releaseId?: string,
-): Promise<DeliveryRow[]> {
-  const releaseFilter = releaseId ? 'AND o.release_id = ?' : '';
+  releaseId: string | undefined,
+  claimToken: string,
+): Promise<ClaimedKey[]> {
+  const releaseFilter = releaseId ? 'AND release_id = ?' : '';
   const statement = env.DB.prepare(`
+    UPDATE ranobelib_notification_outbox
+    SET claim_token = ?,
+        claim_expires_at = datetime('now', '+' || ${CLAIM_LEASE_MINUTES} || ' minutes'),
+        updated_at = CURRENT_TIMESTAMP
+    WHERE rowid IN (
+      SELECT rowid
+      FROM ranobelib_notification_outbox
+      WHERE status IN ('pending','retry')
+        AND available_at <= CURRENT_TIMESTAMP
+        AND (claim_token IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= CURRENT_TIMESTAMP)
+        ${releaseFilter}
+      ORDER BY created_at ASC
+      LIMIT ?
+    )
+    RETURNING release_id, user_telegram_id
+  `);
+  const bound = releaseId
+    ? statement.bind(claimToken, releaseId, limit)
+    : statement.bind(claimToken, limit);
+  return resultRows<ClaimedKey>(await bound.run());
+}
+
+async function loadClaimedDeliveryRows(
+  env: NotificationDeliveryEnv,
+  claimToken: string,
+): Promise<DeliveryRow[]> {
+  const { results } = await env.DB.prepare(`
     SELECT o.release_id, o.user_telegram_id, o.status, o.attempts,
            r.book_ref, t.ranobelib_id,
            COALESCE(t.title, r.title_snapshot) AS title, t.url,
@@ -151,14 +196,9 @@ async function loadDeliveryRows(
     FROM ranobelib_notification_outbox o
     JOIN ranobelib_releases r ON r.id = o.release_id
     JOIN ranobelib_titles t ON t.book_ref = r.book_ref
-    WHERE o.status IN ('pending','retry')
-      AND o.available_at <= CURRENT_TIMESTAMP
-      ${releaseFilter}
+    WHERE o.claim_token = ?
     ORDER BY o.created_at ASC
-    LIMIT ?
-  `);
-  const bound = releaseId ? statement.bind(releaseId, limit) : statement.bind(limit);
-  const { results } = await bound.all<DeliveryRow>();
+  `).bind(claimToken).all<DeliveryRow>();
   return results;
 }
 
@@ -197,44 +237,54 @@ async function deliverOne(env: NotificationDeliveryEnv, row: DeliveryRow): Promi
   }
 }
 
-function outcomeMutation(env: NotificationDeliveryEnv, outcome: DeliveryOutcome): D1PreparedStatementLike {
+function outcomeMutation(
+  env: NotificationDeliveryEnv,
+  outcome: DeliveryOutcome,
+  claimToken: string,
+): D1PreparedStatementLike {
   const { release_id: releaseId, user_telegram_id: userId } = outcome.row;
   if (outcome.kind === 'skipped') {
-    return env.DB.prepare(
-      'DELETE FROM ranobelib_notification_outbox WHERE release_id = ? AND user_telegram_id = ?',
-    ).bind(releaseId, userId);
+    return env.DB.prepare(`
+      DELETE FROM ranobelib_notification_outbox
+      WHERE release_id = ? AND user_telegram_id = ? AND claim_token = ?
+    `).bind(releaseId, userId, claimToken);
   }
   if (outcome.kind === 'sent') {
     return env.DB.prepare(`
       UPDATE ranobelib_notification_outbox
       SET status='sent', attempts=attempts+1, delivered_at=CURRENT_TIMESTAMP,
+          claim_token=NULL, claim_expires_at=NULL,
           last_error=NULL, updated_at=CURRENT_TIMESTAMP
-      WHERE release_id = ? AND user_telegram_id = ?
-    `).bind(releaseId, userId);
+      WHERE release_id = ? AND user_telegram_id = ? AND claim_token = ?
+    `).bind(releaseId, userId, claimToken);
   }
   if (outcome.kind === 'disabled') {
     return env.DB.prepare(`
       UPDATE ranobelib_notification_outbox
-      SET status='disabled', attempts=attempts+1, last_error=?, updated_at=CURRENT_TIMESTAMP
-      WHERE release_id = ? AND user_telegram_id = ?
-    `).bind(outcome.error.slice(0, 800), releaseId, userId);
+      SET status='disabled', attempts=attempts+1,
+          claim_token=NULL, claim_expires_at=NULL,
+          last_error=?, updated_at=CURRENT_TIMESTAMP
+      WHERE release_id = ? AND user_telegram_id = ? AND claim_token = ?
+    `).bind(outcome.error.slice(0, 800), releaseId, userId, claimToken);
   }
   if (outcome.retryAfterSeconds !== undefined) {
     return env.DB.prepare(`
       UPDATE ranobelib_notification_outbox
       SET status='retry', attempts=attempts+1,
           available_at=datetime('now', '+' || ? || ' seconds'),
+          claim_token=NULL, claim_expires_at=NULL,
           last_error=?, updated_at=CURRENT_TIMESTAMP
-      WHERE release_id = ? AND user_telegram_id = ?
-    `).bind(outcome.retryAfterSeconds, outcome.error.slice(0, 800), releaseId, userId);
+      WHERE release_id = ? AND user_telegram_id = ? AND claim_token = ?
+    `).bind(outcome.retryAfterSeconds, outcome.error.slice(0, 800), releaseId, userId, claimToken);
   }
   return env.DB.prepare(`
     UPDATE ranobelib_notification_outbox
     SET status='retry', attempts=attempts+1,
         available_at=datetime('now', '+' || MIN(attempts + 1, 10) || ' minutes'),
+        claim_token=NULL, claim_expires_at=NULL,
         last_error=?, updated_at=CURRENT_TIMESTAMP
-    WHERE release_id = ? AND user_telegram_id = ?
-  `).bind(outcome.error.slice(0, 800), releaseId, userId);
+    WHERE release_id = ? AND user_telegram_id = ? AND claim_token = ?
+  `).bind(outcome.error.slice(0, 800), releaseId, userId, claimToken);
 }
 
 async function executeStatements(db: D1DatabaseLike, statements: D1PreparedStatementLike[]): Promise<void> {
@@ -286,6 +336,16 @@ async function telegramCall<T>(
     throw new TelegramApiError(message, response.status, errorCode, retryAfter);
   }
   return body.result as T;
+}
+
+function resultRows<T>(result: unknown): T[] {
+  if (!result || typeof result !== 'object' || !('results' in result)) return [];
+  const rows = (result as { results?: unknown }).results;
+  return Array.isArray(rows) ? rows as T[] : [];
+}
+
+function emptyDeliveryResult(): NotificationDeliveryResult {
+  return { claimed: 0, sent: 0, retry: 0, disabled: 0, skipped: 0, rateLimited: 0 };
 }
 
 function clampInt(value: number, min: number, max: number): number {
