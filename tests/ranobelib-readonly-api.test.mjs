@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const productionEntry = readFileSync(new URL('../src/live-entry-v2.ts', import.meta.url), 'utf8');
+const compatibilityEntry = readFileSync(new URL('../src/live-entry.ts', import.meta.url), 'utf8');
 const runtime = readFileSync(new URL('../src/ranobelib-runtime.ts', import.meta.url), 'utf8');
 const wrangler = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
 
@@ -15,6 +16,12 @@ test('production RanobeLib API is intercepted as a pure D1 read before the legac
   assert.doesNotMatch(route, /syncRanobeLib/);
   assert.doesNotMatch(route, /ctx\.waitUntil/);
   assert.match(route, /getRanobeLibHome\(env\)/);
+
+  const homeStart = runtime.indexOf('export async function getRanobeLibHome');
+  const homeEnd = runtime.indexOf('\n/**', homeStart);
+  assert.ok(homeStart >= 0 && homeEnd > homeStart, 'getRanobeLibHome must remain inspectable');
+  const home = runtime.slice(homeStart, homeEnd);
+  assert.doesNotMatch(home, /ensureRanobeLibSchema/);
 });
 
 test('legacy circular crawler is removed from RanobeLib runtime', () => {
@@ -37,6 +44,7 @@ test('compatibility auto-kick is permanently disabled while manual admin sync us
   assert.match(runtime, /newReleases:\s*hotScan\.newReleases\s*\+\s*idleScan\.newReleases/);
 });
 
-test('obsolete legacy sync batch configuration is removed', () => {
+test('obsolete legacy sync batch configuration is removed from deployment and compatibility types', () => {
   assert.doesNotMatch(wrangler, /RANOBELIB_SYNC_BATCH_SIZE/);
+  assert.doesNotMatch(compatibilityEntry, /RANOBELIB_SYNC_BATCH_SIZE/);
 });
