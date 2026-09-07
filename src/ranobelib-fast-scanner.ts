@@ -11,6 +11,8 @@ import type { D1DatabaseLike } from './ranobelib-runtime.js';
 
 export const FAST_SCAN_LIMIT = 24;
 export const FAST_SCAN_CONCURRENCY = 4;
+export const IDLE_SCAN_LIMIT = 24;
+export const IDLE_SCAN_DELAY_MINUTES = 180;
 const DEFAULT_TEAM_REF = '11969--dom-nekromanta';
 
 type ScannerEnv = {
@@ -56,6 +58,8 @@ export type FastScanOptions = {
   now?: Date;
 };
 
+type ScanMode = 'hot' | 'idle';
+
 type ScanOutcome = {
   succeeded: number;
   failed: number;
@@ -83,7 +87,7 @@ export function computeNextCheckDelayMinutes(input: NextCheckInput): number {
 }
 
 export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT): Promise<DueTitle[]> {
-  const safeLimit = clampScanLimit(limit);
+  const safeLimit = clampScanLimit(limit, FAST_SCAN_LIMIT);
   const { results } = await env.DB.prepare(`
     SELECT book_ref, ranobelib_id, slug, url, title, cover_url, snapshot_ready,
            consecutive_no_change, consecutive_failures, last_change_at, next_check_at, scan_priority,
@@ -101,17 +105,53 @@ export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT):
   return results.slice(0, safeLimit);
 }
 
+export async function selectIdleTitles(env: ScannerEnv, limit = IDLE_SCAN_LIMIT): Promise<DueTitle[]> {
+  const safeLimit = clampScanLimit(limit, IDLE_SCAN_LIMIT);
+  const { results } = await env.DB.prepare(`
+    SELECT book_ref, ranobelib_id, slug, url, title, cover_url, snapshot_ready,
+           consecutive_no_change, consecutive_failures, last_change_at, next_check_at, scan_priority,
+           notification_subscriber_count
+    FROM ranobelib_titles
+    WHERE is_active = 1
+      AND snapshot_ready = 1
+      AND notification_subscriber_count = 0
+      AND (next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
+    ORDER BY COALESCE(next_check_at, '') ASC,
+             scan_priority DESC,
+             book_ref ASC
+    LIMIT ?
+  `).bind(safeLimit).all<DueTitle>();
+  return results.slice(0, safeLimit);
+}
+
 export async function scanDueRanobeLibTitles(
   env: ScannerEnv,
   options: FastScanOptions = {},
 ): Promise<FastScanResult> {
-  const totalLimit = clampScanLimit(options.limit ?? FAST_SCAN_LIMIT);
+  const totalLimit = clampScanLimit(options.limit ?? FAST_SCAN_LIMIT, FAST_SCAN_LIMIT);
   const selected = await selectDueTitles(env, totalLimit);
+  return scanSelectedTitles(env, selected, options.now ?? new Date(), 'hot');
+}
+
+export async function scanIdleRanobeLibTitles(
+  env: ScannerEnv,
+  options: FastScanOptions = {},
+): Promise<FastScanResult> {
+  const totalLimit = clampScanLimit(options.limit ?? IDLE_SCAN_LIMIT, IDLE_SCAN_LIMIT);
+  const selected = await selectIdleTitles(env, totalLimit);
+  return scanSelectedTitles(env, selected, options.now ?? new Date(), 'idle');
+}
+
+async function scanSelectedTitles(
+  env: ScannerEnv,
+  selected: DueTitle[],
+  now: Date,
+  mode: ScanMode,
+): Promise<FastScanResult> {
   if (!selected.length) return { selected: 0, succeeded: 0, failed: 0, newReleases: 0, errors: [] };
 
   const client = new RanobeLibClient();
   const teamRef = env.RANOBELIB_TEAM_REF?.trim() || DEFAULT_TEAM_REF;
-  const now = options.now ?? new Date();
 
   // Workers Paid gives this invocation far more subrequest headroom, while the platform still
   // has a small simultaneous-connection ceiling. Four workers remove the old sequential
@@ -128,7 +168,7 @@ export async function scanDueRanobeLibTitles(
       }
 
       try {
-        const sync = await scanOneBook(env, client, book, row, teamRef, now);
+        const sync = await scanOneBook(env, client, book, row, teamRef, now, mode);
         return { succeeded: 1, failed: 0, newReleases: sync.releaseCreated ? 1 : 0 };
       } catch (error) {
         const message = `${row.book_ref}: ${errorMessage(error)}`;
@@ -159,6 +199,7 @@ async function scanOneBook(
   due: DueTitle,
   teamRef: string,
   now: Date,
+  mode: ScanMode,
 ): Promise<{ releaseCreated: boolean; releaseId: string | null }> {
   const state = await env.DB.prepare(`
     SELECT snapshot_ready, last_release_at, title, summary, cover_url
@@ -235,13 +276,15 @@ async function scanOneBook(
 
   const previousMisses = Math.max(0, Math.floor(Number(due.consecutive_no_change) || 0));
   const misses = releaseCreated ? 0 : previousMisses + 1;
-  const delayMinutes = computeNextCheckDelayMinutes({
-    changed: releaseCreated,
-    consecutiveNoChange: misses,
-    consecutiveFailures: 0,
-    lastChangeAt: due.last_change_at,
-    now,
-  });
+  const delayMinutes = mode === 'idle'
+    ? IDLE_SCAN_DELAY_MINUTES
+    : computeNextCheckDelayMinutes({
+        changed: releaseCreated,
+        consecutiveNoChange: misses,
+        consecutiveFailures: 0,
+        lastChangeAt: due.last_change_at,
+        now,
+      });
 
   await env.DB.prepare(`
     UPDATE ranobelib_titles SET
@@ -377,9 +420,9 @@ function runChanges(result: unknown): number {
   return Number.isFinite(changes) ? changes : 0;
 }
 
-function clampScanLimit(value: number): number {
-  const numeric = Number.isFinite(value) ? Math.floor(value) : FAST_SCAN_LIMIT;
-  return Math.max(1, Math.min(FAST_SCAN_LIMIT, numeric));
+function clampScanLimit(value: number, maximum: number): number {
+  const numeric = Number.isFinite(value) ? Math.floor(value) : maximum;
+  return Math.max(1, Math.min(maximum, numeric));
 }
 
 function timestampMs(value: string | null): number | null {
