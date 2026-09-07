@@ -10,8 +10,8 @@ Reduce the time from a new chapter appearing on RanobeLib to a subscriber receiv
 
 Target behavior for active titles:
 
-- discovery normally within 1–2 minutes;
-- delivery starts immediately after discovery when Queue delivery is available;
+- a newly active title is normally checked again within 1–2 minutes;
+- delivery starts immediately after release detection when Queue delivery is available;
 - cron fallback keeps notifications deliverable if Queue delivery is unavailable;
 - no duplicate notifications;
 - no regression to existing subscriptions, exclusions, notification controls, release aggregation, scheduled-chapter recovery, or membership access.
@@ -78,7 +78,7 @@ Keep the set of active Dom Nekromanta RanobeLib titles up to date without paying
 
 ### Schedule
 
-Run approximately every 30–60 minutes.
+Run every 30 minutes.
 
 ### Behavior
 
@@ -86,7 +86,8 @@ Run approximately every 30–60 minutes.
 - upsert discovered titles into `ranobelib_titles`;
 - mark no-longer-present team titles inactive using the existing semantics;
 - do not fetch chapter lists for every discovered title in this job;
-- preserve current title metadata and stable `book_ref` linkage.
+- preserve current title metadata and stable `book_ref` linkage;
+- newly discovered titles receive `next_check_at = CURRENT_TIMESTAMP` so the fast scanner initializes them promptly.
 
 ### Failure behavior
 
@@ -100,7 +101,7 @@ Check a small number of due titles frequently instead of checking a large circul
 
 ### Schedule
 
-Run every minute if the Free-plan cron budget permits; otherwise every two minutes. The initial implementation should use one-minute scheduling and a deliberately small scan batch.
+Run every minute.
 
 ### Data model
 
@@ -109,24 +110,35 @@ Add scheduler fields to `ranobelib_titles`:
 - `next_check_at TEXT`;
 - `last_change_at TEXT`;
 - `consecutive_no_change INTEGER NOT NULL DEFAULT 0`;
+- `consecutive_failures INTEGER NOT NULL DEFAULT 0`;
 - `scan_priority INTEGER NOT NULL DEFAULT 0`.
 
-Add an index that allows cheap due-title selection, for example on `(is_active, next_check_at, scan_priority)`.
+Add an index for due-title selection on `(is_active, snapshot_ready, next_check_at, scan_priority)`.
 
 ### Selection
 
-The scanner selects only active, snapshot-ready titles whose `next_check_at <= now`, ordered by urgency. Initial safe batch: 5–8 titles per invocation.
+The scanner selects at most **6** active titles that are due:
+
+```sql
+WHERE is_active = 1
+  AND (snapshot_ready = 0 OR next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
+ORDER BY COALESCE(next_check_at, '') ASC, scan_priority DESC
+LIMIT 6
+```
+
+This prioritizes the most overdue title first and uses `scan_priority` only as a tie-breaker. New/uninitialized titles are eligible immediately.
 
 ### Adaptive cadence
 
-After each title scan:
+Cadence is deterministic:
 
-- new release detected: next check in ~1–2 minutes; reset no-change counter;
-- recently active title: 3–5 minutes;
-- normal active title: around 10 minutes;
-- long-inactive title: progressively back off toward 20–30 minutes.
+- release detected: `last_change_at = now`, `consecutive_no_change = 0`, `consecutive_failures = 0`, next check in **1 minute**;
+- no release, but `last_change_at` is within 15 minutes: next check in **2 minutes**;
+- no release, but `last_change_at` is within 2 hours: next check in **5 minutes**;
+- otherwise after a successful no-change scan: increment `consecutive_no_change`; values 1–2 → **10 minutes**, values 3+ → **30 minutes**;
+- scan failure: increment `consecutive_failures`, keep release/no-change state unchanged, and back off for `min(30, 5 * 2^(failures-1))` minutes: 5, 10, 20, then 30 minutes capped.
 
-The cadence must be deterministic and testable. It must never become so aggressive that one cron invocation risks Cloudflare subrequest/D1 limits.
+Any successful scan resets `consecutive_failures` to 0. A release resets `consecutive_no_change` to 0.
 
 ### Chapter detection
 
@@ -157,19 +169,23 @@ OR
 
 ### Purpose
 
-Remove the extra 0–60 second wait for the delivery cron after a release is discovered.
+Remove the extra 0–60 second wait for the delivery cron after a release is detected.
 
 ### Message granularity
 
-Do not enqueue one Queue message per subscriber. Queue operations are charged per message, so that would waste the 10,000 operations/day Free allowance.
+Do not enqueue one Queue message per subscriber or per outbox row.
 
-Use one compact wake-up message per release or drain request, for example:
+The fast scanner sends **one** compact wake-up message if its invocation created at least one release:
 
 ```json
-{"kind":"release-drain","releaseId":"..."}
+{"kind":"drain"}
 ```
 
-The message is a signal, not the payload authority. The consumer always reads pending recipients from D1.
+The message contains no user/title data. It is only a signal. The consumer reads pending recipients from D1.
+
+### Continuation
+
+The Queue consumer drains one bounded delivery batch. If the delivery query reports that more due rows remain, it enqueues one new `{"kind":"drain"}` continuation message. This creates a controlled chain of small Worker invocations instead of one oversized invocation.
 
 ### Idempotency
 
@@ -183,21 +199,24 @@ Failure to enqueue a wake-up must never lose a notification. The pending D1 outb
 
 ### Recipient query
 
-Replace the current per-row `isEffectivelySubscribed()` calls with one delivery SELECT that only returns rows whose subscription is still effective.
+Replace the current per-row `isEffectivelySubscribed()` calls with a delivery query that determines effective subscription in SQL.
 
-The eligibility predicate must be expressed in SQL using `EXISTS` / `NOT EXISTS` or equivalent joins so one batch does not perform three extra D1 reads per recipient.
+The query must return:
 
-If a pending row is no longer eligible, clean it up in bounded bulk rather than issuing three reads for that user.
+- due and still-eligible rows for sending;
+- enough information to identify due rows that are no longer eligible so they can be cleaned in bounded bulk.
+
+The effective predicate is expressed using `EXISTS` / `NOT EXISTS` or equivalent joins so the worker does not perform three subscription reads per recipient.
 
 ### Batch size
 
-Choose a batch that fits comfortably within Workers Free subrequest and D1-query limits. Initial target: 20–25 recipients per invocation.
+Each delivery invocation processes at most **20** Telegram recipients. This leaves headroom below the Workers Free 50-subrequest limit for Queue continuation and error handling.
 
 ### Telegram concurrency
 
-Send concurrently with a fixed concurrency of 4–6, never unbounded `Promise.all` over the full batch.
+Send with fixed concurrency **5**, never an unbounded `Promise.all` over the full batch.
 
-Keep effective broadcast throughput below Telegram's free ~30 messages/second limit. No paid broadcasts are required.
+The worker must also pace starts so aggregate free broadcast throughput stays below **25 messages/second**, leaving margin under Telegram's approximate 30 messages/second bulk limit.
 
 ### Result persistence
 
@@ -207,21 +226,28 @@ Preferred design:
 
 - collect successful `(release_id, user_id)` pairs;
 - collect disabled pairs;
-- collect retry pairs grouped by retry time where practical;
-- persist results with bounded batch statements or compact updates, staying below D1 per-invocation limits.
+- collect retry pairs with their next `available_at`;
+- persist results with D1 `batch()` or compact bounded update statements;
+- split statements before D1's bound-parameter limit is reached.
 
-If D1's 100-bound-parameter limit makes a single bulk statement awkward, split into small bounded chunks.
+A delivery invocation must stay below 50 D1 queries with headroom.
 
 ### Telegram errors
 
-- `403`: mark recipient delivery disabled for that outbox item using existing semantics;
-- `429`: parse Telegram `retry_after` when available and set `available_at` accordingly;
-- other temporary errors: exponential/bounded backoff with jitter or the existing minute-based fallback, capped to a reasonable maximum;
+- `403`: mark that outbox delivery `disabled`;
+- `429`: parse Telegram `parameters.retry_after` and set `available_at` to that delay (minimum 1 second, capped defensively at 1 hour); if Telegram omits `retry_after`, fall back to the normal temporary-error backoff;
+- other temporary errors: increment attempts and retry after `min(30, max(1, attempts + 1))` minutes;
 - one failed user must not abort the entire batch.
+
+### More-work signal
+
+The delivery function returns `hasMoreDue`. Queue consumer re-enqueues `drain` when true. Cron fallback simply ends and lets the next cron invocation continue.
 
 ## 6. Cron fallback
 
 Retain a low-cost delivery cron even after Queue is introduced.
+
+Schedule: every **5 minutes**.
 
 Purpose:
 
@@ -229,7 +255,7 @@ Purpose:
 - recover from transient Queue consumer failures;
 - recover delayed `retry` rows when `available_at` is reached.
 
-Recommended cadence: every 5 minutes, unless Queue platform behavior during implementation shows a one-minute fallback is still cheap enough. Queue remains the normal fast path.
+Queue remains the normal fast path.
 
 ## 7. Membership access
 
@@ -237,15 +263,13 @@ Telegram `chat_member` webhook remains the primary realtime source for channel m
 
 The periodic `getChatMember` reconciliation becomes a separate slow safety sweep rather than sharing the RanobeLib scanner invocation.
 
-Recommended cadence: hourly, in a small bounded batch.
+Schedule: **hourly**, with the existing bounded batch of at most 40 monitored users. Since this invocation does no RanobeLib sync or notification sending, it remains below the 50 external-subrequest limit.
 
 A Telegram/API failure must remain fail-open for punishment: never blacklist a user only because reconciliation could not contact Telegram.
 
 ## 8. Cron budget
 
-Workers Free supports only five cron triggers per account. Notifications v3 must fit inside that budget.
-
-Recommended allocation:
+Workers Free supports only five cron triggers per account. Notifications v3 uses four:
 
 1. `* * * * *` — fast chapter scanner;
 2. `*/30 * * * *` — team discovery;
@@ -254,7 +278,7 @@ Recommended allocation:
 
 One cron slot remains unused for future operational needs.
 
-If Cloudflare treats overlapping cron expressions as separate invocations, routing must distinguish them explicitly and return after the selected job so unrelated jobs never share the same invocation.
+Routing must distinguish cron strings explicitly and **return after the selected job** so unrelated jobs never share one invocation, including at minute `00` when all four schedules may fire independently.
 
 ## 9. Runtime boundaries
 
@@ -268,28 +292,29 @@ Suggested boundaries:
 - Queue consumer wiring in the Worker entrypoint;
 - existing subscription UI/callback code remains in `telegram-subscriptions.ts`.
 
-Shared Telegram formatting can stay in the current module or be extracted only if needed by the implementation. Avoid unrelated refactors.
+Shared Telegram release formatting can remain in `telegram-subscriptions.ts` initially. Extract it only if imports become cyclic or tests become awkward. Avoid unrelated refactors.
 
 ## 10. Migration
 
-Add a new forward-only migration after `0013`.
+Add forward-only migration `0014_telegram_notifications_v3.sql`.
 
 It should:
 
-- add scheduler columns to `ranobelib_titles`;
-- add scheduler indexes;
-- recreate the notification fan-out trigger once, if trigger SQL must change;
-- add any outbox indexes needed by the new eligibility/drain query.
+- add the five scheduler columns to `ranobelib_titles`;
+- initialize `next_check_at` for existing active titles so they enter the scanner gradually/consistently;
+- add scheduler and outbox drain indexes;
+- recreate the notification fan-out trigger once if trigger SQL must be normalized;
+- preserve every existing subscription, exclusion, release, proposal, and outbox row.
 
-No existing proposal/subscription/release data may be dropped or rewritten destructively.
+No destructive table rebuild is allowed in v3 unless SQLite/D1 makes a specific required schema change impossible otherwise; if that becomes necessary, stop and revise the spec before implementation.
 
 ## 11. Queue configuration
 
 Add one Cloudflare Queue binding and consumer to Wrangler configuration.
 
-The same Worker may act as producer and consumer if that keeps deployment simple. Queue messages must stay tiny and must not contain Telegram bot tokens, user profile data, or chapter content.
+The same Worker acts as producer and consumer to keep deployment simple. Queue messages remain tiny and contain no Telegram bot token, user profile data, chapter content, or release metadata.
 
-The implementation must remain operational without Queue delivery during local tests and must keep cron fallback as a production safety net.
+The implementation must remain operational without Queue delivery during local unit tests and must keep cron fallback as a production safety net.
 
 ## 12. Observability
 
@@ -308,11 +333,12 @@ Useful metrics:
 
 ### Delivery
 
-- claimed/pending recipients;
+- selected recipients;
 - sent;
 - retry;
 - disabled;
 - skipped because subscription changed;
+- `hasMoreDue`;
 - batch duration;
 - Telegram 429 count.
 
@@ -344,27 +370,30 @@ Required tests include:
 
 ### Scheduler
 
-- due-title selection ordering;
-- 5–8 title batch cap;
-- adaptive next-check calculation;
+- due-title selection ordering and exact six-title cap;
+- exact adaptive next-check calculation;
 - release detection still uses existing detector semantics;
-- failure backoff does not hot-loop a broken title.
+- failure backoff does not hot-loop a broken title;
+- successful scans reset failure count.
 
 ### Discovery
 
 - discovery no longer happens on every fast scan;
 - valid discovery activates/upserts titles;
+- newly discovered titles become immediately scannable;
 - invalid/empty failed discovery cannot mass-deactivate the catalog.
 
 ### Delivery
 
-- one batch query can determine effective subscription without per-user subscription SELECTs;
+- one bounded query/batch determines effective subscriptions without per-user subscription SELECTs;
 - unsubscribed/excluded pending rows are skipped/cleaned;
-- bounded Telegram concurrency;
+- batch cap is 20;
+- Telegram concurrency is bounded at 5;
 - successful rows become sent;
 - 403 becomes disabled;
 - 429 respects `retry_after`;
 - transient failures retry;
+- `hasMoreDue` causes one continuation wake-up;
 - duplicate Queue wake-up does not duplicate Telegram delivery.
 
 ### Scheduling/wiring
@@ -372,7 +401,8 @@ Required tests include:
 - fast scan, discovery, fallback drain and membership reconciliation route to separate cron branches;
 - one branch returns before another job can run in the same invocation;
 - Queue consumer invokes only delivery logic;
-- outbox trigger is not recreated in the hot path.
+- outbox trigger is not recreated in the hot path;
+- Wrangler declares exactly the intended Queue producer/consumer and four cron schedules.
 
 ### Regression
 
@@ -384,28 +414,29 @@ Required tests include:
 ## 15. Rollout
 
 1. Implement on `feat/telegram-notifications-v3`.
-2. Keep existing D1 outbox and fallback delivery throughout migration.
-3. Deploy migration before relying on scheduler columns.
+2. Keep existing D1 outbox throughout migration.
+3. Apply migration `0014` before relying on scheduler columns.
 4. Deploy Worker/Queue configuration.
 5. Verify discovery and fast scanner logs before considering latency target achieved.
-6. Verify a real release produces exactly one outbox fan-out and one DM per eligible subscriber.
-7. Keep old notification cron path available until Queue consumer has been observed working in production.
+6. Verify a real release creates one durable fan-out and exactly one DM per eligible subscriber.
+7. Verify Queue drain chaining on a test backlog larger than 20 recipients.
+8. Keep the 5-minute fallback drain permanently; it is part of the reliability design, not temporary scaffolding.
 
 ## 16. Success criteria
 
 Notifications v3 is ready when:
 
-1. active titles are normally checked every 1–2 minutes after a release/change;
-2. inactive titles back off automatically;
+1. a title that has just released a chapter is checked again after 1 minute and stays on a 1–2 minute hot cadence for the first 15 minutes without another release;
+2. quiet titles back off deterministically to 10/30-minute checks;
 3. team discovery is no longer executed during every chapter scan;
 4. membership reconciliation cannot consume the scanner's invocation budget;
-5. delivery does not perform three subscription D1 queries per recipient;
-6. delivery sends concurrently with an explicit bound;
-7. Telegram 429 uses `retry_after`;
-8. Queue wakes delivery immediately after a release;
-9. D1 outbox + cron fallback prevents notification loss when Queue fails;
+5. delivery performs no per-recipient three-query effective-subscription check;
+6. each delivery invocation sends at most 20 DMs with concurrency 5 and pacing below 25 starts/second;
+7. Telegram 429 uses `retry_after` when provided;
+8. one Queue wake-up starts immediate D1 outbox draining and continuation wake-ups handle backlogs;
+9. D1 outbox + 5-minute cron fallback prevents notification loss when Queue fails;
 10. hot-path runtime does not recreate the D1 trigger;
-11. every scheduled job fits Workers Free invocation/query/subrequest limits with headroom;
+11. every scheduled/Queue invocation fits Workers Free query/subrequest limits with headroom;
 12. the existing Telegram subscription UX remains compatible;
 13. the complete repository CI is green.
 
