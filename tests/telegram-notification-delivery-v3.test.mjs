@@ -20,6 +20,7 @@ function outboxRow(userId, overrides = {}) {
     title: 'Fast Book',
     url: 'https://ranobelib.me/ru/book/77--fast-book',
     chapter_count: 1,
+    first_volume: '1',
     first_number: '2',
     last_number: '2',
     summary: 'Chapter 2',
@@ -158,6 +159,7 @@ test('delivery uses one SQL eligibility query and no per-user subscription SELEC
   assert.equal(sends, 1);
   assert.equal(db.deliverySelects.length, 1);
   const query = db.deliverySelects[0].query;
+  assert.match(query, /r\.first_volume/i);
   assert.match(query, /EXISTS[\s\S]*telegram_subscription_settings/i);
   assert.match(query, /title_subscription_exclusions/i);
   assert.match(query, /title_subscriptions/i);
@@ -168,6 +170,33 @@ test('delivery uses one SQL eligibility query and no per-user subscription SELEC
   assert.ok(db.mutations.some((m) => /SET claim_token\s*=\s*\?/i.test(m.query)));
   assert.ok(db.mutations.some((m) => /status='sent'/i.test(m.query)));
   assert.ok(db.mutations.some((m) => /DELETE FROM ranobelib_notification_outbox/i.test(m.query)));
+});
+
+test('single chapter notification opens that chapter while batches and incomplete metadata keep the title page', async () => {
+  const { drainNotificationOutbox } = await loadDelivery();
+
+  async function sentReadUrl(row) {
+    const db = new DB([row]);
+    let payload = null;
+    await withFetch(async (_url, init) => {
+      payload = JSON.parse(init.body);
+      return telegramOk();
+    }, () => drainNotificationOutbox({ DB: db, TELEGRAM_BOT_TOKEN: 'token' }));
+    return payload.reply_markup.inline_keyboard[0][0].url;
+  }
+
+  assert.equal(
+    await sentReadUrl(outboxRow('100')),
+    'https://ranobelib.me/ru/77--fast-book/read/v1/c2',
+  );
+  assert.equal(
+    await sentReadUrl(outboxRow('200', { chapter_count: 2, first_number: '2', last_number: '3', summary: 'Chapters 2–3' })),
+    'https://ranobelib.me/ru/book/77--fast-book',
+  );
+  assert.equal(
+    await sentReadUrl(outboxRow('300', { first_volume: null })),
+    'https://ranobelib.me/ru/book/77--fast-book',
+  );
 });
 
 test('two concurrent drains atomically claim outbox rows so Telegram is called only once per recipient', async () => {
