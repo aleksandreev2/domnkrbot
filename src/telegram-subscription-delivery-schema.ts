@@ -1,10 +1,14 @@
 import { ensureRanobeLibSchema, type RanobeLibRuntimeEnv } from './ranobelib-runtime.js';
 import {
+  ensureTelegramNotificationSettingsSchema,
+  type TelegramNotificationSettingsEnv,
+} from './telegram-notification-settings.js';
+import {
   ensureTelegramSubscriptionSchema,
   type TelegramSubscriptionEnv,
 } from './telegram-subscriptions.js';
 
-type Env = RanobeLibRuntimeEnv & TelegramSubscriptionEnv;
+type Env = RanobeLibRuntimeEnv & TelegramSubscriptionEnv & TelegramNotificationSettingsEnv;
 
 let deliverySchemaPromise: Promise<void> | null = null;
 
@@ -23,4 +27,5 @@ async function initializeDeliverySchema(env: Env): Promise<void> {
   // trigger is migration-owned in Notifications v3. Ordinary delivery must never mutate it.
   await ensureRanobeLibSchema(env);
   await ensureTelegramSubscriptionSchema(env);
+  await ensureTelegramNotificationSettingsSchema(env);
 }
