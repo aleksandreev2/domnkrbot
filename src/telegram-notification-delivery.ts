@@ -4,14 +4,23 @@ import {
   type TelegramDeliveryReachabilityOutcome,
 } from './notification-demand.js';
 import type { D1DatabaseLike, D1PreparedStatementLike } from './ranobelib-runtime.js';
+import {
+  aggregateClaimedDeliveryRows as aggregateDeliveryRows,
+  type ClaimedDeliveryRowLike,
+  type DeliveryGroup,
+} from './telegram-notification-delivery-groups.js';
 import { formatReleaseNotification } from './telegram-subscriptions.js';
+
+export {
+  aggregateClaimedDeliveryRows,
+  notificationGroupReady,
+} from './telegram-notification-delivery-groups.js';
 
 export const DELIVERY_BATCH_LIMIT = 20;
 export const TELEGRAM_SEND_CONCURRENCY = 5;
 export const TELEGRAM_START_INTERVAL_MS = 100;
 const TELEGRAM_STARTS_PER_INTERVAL = 2;
 const CLAIM_LEASE_MINUTES = 10;
-const STACK_FLUSH_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type NotificationDeliveryEnv = {
   DB: D1DatabaseLike;
@@ -32,121 +41,22 @@ export type NotificationDeliveryResult = {
   hasMoreDue: boolean;
 };
 
-export type NotificationGroupCandidate = {
-  deliveryMode: unknown;
-  stackSize: unknown;
-  pendingChapters: number | string;
-  oldestPendingAt: string | null;
-  retryBlocked: boolean | number | string;
-};
-
-export type ClaimedDeliveryAggregationRow = {
-  release_id: string;
+type ReadyGroupKey = {
   user_telegram_id: string;
   book_ref: string;
-  ranobelib_id: number | string | null;
-  title: string;
-  url: string;
-  chapter_count: number | string;
-  first_volume: string | null;
-  first_number: string | null;
-  last_volume?: string | null;
-  last_number: string | null;
-  summary: string;
 };
 
-export type DeliveryGroup = {
-  userTelegramId: string;
-  bookRef: string;
-  titleId: number | null;
-  title: string;
-  titleUrl: string;
-  members: ClaimedDeliveryAggregationRow[];
-  chapterCount: number;
-  firstVolume: string | null;
-  firstNumber: string | null;
-  lastVolume: string | null;
-  lastNumber: string | null;
-};
-
-export function notificationGroupReady(candidate: NotificationGroupCandidate, nowMs = Date.now()): boolean {
-  const pendingChapters = Number(candidate.pendingChapters);
-  if (!Number.isFinite(pendingChapters) || pendingChapters <= 0) return false;
-  if (truthyDatabaseFlag(candidate.retryBlocked)) return false;
-
-  const stackSize = Number(candidate.stackSize);
-  const validStack = candidate.deliveryMode === 'stack'
-    && Number.isInteger(stackSize)
-    && stackSize >= 2
-    && stackSize <= 100;
-  if (!validStack) return true;
-  if (pendingChapters >= stackSize) return true;
-
-  const oldestMs = candidate.oldestPendingAt ? Date.parse(candidate.oldestPendingAt) : Number.NaN;
-  return Number.isFinite(oldestMs) && Number.isFinite(nowMs) && nowMs - oldestMs >= STACK_FLUSH_MS;
-}
-
-export function aggregateClaimedDeliveryRows(rows: ClaimedDeliveryAggregationRow[]): DeliveryGroup[] {
-  const groups = new Map<string, DeliveryGroup>();
-  for (const row of rows) {
-    const userTelegramId = String(row.user_telegram_id);
-    const bookRef = String(row.book_ref);
-    const key = `${userTelegramId}\u0000${bookRef}`;
-    const chapterCount = positiveChapterCount(row.chapter_count);
-    let group = groups.get(key);
-    if (!group) {
-      const titleId = Number(row.ranobelib_id);
-      group = {
-        userTelegramId,
-        bookRef,
-        titleId: Number.isSafeInteger(titleId) && titleId > 0 ? titleId : null,
-        title: row.title,
-        titleUrl: row.url,
-        members: [],
-        chapterCount: 0,
-        firstVolume: row.first_volume ?? null,
-        firstNumber: row.first_number ?? null,
-        lastVolume: row.last_volume ?? row.first_volume ?? null,
-        lastNumber: row.last_number ?? row.first_number ?? null,
-      };
-      groups.set(key, group);
-    }
-    group.members.push(row);
-    group.chapterCount += chapterCount;
-    group.lastVolume = row.last_volume ?? row.first_volume ?? group.lastVolume;
-    group.lastNumber = row.last_number ?? row.first_number ?? group.lastNumber;
-  }
-  return [...groups.values()];
-}
-
-type ClaimedKey = {
-  release_id: string;
-  user_telegram_id: string;
-};
-
-type DeliveryRow = {
-  release_id: string;
-  user_telegram_id: string;
+type DeliveryRow = ClaimedDeliveryRowLike & {
   status: string;
   attempts: number | string;
-  book_ref: string;
-  ranobelib_id: number | string | null;
-  title: string;
-  url: string;
-  chapter_count: number | string;
-  first_volume: string | null;
-  first_number: string | null;
-  last_number: string | null;
-  summary: string;
   eligible: number | string;
-  has_more_due: number | string;
 };
 
 type DeliveryOutcome =
-  | { kind: 'sent'; row: DeliveryRow }
-  | { kind: 'disabled'; row: DeliveryRow; error: string }
-  | { kind: 'retry'; row: DeliveryRow; error: string; retryAfterSeconds?: number }
-  | { kind: 'skipped'; row: DeliveryRow };
+  | { kind: 'sent'; group: DeliveryGroup<DeliveryRow> }
+  | { kind: 'disabled'; group: DeliveryGroup<DeliveryRow>; error: string }
+  | { kind: 'retry'; group: DeliveryGroup<DeliveryRow>; error: string; retryAfterSeconds?: number }
+  | { kind: 'skipped'; group: DeliveryGroup<DeliveryRow> };
 
 type TelegramErrorBody = {
   ok?: boolean;
@@ -171,37 +81,49 @@ export async function drainNotificationOutbox(
   options: NotificationDrainOptions = {},
 ): Promise<NotificationDeliveryResult> {
   const limit = clampInt(options.limit ?? DELIVERY_BATCH_LIMIT, 1, DELIVERY_BATCH_LIMIT);
+  const selection = await selectReadyDeliveryGroups(env, limit);
+  if (!selection.groups.length) {
+    return { ...emptyDeliveryResult(), hasMoreDue: selection.hasMoreDue };
+  }
+
   const claimToken = crypto.randomUUID();
-  const claimedKeys = await claimDeliveryRows(env, limit, claimToken);
-  if (!claimedKeys.length) return emptyDeliveryResult();
+  const claimedKeys = await claimDeliveryGroups(env, selection.groups, claimToken);
+  if (!claimedKeys.length) {
+    return { ...emptyDeliveryResult(), hasMoreDue: selection.hasMoreDue };
+  }
 
   const rows = await loadClaimedDeliveryRows(env, claimToken);
-  const hasMoreDue = rows.some((row) => Number(row.has_more_due) === 1);
-  const eligibleRows = rows.filter((row) => Number(row.eligible) === 1);
-  const skippedRows = rows.filter((row) => Number(row.eligible) !== 1);
+  const groups = aggregateDeliveryRows(rows);
+  if (!groups.length) {
+    return { ...emptyDeliveryResult(), hasMoreDue: selection.hasMoreDue };
+  }
 
-  const outcomes: DeliveryOutcome[] = skippedRows.map((row) => ({ kind: 'skipped', row }));
+  const eligibleGroups = groups.filter(groupEligible);
+  const skippedGroups = groups.filter((group) => !groupEligible(group));
+  const outcomes: DeliveryOutcome[] = skippedGroups.map((group) => ({ kind: 'skipped', group }));
+
   const deliveryStartedAt = Date.now();
   const sendOutcomes = await mapWithConcurrency(
-    eligibleRows,
+    eligibleGroups,
     TELEGRAM_SEND_CONCURRENCY,
-    async (row, index) => {
+    async (group, index) => {
       const delayMs = computeTelegramStartDelayMs(index, deliveryStartedAt);
       if (delayMs > 0) await sleep(delayMs);
-      return deliverOne(env, row);
+      return deliverGroup(env, group);
     },
   );
   outcomes.push(...sendOutcomes);
 
-  const mutations = outcomes.map((outcome) => outcomeMutation(env, outcome, claimToken));
+  const mutations = outcomes.flatMap((outcome) =>
+    outcome.group.members.map((row) => outcomeMutation(env, outcome, row, claimToken)));
   await executeStatements(env.DB, mutations);
 
   const reachability: TelegramDeliveryReachabilityOutcome[] = [];
   for (const outcome of outcomes) {
     if (outcome.kind === 'sent') {
-      reachability.push({ userTelegramId: outcome.row.user_telegram_id, state: 'active' });
+      reachability.push({ userTelegramId: outcome.group.userTelegramId, state: 'active' });
     } else if (outcome.kind === 'disabled') {
-      reachability.push({ userTelegramId: outcome.row.user_telegram_id, state: 'blocked' });
+      reachability.push({ userTelegramId: outcome.group.userTelegramId, state: 'blocked' });
     }
   }
   if (reachability.length) await recordTelegramDeliveryReachability(env, reachability);
@@ -225,25 +147,24 @@ export async function drainNotificationOutbox(
   }
 
   return {
-    claimed: claimedKeys.length,
+    claimed: groups.length,
     sent,
     retry,
     disabled,
     skipped,
     rateLimited,
-    hasMoreDue,
+    hasMoreDue: selection.hasMoreDue,
   };
 }
 
-async function claimDeliveryRows(
+async function selectReadyDeliveryGroups(
   env: NotificationDeliveryEnv,
   limit: number,
-  claimToken: string,
-): Promise<ClaimedKey[]> {
-  const statement = env.DB.prepare(`
+): Promise<{ groups: ReadyGroupKey[]; hasMoreDue: boolean }> {
+  const probeLimit = limit + 1;
+  const { results } = await env.DB.prepare(`
     WITH ready_groups AS (
-      SELECT grouped.user_telegram_id, grouped.book_ref
-      FROM (
+      WITH notification_groups AS (
         SELECT
           o.user_telegram_id,
           r.book_ref,
@@ -293,7 +214,9 @@ async function claimDeliveryRows(
          AND td.book_ref = r.book_ref
         WHERE o.status IN ('pending','retry')
         GROUP BY o.user_telegram_id, r.book_ref
-      ) grouped
+      )
+      SELECT grouped.user_telegram_id, grouped.book_ref, grouped.oldest_pending_at
+      FROM notification_groups grouped
       WHERE grouped.lease_blocked = 0
         AND grouped.retry_blocked = 0
         AND (
@@ -303,13 +226,36 @@ async function claimDeliveryRows(
           OR grouped.stack_size < 2
           OR grouped.stack_size > 100
           OR grouped.pending_chapters >= grouped.stack_size
-          OR grouped.oldest_pending_at <= datetime('now','-7 days')
+          OR grouped.oldest_pending_at <= datetime('now', '-7 days')
         )
       ORDER BY grouped.oldest_pending_at ASC
-      LIMIT ?2
+      LIMIT ?
     )
+    SELECT user_telegram_id, book_ref
+    FROM ready_groups
+    ORDER BY oldest_pending_at ASC
+  `).bind(probeLimit).all<ReadyGroupKey>();
+
+  return {
+    groups: results.slice(0, limit),
+    hasMoreDue: results.length > limit,
+  };
+}
+
+async function claimDeliveryGroups(
+  env: NotificationDeliveryEnv,
+  groups: ReadyGroupKey[],
+  claimToken: string,
+): Promise<Array<{ release_id: string; user_telegram_id: string }>> {
+  if (!groups.length) return [];
+  const selectedGroups = JSON.stringify(groups.map((group) => ({
+    userTelegramId: String(group.user_telegram_id),
+    bookRef: String(group.book_ref),
+  })));
+
+  const statement = env.DB.prepare(`
     UPDATE ranobelib_notification_outbox
-    SET claim_token = ?1,
+    SET claim_token = ?,
         claim_expires_at = datetime('now', '+' || ${CLAIM_LEASE_MINUTES} || ' minutes'),
         updated_at = CURRENT_TIMESTAMP
     WHERE status IN ('pending','retry')
@@ -318,14 +264,17 @@ async function claimDeliveryRows(
       AND EXISTS (
         SELECT 1
         FROM ranobelib_releases claimed_release
-        JOIN ready_groups selected
-          ON selected.book_ref = claimed_release.book_ref
-         AND selected.user_telegram_id = ranobelib_notification_outbox.user_telegram_id
+        JOIN json_each(?) selected
         WHERE claimed_release.id = ranobelib_notification_outbox.release_id
+          AND CAST(json_extract(selected.value, '$.userTelegramId') AS TEXT) = ranobelib_notification_outbox.user_telegram_id
+          AND CAST(json_extract(selected.value, '$.bookRef') AS TEXT) = claimed_release.book_ref
       )
     RETURNING release_id, user_telegram_id
   `);
-  return resultRows<ClaimedKey>(await statement.bind(claimToken, limit).run());
+
+  return resultRows<Array<{ release_id: string; user_telegram_id: string }>[number]>(
+    await statement.bind(claimToken, selectedGroups).run(),
+  );
 }
 
 async function loadClaimedDeliveryRows(
@@ -336,7 +285,7 @@ async function loadClaimedDeliveryRows(
     SELECT o.release_id, o.user_telegram_id, o.status, o.attempts,
            r.book_ref, t.ranobelib_id,
            COALESCE(t.title, r.title_snapshot) AS title, t.url,
-           r.chapter_count, r.first_volume, r.first_number, r.last_number, r.summary,
+           r.chapter_count, r.first_volume, r.first_number, r.last_volume, r.last_number, r.summary,
            CASE WHEN (
              (
                EXISTS (
@@ -370,19 +319,7 @@ async function loadClaimedDeliveryRows(
                WHERE reach.user_telegram_id = o.user_telegram_id
                  AND reach.state = 'blocked'
              )
-           ) THEN 1 ELSE 0 END AS eligible,
-           EXISTS (
-             SELECT 1 AS due
-             FROM ranobelib_notification_outbox pending
-             WHERE pending.status IN ('pending','retry')
-               AND pending.available_at <= CURRENT_TIMESTAMP
-               AND (
-                 pending.claim_token IS NULL
-                 OR pending.claim_expires_at IS NULL
-                 OR pending.claim_expires_at <= CURRENT_TIMESTAMP
-               )
-             LIMIT 1
-           ) AS has_more_due
+           ) THEN 1 ELSE 0 END AS eligible
     FROM ranobelib_notification_outbox o
     JOIN ranobelib_releases r ON r.id = o.release_id
     JOIN ranobelib_titles t ON t.book_ref = r.book_ref
@@ -392,38 +329,46 @@ async function loadClaimedDeliveryRows(
   return results;
 }
 
-async function deliverOne(env: NotificationDeliveryEnv, row: DeliveryRow): Promise<DeliveryOutcome> {
-  const titleId = Number(row.ranobelib_id);
+function groupEligible(group: DeliveryGroup<DeliveryRow>): boolean {
+  return group.members.length > 0 && group.members.every((row) => Number(row.eligible) === 1);
+}
+
+async function deliverGroup(
+  env: NotificationDeliveryEnv,
+  group: DeliveryGroup<DeliveryRow>,
+): Promise<DeliveryOutcome> {
+  const titleId = Number(group.titleId);
+  const firstRow = group.members[0]!;
   const payload = formatReleaseNotification({
     ...(Number.isSafeInteger(titleId) && titleId > 0 ? { titleId, subscribed: true } : {}),
-    title: row.title,
-    url: releaseReadUrl(row),
-    chapterCount: Number(row.chapter_count) || 1,
-    firstNumber: row.first_number,
-    lastNumber: row.last_number,
-    summary: row.summary,
+    title: group.title,
+    url: group.chapterCount === 1 ? releaseReadUrl(firstRow) : group.titleUrl,
+    chapterCount: group.chapterCount || 1,
+    firstNumber: group.firstNumber,
+    lastNumber: group.lastNumber,
+    summary: group.summary,
   });
 
   try {
     await telegramCall(env, 'sendMessage', {
-      chat_id: row.user_telegram_id,
+      chat_id: group.userTelegramId,
       text: payload.text,
       parse_mode: payload.parse_mode,
       reply_markup: payload.reply_markup,
     });
-    return { kind: 'sent', row };
+    return { kind: 'sent', group };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (error instanceof TelegramApiError) {
       if (error.status === 403 || error.errorCode === 403) {
-        return { kind: 'disabled', row, error: message };
+        return { kind: 'disabled', group, error: message };
       }
       if ((error.status === 429 || error.errorCode === 429) && error.retryAfter !== null) {
         const retryAfter = clampInt(error.retryAfter, 1, 3600);
-        return { kind: 'retry', row, error: message, retryAfterSeconds: retryAfter };
+        return { kind: 'retry', group, error: message, retryAfterSeconds: retryAfter };
       }
     }
-    return { kind: 'retry', row, error: message };
+    return { kind: 'retry', group, error: message };
   }
 }
 
@@ -446,9 +391,11 @@ function releaseReadUrl(row: DeliveryRow): string {
 function outcomeMutation(
   env: NotificationDeliveryEnv,
   outcome: DeliveryOutcome,
+  row: DeliveryRow,
   claimToken: string,
 ): D1PreparedStatementLike {
-  const { release_id: releaseId, user_telegram_id: userId } = outcome.row;
+  const releaseId = row.release_id;
+  const userId = row.user_telegram_id;
   if (outcome.kind === 'skipped') {
     return env.DB.prepare(`
       DELETE FROM ranobelib_notification_outbox
@@ -572,17 +519,6 @@ function emptyDeliveryResult(): NotificationDeliveryResult {
     rateLimited: 0,
     hasMoreDue: false,
   };
-}
-
-function positiveChapterCount(value: unknown): number {
-  const count = Number(value);
-  return Number.isFinite(count) && count > 0 ? count : 0;
-}
-
-function truthyDatabaseFlag(value: unknown): boolean {
-  if (value === true || value === 1 || value === '1') return true;
-  if (typeof value === 'string') return value.trim().toLowerCase() === 'true';
-  return false;
 }
 
 function clampInt(value: number, min: number, max: number): number {
