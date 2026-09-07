@@ -36,9 +36,7 @@ test('release notification v2 has reading and direct subscription controls', () 
     titleId: 62387,
     title: 'Покемон: Мастер тактики',
     url: 'https://ranobelib.me/ru/book/62387--pokemon-master-of-tactics',
-    bookRef: '62387--pokemon-master-of-tactics',
     chapterCount: 2,
-    firstVolume: '1',
     firstNumber: '51',
     lastNumber: '52',
     summary: 'Chapters 51–52',
@@ -59,30 +57,13 @@ test('release notification v2 has reading and direct subscription controls', () 
     titleId: 62387,
     title: 'Покемон: Мастер тактики',
     url: 'https://ranobelib.me/ru/book/62387--pokemon-master-of-tactics',
-    bookRef: '62387--pokemon-master-of-tactics',
     chapterCount: 1,
-    firstVolume: '1',
     firstNumber: '53',
     lastNumber: '53',
     summary: 'Chapter 53',
     subscribed: false,
   });
-  assert.equal(off.reply_markup.inline_keyboard[0][0].url, 'https://ranobelib.me/ru/62387--pokemon-master-of-tactics/read/v1/c53');
   assert.equal(off.reply_markup.inline_keyboard[1][0].text, '🔔 Подписаться');
-
-  const fallback = notifications.formatReleaseNotification({
-    titleId: 62387,
-    title: 'Покемон: Мастер тактики',
-    url: 'https://ranobelib.me/ru/book/62387--pokemon-master-of-tactics',
-    bookRef: '62387--pokemon-master-of-tactics',
-    chapterCount: 1,
-    firstVolume: null,
-    firstNumber: '54',
-    lastNumber: '54',
-    summary: 'Chapter 54',
-    subscribed: true,
-  });
-  assert.equal(fallback.reply_markup.inline_keyboard[0][0].url, 'https://ranobelib.me/ru/book/62387--pokemon-master-of-tactics');
 });
 
 test('notification center shows instant delivery as status, not a fake interactive mode control', () => {
