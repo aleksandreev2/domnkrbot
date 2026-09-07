@@ -50,8 +50,6 @@ class Statement {
       const token = String(this.values[0]);
       return { results: this.db.rows.filter((item) => item.claim_token === token) };
     }
-    // Old row-oriented worker compatibility: leave the old select empty so these tests fail
-    // on the missing grouped claim/send semantics rather than on mock implementation details.
     if (/FROM ranobelib_notification_outbox o/i.test(this.query)) return { results: [] };
     return { results: [] };
   }
@@ -75,13 +73,13 @@ class Statement {
       return { results: claimed.map((item) => ({ release_id: item.release_id, user_telegram_id: item.user_telegram_id })), meta: { changes: claimed.length } };
     }
     if (/UPDATE ranobelib_notification_outbox/i.test(this.query) && /status='sent'/i.test(this.query)) {
-      this.db.applyGroupStatus(this.values, 'sent');
+      this.db.applyRowStatus(this.values, 'sent');
     } else if (/UPDATE ranobelib_notification_outbox/i.test(this.query) && /status='disabled'/i.test(this.query)) {
-      this.db.applyGroupStatus(this.values, 'disabled');
+      this.db.applyRowStatus(this.values, 'disabled');
     } else if (/UPDATE ranobelib_notification_outbox/i.test(this.query) && /status='retry'/i.test(this.query)) {
-      this.db.applyGroupStatus(this.values, 'retry');
+      this.db.applyRowStatus(this.values, 'retry');
     } else if (/DELETE FROM ranobelib_notification_outbox/i.test(this.query)) {
-      this.db.deleteClaimedGroup(this.values);
+      this.db.deleteClaimedRow(this.values);
     }
     return { meta: { changes: 1 } };
   }
@@ -132,18 +130,28 @@ class DB {
       return NOW - Date.parse(group.oldest_pending_at.replace(' ', 'T') + 'Z') >= 7 * 24 * 60 * 60 * 1000;
     });
   }
-  applyGroupStatus(values, status) {
+  applyRowStatus(values, status) {
+    const releaseId = String(values.at(-3));
+    const userId = String(values.at(-2));
     const claimToken = String(values.at(-1));
-    for (const item of this.rows) {
-      if (item.claim_token !== claimToken) continue;
-      item.status = status;
-      item.claim_token = null;
-      item.claim_expires_at = null;
-    }
+    const item = this.rows.find((candidate) =>
+      candidate.release_id === releaseId
+      && candidate.user_telegram_id === userId
+      && candidate.claim_token === claimToken);
+    if (!item) return;
+    item.status = status;
+    item.claim_token = null;
+    item.claim_expires_at = null;
   }
-  deleteClaimedGroup(values) {
+  deleteClaimedRow(values) {
+    const releaseId = String(values.at(-3));
+    const userId = String(values.at(-2));
     const claimToken = String(values.at(-1));
-    this.rows = this.rows.filter((item) => item.claim_token !== claimToken);
+    this.rows = this.rows.filter((item) => !(
+      item.release_id === releaseId
+      && item.user_telegram_id === userId
+      && item.claim_token === claimToken
+    ));
   }
 }
 
@@ -228,4 +236,49 @@ test('seven-day timeout flushes a partial stack while future retry blocks newer 
     drainNotificationOutbox({ DB: blocked, TELEGRAM_BOT_TOKEN: 'token' }));
   assert.equal(blockedSends, 0);
   assert.equal(result.claimed, 0);
+});
+
+test('403 disables every member of one claimed notification group', async () => {
+  const { drainNotificationOutbox } = await loadDelivery();
+  const db = new DB([
+    row('403', { release_id: 'r1', chapter_count: 2, first_number: '1', last_number: '2' }),
+    row('403', { release_id: 'r2', chapter_count: 3, first_number: '3', last_number: '5', created_at: '2026-09-08 09:00:00' }),
+  ], { global: { mode: 'stack', stackSize: 5 } });
+
+  const result = await withFetch(async () => new Response(JSON.stringify({
+    ok: false,
+    error_code: 403,
+    description: 'Forbidden',
+  }), { status: 403, headers: { 'content-type': 'application/json' } }), () =>
+    drainNotificationOutbox({ DB: db, TELEGRAM_BOT_TOKEN: 'token' }));
+
+  assert.equal(result.claimed, 1);
+  assert.equal(result.disabled, 1);
+  assert.deepEqual(db.rows.map((item) => item.status), ['disabled', 'disabled']);
+  const disabledWrites = db.queries.filter((entry) => /status='disabled'/i.test(entry.query));
+  assert.equal(disabledWrites.length, 2);
+});
+
+test('429 retries every member of one group with the same retry_after', async () => {
+  const { drainNotificationOutbox } = await loadDelivery();
+  const db = new DB([
+    row('429', { release_id: 'r1', chapter_count: 2, first_number: '1', last_number: '2' }),
+    row('429', { release_id: 'r2', chapter_count: 3, first_number: '3', last_number: '5', created_at: '2026-09-08 09:00:00' }),
+  ], { global: { mode: 'stack', stackSize: 5 } });
+
+  const result = await withFetch(async () => new Response(JSON.stringify({
+    ok: false,
+    error_code: 429,
+    description: 'Too Many Requests',
+    parameters: { retry_after: 17 },
+  }), { status: 429, headers: { 'content-type': 'application/json' } }), () =>
+    drainNotificationOutbox({ DB: db, TELEGRAM_BOT_TOKEN: 'token' }));
+
+  assert.equal(result.claimed, 1);
+  assert.equal(result.retry, 1);
+  assert.equal(result.rateLimited, 1);
+  assert.deepEqual(db.rows.map((item) => item.status), ['retry', 'retry']);
+  const retryWrites = db.queries.filter((entry) => /status='retry'/i.test(entry.query));
+  assert.equal(retryWrites.length, 2);
+  assert.ok(retryWrites.every((entry) => entry.values.includes(17)));
 });
