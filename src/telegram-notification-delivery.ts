@@ -549,8 +549,8 @@ async function telegramCall<T>(
   const body = await response.json().catch(() => null) as (TelegramErrorBody & { result?: T }) | null;
   if (!response.ok || !body?.ok) {
     const message = body?.description || `Telegram ${method} failed with HTTP ${response.status}`;
-    const errorCode = Number.isFinite(body?.error_code) ? Number(body.error_code) : null;
-    const retryAfter = Number.isFinite(body?.parameters?.retry_after) ? Number(body.parameters?.retry_after) : null;
+    const errorCode = Number.isFinite(body?.error_code) ? Number(body?.error_code) : null;
+    const retryAfter = Number.isFinite(body?.parameters?.retry_after) ? Number(body?.parameters?.retry_after) : null;
     throw new TelegramApiError(message, response.status, errorCode, retryAfter);
   }
   return body.result as T;
