@@ -103,7 +103,7 @@ export async function scanDueRanobeLibTitles(
     }
 
     try {
-      const sync = await scanOneBook(env, client, book, teamRef, now);
+      const sync = await scanOneBook(env, client, book, row, teamRef, now);
       succeeded += 1;
       if (sync.releaseCreated && sync.releaseId) {
         newReleases += 1;
@@ -124,6 +124,7 @@ async function scanOneBook(
   env: ScannerEnv,
   client: RanobeLibClient,
   book: RanobeLibTeamBookRef,
+  due: DueTitle,
   teamRef: string,
   now: Date,
 ): Promise<{ releaseCreated: boolean; releaseId: string | null }> {
@@ -197,12 +198,12 @@ async function scanOneBook(
     if (!releaseCreated) releaseId = null;
   }
 
-  const previousMisses = Math.max(0, Math.floor(Number((await currentScheduleState(env, book.ref))?.consecutive_no_change ?? 0) || 0));
+  const previousMisses = Math.max(0, Math.floor(Number(due.consecutive_no_change) || 0));
   const misses = releaseCreated ? 0 : previousMisses + 1;
   const delayMinutes = computeNextCheckDelayMinutes({
     changed: releaseCreated,
     consecutiveNoChange: misses,
-    lastChangeAt: (await currentScheduleState(env, book.ref))?.last_change_at ?? null,
+    lastChangeAt: due.last_change_at,
   });
 
   await env.DB.prepare(`
@@ -238,22 +239,6 @@ async function scanOneBook(
   ).run();
 
   return { releaseCreated, releaseId };
-}
-
-async function currentScheduleState(env: ScannerEnv, bookRef: string): Promise<{
-  consecutive_no_change: number | string;
-  last_change_at: string | null;
-} | null> {
-  try {
-    return await env.DB.prepare(`
-      SELECT consecutive_no_change, last_change_at FROM ranobelib_titles WHERE book_ref = ?
-    `).bind(bookRef).first<{
-      consecutive_no_change: number | string;
-      last_change_at: string | null;
-    }>();
-  } catch {
-    return null;
-  }
 }
 
 async function scheduleFailure(env: ScannerEnv, bookRef: string, message: string): Promise<void> {
