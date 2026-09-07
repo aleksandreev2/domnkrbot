@@ -18,6 +18,24 @@ type ProposalStatusRow = {
   title: string;
   status: ProposalStatus;
 };
+type ProposalLinkRow = {
+  id: string;
+  proposal_type: string;
+  source_kind: string;
+  ranobelib_book_ref: string | null;
+  title: string;
+  status: ProposalStatus;
+};
+type RanobeLibLinkRow = {
+  book_ref: string;
+  ranobelib_id: number | null;
+  title: string | null;
+  url: string | null;
+};
+type ProposalConflictRow = {
+  id: string;
+  status: ProposalStatus;
+};
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 const NOTIFIED_STATUSES = new Set<ProposalStatus>(['planned', 'in_progress', 'done', 'rejected']);
@@ -164,10 +182,75 @@ async function handleStatusUpdate(
   return json({ ok: true, id: proposalId, status, notificationSent });
 }
 
+async function handleRanobeLibLink(
+  request: Request,
+  env: TitleProposalAdminEnv,
+  proposalId: string,
+): Promise<Response> {
+  const admin = await requireAdminSession(request, env);
+  if (admin instanceof Response) return admin;
+  if (!isSameOriginMutation(request)) return json({ error: 'Cross-origin request rejected.' }, 403);
+
+  const body = await request.json().catch(() => null) as unknown;
+  if (!isRecord(body)) return json({ error: 'Invalid JSON body.' }, 400);
+  const bookRef = text(body.bookRef);
+  if (!bookRef || bookRef.length > 240) return json({ error: 'Некорректный RanobeLib book_ref.' }, 400);
+
+  const proposal = await env.DB.prepare(`
+    SELECT id,proposal_type,source_kind,ranobelib_book_ref,title,status
+    FROM chapter_proposals
+    WHERE id=? LIMIT 1
+  `).bind(proposalId).first<ProposalLinkRow>();
+  if (!proposal || proposal.proposal_type !== 'title') return json({ error: 'Заявка не найдена.' }, 404);
+
+  const ranobelib = await env.DB.prepare(`
+    SELECT book_ref,ranobelib_id,title,url
+    FROM ranobelib_titles
+    WHERE book_ref=? LIMIT 1
+  `).bind(bookRef).first<RanobeLibLinkRow>();
+  if (!ranobelib) return json({ error: 'Карточка RanobeLib не найдена в синхронизированном каталоге.' }, 404);
+
+  if (proposal.source_kind === 'ranobelib' && proposal.ranobelib_book_ref === bookRef) {
+    return json({ ok: true, id: proposalId, bookRef, ranobelib });
+  }
+
+  const conflict = await env.DB.prepare(`
+    SELECT id,status
+    FROM chapter_proposals
+    WHERE proposal_type='title'
+      AND ranobelib_book_ref=?
+      AND id<>?
+      AND status IN ('pending','approved','planned','in_progress')
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).bind(bookRef, proposalId).first<ProposalConflictRow>();
+  if (conflict) {
+    return json({
+      error: 'Этот тайтл уже связан с другой активной заявкой.',
+      conflictId: conflict.id,
+      conflictStatus: conflict.status,
+    }, 409);
+  }
+
+  await env.DB.prepare(`
+    UPDATE chapter_proposals
+    SET source_kind='ranobelib',ranobelib_book_ref=?,updated_at=CURRENT_TIMESTAMP
+    WHERE id=?
+  `).bind(bookRef, proposalId).run();
+
+  return json({ ok: true, id: proposalId, bookRef, ranobelib });
+}
+
 export async function handleTitleProposalAdminApi(request: Request, env: TitleProposalAdminEnv): Promise<Response | null> {
   const url = new URL(request.url);
   if (request.method === 'GET' && url.pathname === '/api/admin/title-proposal-details') {
     return handleDetails(request, env);
+  }
+
+  const linkMatch = url.pathname.match(/^\/api\/admin\/title-proposals\/([^/]+)\/link-ranobelib$/);
+  const linkProposalId = linkMatch?.[1];
+  if (request.method === 'POST' && linkProposalId) {
+    return handleRanobeLibLink(request, env, decodeURIComponent(linkProposalId));
   }
 
   const statusMatch = url.pathname.match(/^\/api\/admin\/proposals\/([^/]+)\/status$/);
