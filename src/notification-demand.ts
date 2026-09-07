@@ -7,6 +7,11 @@ type NotificationDemandEnv = { DB: D1DatabaseLike };
 
 type DemandCountRow = { notification_subscriber_count: number | string };
 
+export type TelegramDeliveryReachabilityOutcome = {
+  userTelegramId: string;
+  state: 'active' | 'blocked';
+};
+
 export async function refreshTitleNotificationDemand(
   env: NotificationDemandEnv,
   bookRef: string,
@@ -156,4 +161,55 @@ export async function markTelegramUserReachable(env: NotificationDemandEnv, user
       last_success_at = CURRENT_TIMESTAMP,
       updated_at = CURRENT_TIMESTAMP
   `).bind(id).run();
+}
+
+export async function recordTelegramDeliveryReachability(
+  env: NotificationDemandEnv,
+  outcomes: TelegramDeliveryReachabilityOutcome[],
+): Promise<void> {
+  if (!outcomes.length) return;
+
+  // Last delivery result wins for duplicate users in the same drain. This keeps the JSON
+  // payload unique by primary key and guarantees a single bounded D1 write for the batch.
+  const byUser = new Map<string, 'active' | 'blocked'>();
+  for (const outcome of outcomes) {
+    const userTelegramId = String(outcome?.userTelegramId || '').trim();
+    if (!userTelegramId) continue;
+    if (outcome.state !== 'active' && outcome.state !== 'blocked') continue;
+    byUser.set(userTelegramId, outcome.state);
+  }
+  if (!byUser.size) return;
+
+  const payload = JSON.stringify([...byUser].map(([userTelegramId, state]) => ({ userTelegramId, state })));
+  await env.DB.prepare(`
+    WITH incoming AS (
+      SELECT
+        CAST(json_extract(j.value, '$.userTelegramId') AS TEXT) AS user_telegram_id,
+        CAST(json_extract(j.value, '$.state') AS TEXT) AS state
+      FROM json_each(?) AS j
+    )
+    INSERT INTO telegram_delivery_reachability (
+      user_telegram_id, state, blocked_at, last_success_at, updated_at
+    )
+    SELECT
+      user_telegram_id,
+      state,
+      CASE WHEN state = 'blocked' THEN CURRENT_TIMESTAMP ELSE NULL END,
+      CASE WHEN state = 'active' THEN CURRENT_TIMESTAMP ELSE NULL END,
+      CURRENT_TIMESTAMP
+    FROM incoming
+    WHERE user_telegram_id != '' AND state IN ('active', 'blocked')
+    ON CONFLICT(user_telegram_id) DO UPDATE SET
+      state = excluded.state,
+      blocked_at = CASE
+        WHEN excluded.state = 'blocked'
+          THEN COALESCE(telegram_delivery_reachability.blocked_at, CURRENT_TIMESTAMP)
+        ELSE NULL
+      END,
+      last_success_at = CASE
+        WHEN excluded.state = 'active' THEN CURRENT_TIMESTAMP
+        ELSE telegram_delivery_reachability.last_success_at
+      END,
+      updated_at = CURRENT_TIMESTAMP
+  `).bind(payload).run();
 }
