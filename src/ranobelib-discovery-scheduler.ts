@@ -61,20 +61,66 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
     coverUrl: normalizeCoverUrl(book.coverUrl ?? null),
   })));
 
+  // Demand is folded into the same JSON upsert so discovery remains bounded to two D1 writes
+  // regardless of team size. Missing reachability rows are deliberately treated as active.
   await db.prepare(`
+    WITH discovered AS (
+      SELECT
+        CAST(json_extract(j.value, '$.ref') AS TEXT) AS book_ref,
+        CAST(json_extract(j.value, '$.id') AS INTEGER) AS ranobelib_id,
+        CAST(json_extract(j.value, '$.slug') AS TEXT) AS slug,
+        CAST(json_extract(j.value, '$.url') AS TEXT) AS url,
+        json_extract(j.value, '$.title') AS title,
+        json_extract(j.value, '$.coverUrl') AS cover_url
+      FROM json_each(?) AS j
+    ),
+    discovered_with_demand AS (
+      SELECT d.*,
+        (
+          SELECT COUNT(*)
+          FROM (
+            SELECT s.user_telegram_id
+            FROM telegram_subscription_settings s
+            LEFT JOIN telegram_delivery_reachability reach
+              ON reach.user_telegram_id = s.user_telegram_id
+            WHERE s.all_titles = 1
+              AND COALESCE(reach.state, 'active') != 'blocked'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM title_subscription_exclusions e
+                WHERE e.user_telegram_id = s.user_telegram_id
+                  AND e.book_ref = d.book_ref
+              )
+            UNION
+            SELECT ts.user_telegram_id
+            FROM title_subscriptions ts
+            LEFT JOIN telegram_subscription_settings s2
+              ON s2.user_telegram_id = ts.user_telegram_id
+            LEFT JOIN telegram_delivery_reachability reach2
+              ON reach2.user_telegram_id = ts.user_telegram_id
+            WHERE ts.book_ref = d.book_ref
+              AND COALESCE(s2.all_titles, 0) != 1
+              AND COALESCE(reach2.state, 'active') != 'blocked'
+          ) effective_recipients
+        ) AS demand_count
+      FROM discovered d
+    )
     INSERT INTO ranobelib_titles (
-      book_ref, ranobelib_id, slug, url, title, cover_url, is_active, next_check_at
+      book_ref, ranobelib_id, slug, url, title, cover_url, is_active,
+      next_check_at, notification_subscriber_count, subscriber_count_updated_at
     )
     SELECT
-      CAST(json_extract(j.value, '$.ref') AS TEXT),
-      CAST(json_extract(j.value, '$.id') AS INTEGER),
-      CAST(json_extract(j.value, '$.slug') AS TEXT),
-      CAST(json_extract(j.value, '$.url') AS TEXT),
-      json_extract(j.value, '$.title'),
-      json_extract(j.value, '$.coverUrl'),
+      book_ref,
+      ranobelib_id,
+      slug,
+      url,
+      title,
+      cover_url,
       1,
+      CURRENT_TIMESTAMP,
+      demand_count,
       CURRENT_TIMESTAMP
-    FROM json_each(?) AS j
+    FROM discovered_with_demand
     WHERE 1
     ON CONFLICT(book_ref) DO UPDATE SET
       ranobelib_id = excluded.ranobelib_id,
@@ -84,8 +130,21 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
       cover_url = COALESCE(excluded.cover_url, ranobelib_titles.cover_url),
       next_check_at = CASE
         WHEN ranobelib_titles.is_active = 0 THEN CURRENT_TIMESTAMP
+        WHEN ranobelib_titles.notification_subscriber_count = 0
+          AND excluded.notification_subscriber_count > 0 THEN CURRENT_TIMESTAMP
+        WHEN ranobelib_titles.notification_subscriber_count > 0
+          AND excluded.notification_subscriber_count = 0
+          THEN datetime(CURRENT_TIMESTAMP, '+180 minutes')
         ELSE ranobelib_titles.next_check_at
       END,
+      scan_priority = CASE
+        WHEN ranobelib_titles.notification_subscriber_count = 0
+          AND excluded.notification_subscriber_count > 0
+          THEN ranobelib_titles.scan_priority + 10
+        ELSE ranobelib_titles.scan_priority
+      END,
+      notification_subscriber_count = excluded.notification_subscriber_count,
+      subscriber_count_updated_at = CURRENT_TIMESTAMP,
       is_active = 1
   `).bind(payload).run();
 }
