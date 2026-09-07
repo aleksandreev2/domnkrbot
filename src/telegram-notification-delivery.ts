@@ -46,6 +46,7 @@ type DeliveryRow = {
   title: string;
   url: string;
   chapter_count: number | string;
+  first_volume: string | null;
   first_number: string | null;
   last_number: string | null;
   summary: string;
@@ -181,7 +182,7 @@ async function loadClaimedDeliveryRows(
     SELECT o.release_id, o.user_telegram_id, o.status, o.attempts,
            r.book_ref, t.ranobelib_id,
            COALESCE(t.title, r.title_snapshot) AS title, t.url,
-           r.chapter_count, r.first_number, r.last_number, r.summary,
+           r.chapter_count, r.first_volume, r.first_number, r.last_number, r.summary,
            CASE WHEN (
              (
                EXISTS (
@@ -242,7 +243,7 @@ async function deliverOne(env: NotificationDeliveryEnv, row: DeliveryRow): Promi
   const payload = formatReleaseNotification({
     ...(Number.isSafeInteger(titleId) && titleId > 0 ? { titleId, subscribed: true } : {}),
     title: row.title,
-    url: row.url,
+    url: releaseReadUrl(row),
     chapterCount: Number(row.chapter_count) || 1,
     firstNumber: row.first_number,
     lastNumber: row.last_number,
@@ -269,6 +270,22 @@ async function deliverOne(env: NotificationDeliveryEnv, row: DeliveryRow): Promi
       }
     }
     return { kind: 'retry', row, error: message };
+  }
+}
+
+function releaseReadUrl(row: DeliveryRow): string {
+  if (Number(row.chapter_count) !== 1) return row.url;
+  const bookRef = row.book_ref?.trim();
+  const volume = row.first_volume?.trim();
+  const number = row.first_number?.trim();
+  if (!bookRef || !volume || !number) return row.url;
+
+  try {
+    const titleUrl = new URL(row.url);
+    const locale = /^\/([^/]+)\/book(?:\/|$)/.exec(titleUrl.pathname)?.[1] || 'ru';
+    return `${titleUrl.origin}/${encodeURIComponent(locale)}/${encodeURIComponent(bookRef)}/read/v${encodeURIComponent(volume)}/c${encodeURIComponent(number)}`;
+  } catch {
+    return row.url;
   }
 }
 
