@@ -7,7 +7,7 @@ import {
   summarizeAdded,
 } from './integrations/ranobelib/release-detector.js';
 import type { RanobeLibChapter, RanobeLibTeamBookRef } from './integrations/ranobelib/types.js';
-import type { D1DatabaseLike, D1PreparedStatementLike } from './ranobelib-runtime.js';
+import type { D1DatabaseLike } from './ranobelib-runtime.js';
 
 export const FAST_SCAN_LIMIT = 6;
 const DEFAULT_TEAM_REF = '11969--dom-nekromanta';
@@ -63,7 +63,7 @@ export function computeNextCheckDelayMinutes(input: NextCheckInput): number {
 }
 
 export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT): Promise<DueTitle[]> {
-  const safeLimit = Math.max(1, Math.min(FAST_SCAN_LIMIT, Math.floor(Number(limit) || FAST_SCAN_LIMIT)));
+  const safeLimit = clampScanLimit(limit);
   const { results } = await env.DB.prepare(`
     SELECT book_ref, ranobelib_id, slug, url, title, cover_url,
            consecutive_no_change, last_change_at, next_check_at, scan_priority
@@ -77,11 +77,32 @@ export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT):
   return results.slice(0, safeLimit);
 }
 
+export async function selectBootstrapTitles(env: ScannerEnv, limit = 1): Promise<DueTitle[]> {
+  const safeLimit = Math.max(1, Math.min(1, Math.floor(Number(limit) || 1)));
+  const { results } = await env.DB.prepare(`
+    SELECT book_ref, ranobelib_id, slug, url, title, cover_url,
+           consecutive_no_change, last_change_at, next_check_at, scan_priority
+    FROM ranobelib_titles
+    WHERE is_active = 1
+      AND snapshot_ready = 0
+    ORDER BY first_seen_at ASC, scan_priority DESC, book_ref ASC
+    LIMIT ?
+  `).bind(safeLimit).all<DueTitle>();
+  return results.slice(0, safeLimit);
+}
+
 export async function scanDueRanobeLibTitles(
   env: ScannerEnv,
   options: FastScanOptions = {},
 ): Promise<FastScanResult> {
-  const selected = await selectDueTitles(env, options.limit ?? FAST_SCAN_LIMIT);
+  const totalLimit = clampScanLimit(options.limit ?? FAST_SCAN_LIMIT);
+  // Reserve at most one of the six HTTP/D1 scan slots for a title that has just been
+  // discovered. This prevents a new title from staying snapshot_ready=0 forever after
+  // discovery was split from scanning.
+  const bootstrap = await selectBootstrapTitles(env, 1);
+  const remaining = Math.max(0, totalLimit - bootstrap.length);
+  const due = remaining > 0 ? await selectDueTitles(env, remaining) : [];
+  const selected = [...bootstrap, ...due];
   const client = new RanobeLibClient();
   const teamRef = env.RANOBELIB_TEAM_REF?.trim() || DEFAULT_TEAM_REF;
   const now = options.now ?? new Date();
@@ -140,30 +161,34 @@ async function scanOneBook(
     cover_url: string | null;
   }>();
   const snapshotReady = Number(state?.snapshot_ready ?? 0) === 1;
-  if (!snapshotReady) throw new Error('fast scan requires a ready chapter snapshot');
-
-  const previousRows = (await env.DB.prepare(`
-    SELECT chapter_id AS id, volume, number, name, first_seen_at AS firstSeenAt
-    FROM ranobelib_chapters WHERE book_ref = ?
-  `).bind(book.ref).all<RanobeLibChapter>()).results;
+  const previousRows = snapshotReady
+    ? (await env.DB.prepare(`
+        SELECT chapter_id AS id, volume, number, name, first_seen_at AS firstSeenAt
+        FROM ranobelib_chapters WHERE book_ref = ?
+      `).bind(book.ref).all<RanobeLibChapter>()).results
+    : undefined;
 
   // Unlike the legacy sync, this client has not performed team discovery first. Pass the
   // team explicitly so the chapter list cannot accidentally include another translation.
   const chapters = await client.getChapters(book.ref, { teamRef });
   const latest = chapters.length ? chapters[chapters.length - 1]! : null;
   const delta = detectReleaseDelta(book.ref, previousRows, chapters);
-  const recoveredScheduled = detectScheduledReleaseTransitions(previousRows, chapters, now.getTime());
+  const recoveredScheduled = snapshotReady && previousRows
+    ? detectScheduledReleaseTransitions(previousRows, chapters, now.getTime())
+    : [];
   const hasRecordedRelease = typeof state?.last_release_at === 'string' && state.last_release_at.trim().length > 0;
   const recentBootstrap = hasRecordedRelease
     ? []
     : detectRecentBootstrapReleaseCandidates(chapters, now.getTime());
-  const releaseChapters = uniqueChapters([...(delta?.added ?? []), ...recoveredScheduled, ...recentBootstrap]);
+  const releaseChapters = snapshotReady
+    ? uniqueChapters([...(delta?.added ?? []), ...recoveredScheduled, ...recentBootstrap])
+    : recentBootstrap;
 
-  if (delta?.added.length) await insertChapters(env, book.ref, delta.added);
-  if (delta?.removed.length) {
-    await executeStatements(env.DB, delta.removed.map((chapter) => env.DB.prepare(
-      'DELETE FROM ranobelib_chapters WHERE book_ref = ? AND chapter_id = ?',
-    ).bind(book.ref, chapter.id)));
+  if (!snapshotReady) {
+    await insertChapters(env, book.ref, chapters);
+  } else if (delta) {
+    if (delta.added.length) await insertChapters(env, book.ref, delta.added);
+    if (delta.removed.length) await deleteChapters(env, book.ref, delta.removed);
   }
 
   const displayTitle = book.title || state?.title || humanizeSlug(book.slug);
@@ -252,21 +277,36 @@ async function scheduleFailure(env: ScannerEnv, bookRef: string, message: string
 }
 
 async function insertChapters(env: ScannerEnv, bookRef: string, chapters: RanobeLibChapter[]): Promise<void> {
-  await executeStatements(env.DB, chapters.map((chapter) => env.DB.prepare(`
+  if (!chapters.length) return;
+  const payload = JSON.stringify(chapters.map((chapter) => ({
+    id: chapter.id,
+    volume: chapter.volume,
+    number: chapter.number,
+    name: chapter.name ?? null,
+  })));
+  // D1 supports SQLite's JSON extension. One json_each() write keeps a 100+ chapter first
+  // snapshot to one D1 statement instead of consuming one query per chapter.
+  await env.DB.prepare(`
     INSERT INTO ranobelib_chapters (book_ref, chapter_id, volume, number, name)
-    VALUES (?, ?, ?, ?, ?)
+    SELECT ?,
+           CAST(json_extract(j.value, '$.id') AS INTEGER),
+           CAST(json_extract(j.value, '$.volume') AS TEXT),
+           CAST(json_extract(j.value, '$.number') AS TEXT),
+           json_extract(j.value, '$.name')
+    FROM json_each(?) AS j
+    WHERE 1
     ON CONFLICT(book_ref, chapter_id) DO UPDATE SET
       volume = excluded.volume, number = excluded.number, name = excluded.name
-  `).bind(bookRef, chapter.id, chapter.volume, chapter.number, chapter.name)));
+  `).bind(bookRef, payload).run();
 }
 
-async function executeStatements(db: D1DatabaseLike, statements: D1PreparedStatementLike[]): Promise<void> {
-  if (!statements.length) return;
-  if (db.batch) {
-    await db.batch(statements);
-    return;
-  }
-  for (const statement of statements) await statement.run();
+async function deleteChapters(env: ScannerEnv, bookRef: string, chapters: RanobeLibChapter[]): Promise<void> {
+  if (!chapters.length) return;
+  await env.DB.prepare(`
+    DELETE FROM ranobelib_chapters
+    WHERE book_ref = ?
+      AND chapter_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
+  `).bind(bookRef, JSON.stringify(chapters.map((chapter) => chapter.id))).run();
 }
 
 function dueTitleToBook(row: DueTitle): RanobeLibTeamBookRef | null {
@@ -296,6 +336,11 @@ function runChanges(result: unknown): number {
     : null;
   const changes = Number(meta?.changes ?? 0);
   return Number.isFinite(changes) ? changes : 0;
+}
+
+function clampScanLimit(value: number): number {
+  const numeric = Number.isFinite(value) ? Math.floor(value) : FAST_SCAN_LIMIT;
+  return Math.max(1, Math.min(FAST_SCAN_LIMIT, numeric));
 }
 
 function normalizeCoverUrl(value: string | null): string | null {
