@@ -99,7 +99,6 @@ export function buildTitleDeliveryModePanel(state: {
     ? 'Для этого тайтла используется общий режим.'
     : `Общий режим: ${deliverySettingLabel(state.globalSetting)}`;
   const rows: NotificationButton[][] = [
-    [{ text: state.enabled ? '🔕 Не уведомлять' : '🔔 Уведомлять', callback_data: `subs:notify:panel-toggle:${title.ranobelib_id}` }],
     [{ text: state.effectiveSetting.mode === 'instant' && !state.inherited ? '✅ ⚡ Мгновенно' : '⚡ Мгновенно', callback_data: `subs:mode:t:${title.ranobelib_id}:i` }],
     [
       presetButton('title', title.ranobelib_id, 5, state.effectiveSetting, state.inherited),
