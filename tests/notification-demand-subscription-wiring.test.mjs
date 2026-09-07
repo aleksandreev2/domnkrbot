@@ -4,21 +4,26 @@ import test from 'node:test';
 
 const source = readFileSync(new URL('../src/telegram-subscriptions.ts', import.meta.url), 'utf8');
 
-test('subscription runtime imports demand refresh and reachability helpers', () => {
+test('subscription runtime imports only demand refresh helpers; reachability is owned by the top-level webhook entry', () => {
   assert.match(source, /from ['"]\.\/notification-demand\.js['"]/);
-  assert.match(source, /markTelegramUserReachable/);
+  assert.doesNotMatch(source, /markTelegramUserReachable/);
   assert.match(source, /refreshTitleNotificationDemand/);
   assert.match(source, /refreshAllNotificationDemand/);
 });
 
-test('private subscription interactions reactivate a previously blocked Telegram user', () => {
+test('ordinary subscription navigation does not recalculate all-title demand', () => {
   const callbackStart = source.indexOf('export async function handleTelegramSubscriptionUpdate');
   const callbackEnd = source.indexOf('export async function sendTelegramSubscriptionMenu', callbackStart);
   const callbackBody = source.slice(callbackStart, callbackEnd > callbackStart ? callbackEnd : undefined);
-  assert.match(callbackBody, /const userId = String\(callback\.from\.id\);[\s\S]{0,300}await markTelegramUserReachable\(env, userId\)/);
+  const firstMutation = callbackBody.indexOf('if (parsed.kind === \'notify-settings\'');
+  const navigationPrelude = callbackBody.slice(0, firstMutation > 0 ? firstMutation : undefined);
+  assert.doesNotMatch(navigationPrelude, /refreshAllNotificationDemand\(env\)/, 'opening center/list/no-op paths must not full-refresh demand');
 
-  const reachableCalls = (source.match(/await markTelegramUserReachable\(env, /g) || []).length;
-  assert.ok(reachableCalls >= 3, 'callback, subscriptions menu, and notification center should all reactivate reachability');
+  const menuStart = source.indexOf('export async function sendTelegramSubscriptionMenu');
+  const centerStart = source.indexOf('export async function sendTelegramNotificationCenter', menuStart);
+  const effectiveStart = source.indexOf('export async function isEffectivelySubscribed', centerStart);
+  assert.doesNotMatch(source.slice(menuStart, centerStart), /refreshAllNotificationDemand\(env\)/);
+  assert.doesNotMatch(source.slice(centerStart, effectiveStart), /refreshAllNotificationDemand\(env\)/);
 });
 
 test('single-title subscription mutations refresh only that title demand', () => {
