@@ -33,7 +33,7 @@ test('paid hot scanner raises the bounded batch to 24 and concurrency to 4', asy
   assert.match(source, /mapWithConcurrency\s*\(\s*selected\s*,\s*FAST_SCAN_CONCURRENCY/i);
 });
 
-test('fast selection admits only due HOT titles plus uninitialized bootstrap titles', async () => {
+test('fast selection admits only due HOT titles plus due uninitialized bootstrap titles', async () => {
   const scanner = await loadScanner();
   const calls = [];
   const rows = Array.from({ length: 30 }, (_, index) => dueTitle(index, index === 0 ? 0 : 1, index === 0 ? 0 : 1));
@@ -55,6 +55,8 @@ test('fast selection admits only due HOT titles plus uninitialized bootstrap tit
   assert.equal(calls[0].values.at(-1), 24);
   assert.match(calls[0].query, /notification_subscriber_count/i);
   assert.match(calls[0].query, /snapshot_ready\s*=\s*0[\s\S]*notification_subscriber_count\s*>\s*0/i);
+  assert.match(calls[0].query, /AND\s*\(\s*next_check_at\s+IS\s+NULL\s+OR\s+next_check_at\s*<=\s*CURRENT_TIMESTAMP\s*\)/i);
+  assert.doesNotMatch(calls[0].query, /AND\s*\(\s*snapshot_ready\s*=\s*0\s+OR\s+next_check_at/i);
   assert.match(calls[0].query, /ORDER BY[\s\S]*COALESCE\s*\(\s*next_check_at[\s\S]*notification_subscriber_count\s+DESC[\s\S]*scan_priority\s+DESC/i);
 });
 
@@ -146,7 +148,5 @@ test('no selected HOT or bootstrap titles means the minute scanner performs zero
     const result = await scanner.scanDueRanobeLibTitles(env);
     assert.equal(result.selected, 0);
     assert.equal(calls, 0);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  } finally { globalThis.fetch = originalFetch; }
 });
