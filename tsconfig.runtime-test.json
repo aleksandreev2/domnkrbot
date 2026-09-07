@@ -34,6 +34,7 @@
     "src/telegram-subscription-webhook.ts",
     "src/ranobelib-fast-scanner.ts",
     "src/ranobelib-discovery-scheduler.ts",
+    "src/telegram-notification-delivery-groups.ts",
     "src/telegram-notification-delivery.ts",
     "src/notification-demand.ts"
   ]
