@@ -161,6 +161,7 @@ test('delivery uses one SQL eligibility query and no per-user subscription SELEC
   assert.match(query, /EXISTS[\s\S]*telegram_subscription_settings/i);
   assert.match(query, /title_subscription_exclusions/i);
   assert.match(query, /title_subscriptions/i);
+  assert.match(query, /telegram_delivery_reachability/i);
   assert.match(query, /AS eligible/i);
   assert.equal(db.allQueries.some((sql) => /SELECT all_titles FROM telegram_subscription_settings WHERE user_telegram_id = \?/i.test(sql)), false);
   assert.equal(db.allQueries.some((sql) => /SELECT 1 AS subscribed FROM title_subscriptions WHERE user_telegram_id = \?/i.test(sql)), false);
@@ -193,7 +194,7 @@ test('two concurrent drains atomically claim outbox rows so Telegram is called o
   assert.ok(db.mutations.some((m) => /AND claim_token = \?/i.test(m.query)), 'final mutation must require claim ownership');
 });
 
-test('a full twenty-recipient batch sends concurrently but never exceeds five active Telegram requests', async () => {
+test('a full twenty-recipient batch sends concurrently, bounds D1 work, and writes reachability once', async () => {
   const { drainNotificationOutbox } = await loadDelivery();
   const db = new DB(Array.from({ length: 20 }, (_, index) => outboxRow(String(1000 + index))));
   let active = 0;
@@ -212,10 +213,12 @@ test('a full twenty-recipient batch sends concurrently but never exceeds five ac
   assert.equal(result.retry, 0);
   assert.ok(maxActive > 1, `expected concurrent sends, saw maxActive=${maxActive}`);
   assert.ok(maxActive <= 5, `expected max five active sends, saw ${maxActive}`);
-  assert.ok(db.allQueries.length <= 22, `unexpected D1 query explosion: ${db.allQueries.length}`);
+  assert.ok(db.allQueries.length <= 23, `unexpected D1 query explosion: ${db.allQueries.length}`);
+  const reachabilityMutations = db.mutations.filter((m) => /INSERT INTO telegram_delivery_reachability/i.test(m.query));
+  assert.equal(reachabilityMutations.length, 1, 'twenty successful sends must share one reachability D1 write');
 });
 
-test('403 disables, 429 respects retry_after seconds, and other temporary errors retry without aborting the batch', async () => {
+test('403 disables, 429 respects retry_after, transient errors stay retryable, and only terminal outcomes update reachability', async () => {
   const { drainNotificationOutbox } = await loadDelivery();
   const db = new DB([
     outboxRow('403'),
@@ -259,6 +262,17 @@ test('403 disables, 429 respects retry_after seconds, and other temporary errors
   assert.ok(rateLimited, '429 retry mutation should bind retry_after=17 seconds');
   assert.match(rateLimited.query, /seconds/i);
   assert.ok(db.mutations.some((m) => /status='retry'/i.test(m.query) && m.values.includes('Temporary error')));
+
+  const reachability = db.mutations.find((m) => /INSERT INTO telegram_delivery_reachability/i.test(m.query));
+  assert.ok(reachability, 'delivery outcomes should persist one reachability batch');
+  const reachabilityPayload = JSON.parse(reachability.values[0]);
+  assert.deepEqual(reachabilityPayload, [
+    { userTelegramId: '403', state: 'blocked' },
+    { userTelegramId: '200', state: 'active' },
+  ]);
+  assert.equal(reachabilityPayload.some((item) => item.userTelegramId === '429'), false);
+  assert.equal(reachabilityPayload.some((item) => item.userTelegramId === '500'), false);
+  assert.equal(db.mutations.filter((m) => /UPDATE ranobelib_titles/i.test(m.query)).length, 1, '403 batch should refresh demand once');
 });
 
 test('delivery schema hot path no longer drops or recreates the release fanout trigger', () => {
