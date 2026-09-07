@@ -36,6 +36,17 @@ function isLegacyExplicitCommand(text: string): boolean {
     || command.startsWith('/help');
 }
 
+function normalizeSubscriptionCallback(update: TelegramSubscriptionUpdate): TelegramSubscriptionUpdate {
+  if (update.callback_query?.data !== 'prop:notifications') return update;
+  return {
+    ...update,
+    callback_query: {
+      ...update.callback_query,
+      data: 'subs:center',
+    },
+  };
+}
+
 async function prepareCatalog(env: TelegramSubscriptionWebhookEnv): Promise<void> {
   try {
     await ensureTelegramSubscriptionCatalog(env);
@@ -60,7 +71,8 @@ export async function handleTelegramSubscriptionWebhookRequest(
   const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
   // Telegram callbacks must stay responsive even when RanobeLib is slow or unavailable.
   // Catalog bootstrap is only needed by commands that render the full synchronized title list.
-  if (await handleTelegramSubscriptionUpdate(update, subscriptionEnv)) return json({ ok: true });
+  const subscriptionUpdate = normalizeSubscriptionCallback(update);
+  if (await handleTelegramSubscriptionUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
 
   const message = update.message;
   const text = (message?.text ?? '').trim();
