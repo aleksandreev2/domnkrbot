@@ -127,6 +127,18 @@ test('subscription callbacks are handled without blocking on RanobeLib catalog b
   });
 });
 
+test('/start notifications button callback opens the notification center', async () => {
+  await withTelegramCalls(async (calls) => {
+    const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('prop:notifications'), env);
+    assert.equal(response?.status, 200);
+    assert.equal(calls.some((call) => call.kind === 'ranobelib'), false, 'main-menu notification callback must stay independent of RanobeLib');
+    const edit = calls.find((call) => call.kind === 'telegram' && call.method === 'editMessageText');
+    assert.ok(edit);
+    assert.match(edit.payload.text, /Режим доставки: ⚡ Сразу/);
+    assert.ok(calls.some((call) => call.kind === 'telegram' && call.method === 'answerCallbackQuery'));
+  });
+});
+
 test('download deep-link /start dl_* is left for the existing reader-delivery handler', async () => {
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/start dl_123'), env);
