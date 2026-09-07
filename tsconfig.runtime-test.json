@@ -13,6 +13,7 @@
     "src/publishing-settings-guard.ts",
     "src/publishing-diagnostics.ts",
     "src/title-proposal-policy.ts",
+    "src/title-proposal-admin.ts",
     "src/proposal-raw-runtime.ts",
     "src/reader-runtime.ts",
     "src/publication-ops.ts",
