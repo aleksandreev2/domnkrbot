@@ -34,12 +34,14 @@ test('scheduled production entry initializes subscription delivery before Ranobe
   assert.ok(deliveryIndex >= 0, 'notification outbox must be drained after synchronization');
 });
 
-test('subscription delivery schema self-creates the release notification trigger without a manual remote migration', async () => {
+test('subscription delivery runtime leaves the release fanout trigger to migrations', async () => {
   const source = await read('src/telegram-subscription-delivery-schema.ts');
+  const migration = await read('migrations/0012_telegram_notifications_v2.sql');
   assert.match(source, /ensureRanobeLibSchema/);
   assert.match(source, /ensureTelegramSubscriptionSchema/);
-  assert.match(source, /CREATE TRIGGER IF NOT EXISTS trg_ranobelib_release_notifications/);
-  assert.match(source, /AFTER INSERT ON ranobelib_releases/);
+  assert.doesNotMatch(source, /DROP TRIGGER|CREATE TRIGGER/i);
+  assert.match(migration, /CREATE TRIGGER trg_ranobelib_release_notifications/);
+  assert.match(migration, /AFTER INSERT ON ranobelib_releases/);
 });
 
 test('subscription migration atomically fans new RanobeLib releases into the notification outbox', async () => {
