@@ -70,7 +70,6 @@ interface Env {
   PUBLISH_CHANNEL_ID?: string;
   WEBHOOK_URL?: string;
   RANOBELIB_TEAM_REF?: string;
-  RANOBELIB_SYNC_BATCH_SIZE?: string;
 }
 interface ExecutionContextLike {
   waitUntil(promise: Promise<unknown>): void;
