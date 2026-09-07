@@ -33,7 +33,7 @@ import { type TelegramSubscriptionEnv } from './telegram-subscriptions.js';
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
-type NotificationWakeup = { kind: 'drain'; releaseId?: string };
+type NotificationWakeup = { kind: 'drain' };
 type QueueProducerLike = { send(message: NotificationWakeup): Promise<void> };
 type QueueMessageLike = { body: unknown };
 type QueueBatchLike = { messages: QueueMessageLike[] };
@@ -56,11 +56,8 @@ type Env = PublicationCommentGateEnv
     NOTIFICATION_QUEUE?: QueueProducerLike;
   };
 
-async function queueNotificationWakeup(env: Env, releaseId?: string): Promise<boolean> {
-  const send = env.NOTIFICATION_QUEUE?.send({
-    kind: 'drain',
-    ...(releaseId ? { releaseId } : {}),
-  });
+async function queueNotificationWakeup(env: Env): Promise<boolean> {
+  const send = env.NOTIFICATION_QUEUE?.send({ kind: 'drain' });
   if (!send) return false;
   try {
     await send;
@@ -75,8 +72,7 @@ function parseWakeup(body: unknown): NotificationWakeup | null {
   if (!body || typeof body !== 'object') return null;
   const value = body as Record<string, unknown>;
   if (value.kind !== 'drain') return null;
-  const releaseId = typeof value.releaseId === 'string' ? value.releaseId.trim() : '';
-  return { kind: 'drain', ...(releaseId ? { releaseId } : {}) };
+  return { kind: 'drain' };
 }
 
 export default {
@@ -104,12 +100,8 @@ export default {
 
   async scheduled(controller: ScheduledControllerLike, env: Env, _ctx: CommentGateExecutionContext): Promise<void> {
     if (controller.cron === FAST_SCAN_CRON) {
-      const scan = await scanDueRanobeLibTitles(env, {
-        limit: FAST_SCAN_LIMIT,
-        onRelease: async (releaseId) => {
-          await queueNotificationWakeup(env, releaseId);
-        },
-      });
+      const scan = await scanDueRanobeLibTitles(env, { limit: FAST_SCAN_LIMIT });
+      if (scan.newReleases > 0) await queueNotificationWakeup(env);
       console.log('RanobeLib fast scan complete', { cron: controller.cron, ...scan });
       return;
     }
@@ -127,7 +119,7 @@ export default {
     }
 
     if (controller.cron === MEMBERSHIP_CRON) {
-      const membership = await runChannelMembershipMaintenance(env, 20);
+      const membership = await runChannelMembershipMaintenance(env, 40);
       console.log('Channel membership maintenance complete', membership);
       return;
     }
@@ -141,15 +133,9 @@ export default {
     if (!wakeup) return;
 
     if (wakeup.kind === 'drain') {
-      const releaseId = wakeup.releaseId;
-      const delivery = await drainNotificationOutbox(env, {
-        limit: DELIVERY_BATCH_LIMIT,
-        ...(releaseId ? { releaseId } : {}),
-      });
-      console.log('Telegram notification Queue delivery complete', { releaseId, ...delivery });
-      if (delivery.claimed >= DELIVERY_BATCH_LIMIT) {
-        await queueNotificationWakeup(env);
-      }
+      const delivery = await drainNotificationOutbox(env, { limit: DELIVERY_BATCH_LIMIT });
+      console.log('Telegram notification Queue delivery complete', delivery);
+      if (delivery.hasMoreDue) await queueNotificationWakeup(env);
     }
   },
 };
