@@ -1,5 +1,4 @@
 import {
-  markTelegramUserReachable,
   refreshAllNotificationDemand,
   refreshTitleNotificationDemand,
 } from './notification-demand.js';
@@ -346,8 +345,6 @@ export async function handleTelegramSubscriptionUpdate(
   await ensureTelegramSubscriptionSchema(env);
   await upsertTelegramUser(env, callback.from);
   const userId = String(callback.from.id);
-  await markTelegramUserReachable(env, userId);
-  await refreshAllNotificationDemand(env);
 
   if (parsed.kind === 'center') {
     const center = buildNotificationCenter(await notificationCenterState(env, userId));
@@ -453,8 +450,6 @@ export async function sendTelegramSubscriptionMenu(
   await ensureTelegramSubscriptionSchema(env);
   await upsertTelegramUser(env, user);
   const userId = String(user.id);
-  await markTelegramUserReachable(env, userId);
-  await refreshAllNotificationDemand(env);
   const [titles, allTitles, subscribedIds, excludedIds] = await Promise.all([
     listSubscriptionTitles(env),
     userSubscribesToAll(env, userId),
@@ -478,8 +473,6 @@ export async function sendTelegramNotificationCenter(
   await ensureTelegramSubscriptionSchema(env);
   await upsertTelegramUser(env, user);
   const userId = String(user.id);
-  await markTelegramUserReachable(env, userId);
-  await refreshAllNotificationDemand(env);
   const center = buildNotificationCenter(await notificationCenterState(env, userId));
   await telegramCall(env, 'sendMessage', {
     chat_id: chatId,
