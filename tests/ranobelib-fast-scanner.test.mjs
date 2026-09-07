@@ -23,8 +23,11 @@ test('selectDueTitles reads only active snapshot-ready due titles with a hard si
   const calls = [];
   const rows = Array.from({ length: 8 }, (_, index) => ({
     book_ref: `${index + 1}--book-${index + 1}`,
+    ranobelib_id: index + 1,
+    slug: `book-${index + 1}`,
     url: `https://ranobelib.me/ru/book/${index + 1}--book-${index + 1}`,
     title: `Book ${index + 1}`,
+    cover_url: null,
     consecutive_no_change: index,
     last_change_at: null,
     next_check_at: '2026-09-07 08:00:00',
@@ -57,6 +60,124 @@ test('selectDueTitles reads only active snapshot-ready due titles with a hard si
   assert.match(calls[0].query, /ORDER BY[\s\S]*next_check_at[\s\S]*scan_priority/i);
   assert.match(calls[0].query, /LIMIT\s*\?/i);
   assert.equal(calls[0].values.at(-1), 6);
+});
+
+class ScanStatement {
+  constructor(db, query) {
+    this.db = db;
+    this.query = query.replace(/\s+/g, ' ').trim();
+    this.values = [];
+  }
+  bind(...values) { this.values = values; return this; }
+  async first() {
+    if (/SELECT snapshot_ready, last_release_at, title, summary, cover_url/i.test(this.query)) {
+      return {
+        snapshot_ready: 1,
+        last_release_at: '2026-09-06 10:00:00',
+        title: 'Fast Book',
+        summary: null,
+        cover_url: null,
+      };
+    }
+    return null;
+  }
+  async all() {
+    if (/FROM ranobelib_titles/i.test(this.query) && /next_check_at/i.test(this.query)) {
+      return { results: [this.db.dueTitle] };
+    }
+    if (/FROM ranobelib_chapters WHERE book_ref = \?/i.test(this.query)) {
+      return { results: [{ id: 101, volume: '1', number: '1', name: 'Old', firstSeenAt: '2026-09-06T10:00:00.000Z' }] };
+    }
+    return { results: [] };
+  }
+  async run() {
+    if (/INSERT OR IGNORE INTO ranobelib_releases/i.test(this.query)) {
+      this.db.releaseInserts.push([...this.values]);
+      return { meta: { changes: 1 } };
+    }
+    if (/UPDATE ranobelib_titles SET/i.test(this.query) && /consecutive_no_change/i.test(this.query)) {
+      this.db.schedulerUpdates.push({ query: this.query, values: [...this.values] });
+    }
+    return { meta: { changes: 1 } };
+  }
+}
+
+class ScanDB {
+  constructor() {
+    this.dueTitle = {
+      book_ref: '77--fast-book',
+      ranobelib_id: 77,
+      slug: 'fast-book',
+      url: 'https://ranobelib.me/ru/book/77--fast-book',
+      title: 'Fast Book',
+      cover_url: null,
+      consecutive_no_change: 4,
+      last_change_at: '2026-09-06 10:00:00',
+      next_check_at: '2026-09-07 08:00:00',
+      scan_priority: 1,
+    };
+    this.releaseInserts = [];
+    this.schedulerUpdates = [];
+  }
+  prepare(query) { return new ScanStatement(this, query); }
+  async batch(statements) {
+    const results = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
+  }
+}
+
+function chapter(id, number, teamId) {
+  return {
+    id,
+    volume: '1',
+    number: String(number),
+    name: `Chapter ${number}`,
+    branches: [{
+      id: id + 1000,
+      branch_id: 9,
+      created_at: '2026-09-07T08:00:00.000Z',
+      teams: [{ id: teamId, slug: teamId === 11969 ? 'dom-nekromanta' : 'other', slug_url: `${teamId}--team` }],
+      user: { id: 1, username: 'uploader' },
+    }],
+  };
+}
+
+test('fast scan checks only due titles, preserves team filtering and wakes exactly one newly inserted release', async () => {
+  const scanner = await loadScanner();
+  const db = new ScanDB();
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    if (String(url) === 'https://api.cdnlibs.org/api/manga/77--fast-book/chapters') {
+      return new Response(JSON.stringify({ data: [chapter(101, 1, 11969), chapter(102, 2, 11969), chapter(999, 99, 555)] }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    return new Response('unexpected', { status: 500 });
+  };
+  const releases = [];
+  try {
+    const result = await scanner.scanDueRanobeLibTitles(
+      { DB: db, RANOBELIB_TEAM_REF: '11969--dom-nekromanta' },
+      { now: new Date('2026-09-07T08:05:00.000Z'), onRelease: async (releaseId) => releases.push(releaseId) },
+    );
+    assert.deepEqual(requests, ['https://api.cdnlibs.org/api/manga/77--fast-book/chapters']);
+    assert.equal(result.selected, 1);
+    assert.equal(result.succeeded, 1);
+    assert.equal(result.failed, 0);
+    assert.equal(result.newReleases, 1);
+    assert.deepEqual(releases, ['77--fast-book:102-102:1']);
+    assert.equal(db.releaseInserts.length, 1);
+    assert.ok(db.releaseInserts[0].includes('2'));
+    assert.equal(db.releaseInserts[0].includes('99'), false);
+    assert.equal(db.schedulerUpdates.length, 1);
+    assert.ok(db.schedulerUpdates[0].values.includes(0));
+    assert.ok(db.schedulerUpdates[0].values.includes(1));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('migration 0014 adds only forward scheduler/outbox indexes and no destructive table operations', () => {
