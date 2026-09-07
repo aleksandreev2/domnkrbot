@@ -1,21 +1,13 @@
-import { RanobeLibClient } from './integrations/ranobelib/client.js';
-import {
-  detectRecentBootstrapReleaseCandidates,
-  detectReleaseDelta,
-  detectScheduledReleaseTransitions,
-  sortChapters,
-  summarizeAdded,
-} from './integrations/ranobelib/release-detector.js';
-import type { RanobeLibChapter, RanobeLibTeamBookRef } from './integrations/ranobelib/types.js';
-
 type D1Row = Record<string, unknown>;
 type D1AllResult<T> = { results: T[] };
+
 export interface D1PreparedStatementLike {
   bind(...values: unknown[]): D1PreparedStatementLike;
   first<T = D1Row>(): Promise<T | null>;
   all<T = D1Row>(): Promise<D1AllResult<T>>;
   run(): Promise<unknown>;
 }
+
 export interface D1DatabaseLike {
   prepare(query: string): D1PreparedStatementLike;
   batch?(statements: D1PreparedStatementLike[]): Promise<unknown[]>;
@@ -24,7 +16,6 @@ export interface D1DatabaseLike {
 export interface RanobeLibRuntimeEnv {
   DB: D1DatabaseLike;
   RANOBELIB_TEAM_REF?: string;
-  RANOBELIB_SYNC_BATCH_SIZE?: string;
 }
 
 export type RanobeLibTitleCard = {
@@ -86,13 +77,9 @@ export type RanobeLibSyncResult = {
 };
 
 const DEFAULT_TEAM_REF = '11969--dom-nekromanta';
-const DEFAULT_BATCH_SIZE = 16;
-const MAX_BATCH_SIZE = 40;
-const SYNC_STALE_MS = 8 * 60 * 1000;
-const SYNC_CONCURRENCY = 4;
 
 let schemaPromise: Promise<void> | null = null;
-let syncPromise: Promise<RanobeLibSyncResult> | null = null;
+let manualSyncPromise: Promise<RanobeLibSyncResult> | null = null;
 
 export async function ensureRanobeLibSchema(env: RanobeLibRuntimeEnv): Promise<void> {
   if (!schemaPromise) {
@@ -162,15 +149,13 @@ async function initializeSchema(env: RanobeLibRuntimeEnv): Promise<void> {
     'CREATE INDEX IF NOT EXISTS idx_ranobelib_releases_book_created ON ranobelib_releases(book_ref, created_at DESC)',
   ];
 
-  for (const statement of statements) {
-    await env.DB.prepare(statement).run();
-  }
+  for (const statement of statements) await env.DB.prepare(statement).run();
 }
 
 export async function getRanobeLibHome(env: RanobeLibRuntimeEnv): Promise<RanobeLibHomeData> {
   await ensureRanobeLibSchema(env);
   const teamRef = teamRefFor(env);
-  const [{ results: titleRows }, { results: releaseRows }, counts, lastSyncAt, lastError, cursor] = await Promise.all([
+  const [{ results: titleRows }, { results: releaseRows }, counts, syncState] = await Promise.all([
     env.DB.prepare(`
       SELECT book_ref, url, title, summary, cover_url, chapter_count, latest_chapter_id,
              latest_volume, latest_number, latest_name, last_synced_at, last_release_at
@@ -190,9 +175,7 @@ export async function getRanobeLibHome(env: RanobeLibRuntimeEnv): Promise<Ranobe
       LIMIT 30
     `).all<RanobeLibReleaseCard>(),
     getCounts(env),
-    getSetting(env, 'ranobelib_last_sync_at'),
-    getSetting(env, 'ranobelib_last_sync_error'),
-    getSetting(env, 'ranobelib_sync_cursor'),
+    getSchedulerState(env),
   ]);
 
   return {
@@ -201,248 +184,56 @@ export async function getRanobeLibHome(env: RanobeLibRuntimeEnv): Promise<Ranobe
     releases: releaseRows.map(normalizeReleaseCard),
     stats: counts,
     sync: {
-      lastSyncAt,
-      lastError,
-      cursor: numberFrom(cursor, 0),
-      syncing: syncPromise !== null,
+      lastSyncAt: syncState.lastSyncAt,
+      lastError: syncState.lastError,
+      cursor: 0,
+      syncing: manualSyncPromise !== null,
     },
   };
 }
 
-export async function shouldKickRanobeLibSync(env: RanobeLibRuntimeEnv): Promise<boolean> {
-  await ensureRanobeLibSchema(env);
-  if (syncPromise) return false;
-  const [lastSyncAt, row] = await Promise.all([
-    getSetting(env, 'ranobelib_last_sync_at'),
-    env.DB.prepare('SELECT COUNT(*) AS count FROM ranobelib_titles WHERE snapshot_ready = 1').first<{ count: number | string }>(),
-  ]);
-  const count = numberFrom(row?.count, 0);
-  if (count === 0 || !lastSyncAt) return true;
-  const last = new Date(lastSyncAt).getTime();
-  return !Number.isFinite(last) || Date.now() - last > SYNC_STALE_MS;
+/**
+ * Compatibility shim for the older base worker. Automatic request-triggered sync is retired;
+ * production scheduling is owned by live-entry-v2 HOT/IDLE cron jobs.
+ */
+export async function shouldKickRanobeLibSync(_env: RanobeLibRuntimeEnv): Promise<boolean> {
+  return false;
 }
 
-export function syncRanobeLib(env: RanobeLibRuntimeEnv, options: { full?: boolean } = {}): Promise<RanobeLibSyncResult> {
-  if (syncPromise) return syncPromise;
-  syncPromise = runSync(env, options).finally(() => {
-    syncPromise = null;
+/**
+ * Compatibility adapter for the existing authenticated admin button. It no longer runs the
+ * legacy circular crawler: discovery and the bounded HOT scanner are the same modules used by
+ * production scheduling.
+ */
+export function syncRanobeLib(
+  env: RanobeLibRuntimeEnv,
+  _options: { full?: boolean } = {},
+): Promise<RanobeLibSyncResult> {
+  if (manualSyncPromise) return manualSyncPromise;
+  manualSyncPromise = runModernManualSync(env).finally(() => {
+    manualSyncPromise = null;
   });
-  return syncPromise;
+  return manualSyncPromise;
 }
 
-async function runSync(env: RanobeLibRuntimeEnv, options: { full?: boolean }): Promise<RanobeLibSyncResult> {
+async function runModernManualSync(env: RanobeLibRuntimeEnv): Promise<RanobeLibSyncResult> {
   await ensureRanobeLibSchema(env);
-  const teamRef = teamRefFor(env);
-  const client = new RanobeLibClient();
-  const startedAt = new Date().toISOString();
-  const errors: string[] = [];
-
-  let books: RanobeLibTeamBookRef[];
-  try {
-    books = await client.discoverTeamBooks(teamRef);
-    if (books.length === 0) throw new Error(`RanobeLib team ${teamRef} returned no book links`);
-    await setSetting(env, 'ranobelib_last_discovery_count', String(books.length));
-  } catch (error) {
-    const message = errorMessage(error);
-    await setSetting(env, 'ranobelib_last_sync_error', message);
-    throw error;
-  }
-
-  await env.DB.prepare('UPDATE ranobelib_titles SET is_active = 0').run();
-  await executeStatements(env, books.map((book) => env.DB.prepare(`
-    INSERT INTO ranobelib_titles (book_ref, ranobelib_id, slug, url, title, cover_url, is_active)
-    VALUES (?, ?, ?, ?, ?, ?, 1)
-    ON CONFLICT(book_ref) DO UPDATE SET ranobelib_id = excluded.ranobelib_id,
-      slug = excluded.slug, url = excluded.url,
-      title = COALESCE(excluded.title, ranobelib_titles.title),
-      cover_url = COALESCE(excluded.cover_url, ranobelib_titles.cover_url),
-      is_active = 1
-  `).bind(
-    book.ref,
-    book.id,
-    book.slug,
-    book.url,
-    book.title ?? null,
-    normalizeCoverUrl(book.coverUrl ?? null),
-  )));
-
-  const oldCursor = numberFrom(await getSetting(env, 'ranobelib_sync_cursor'), 0);
-  const batchSize = options.full ? books.length : Math.min(batchSizeFor(env), books.length);
-  const selected = options.full ? books : circularSlice(books, oldCursor, batchSize);
-  let succeeded = 0;
-  let failed = 0;
-  let newReleases = 0;
-
-  await mapWithConcurrency(selected, SYNC_CONCURRENCY, async (book) => {
-    try {
-      const created = await syncBook(env, client, book);
-      succeeded += 1;
-      if (created) newReleases += 1;
-    } catch (error) {
-      failed += 1;
-      const message = `${book.ref}: ${errorMessage(error)}`;
-      errors.push(message);
-      await env.DB.prepare('UPDATE ranobelib_titles SET sync_error = ? WHERE book_ref = ?')
-        .bind(message.slice(0, 1000), book.ref).run();
-    }
-  });
-
-  const nextCursor = books.length === 0 ? 0 : (oldCursor + selected.length) % books.length;
-  await Promise.all([
-    setSetting(env, 'ranobelib_sync_cursor', String(nextCursor)),
-    setSetting(env, 'ranobelib_last_sync_at', startedAt),
-    setSetting(env, 'ranobelib_last_sync_error', errors.length ? errors.slice(0, 5).join('\n') : ''),
+  const [discoveryModule, scannerModule] = await Promise.all([
+    import('./ranobelib-discovery-scheduler.js'),
+    import('./ranobelib-fast-scanner.js'),
   ]);
-
+  const discovery = await discoveryModule.discoverRanobeLibTeam(env);
+  const scan = await scannerModule.scanDueRanobeLibTitles(env, { limit: scannerModule.FAST_SCAN_LIMIT });
   return {
-    teamRef,
-    discovered: books.length,
-    processed: selected.length,
-    succeeded,
-    failed,
-    newReleases,
-    nextCursor,
-    errors,
+    teamRef: teamRefFor(env),
+    discovered: discovery.discovered,
+    processed: scan.selected,
+    succeeded: scan.succeeded,
+    failed: scan.failed,
+    newReleases: scan.newReleases,
+    nextCursor: 0,
+    errors: scan.errors,
   };
-}
-
-async function syncBook(env: RanobeLibRuntimeEnv, client: RanobeLibClient, book: RanobeLibTeamBookRef): Promise<boolean> {
-  const state = await env.DB.prepare(`
-    SELECT snapshot_ready, last_release_at, title, summary, cover_url
-    FROM ranobelib_titles
-    WHERE book_ref = ?
-  `).bind(book.ref).first<{
-    snapshot_ready: number | string;
-    last_release_at: string | null;
-    title: string | null;
-    summary: string | null;
-    cover_url: string | null;
-  }>();
-  const snapshotReady = numberFrom(state?.snapshot_ready, 0) === 1;
-  const hasRecordedRelease = typeof state?.last_release_at === 'string' && state.last_release_at.trim().length > 0;
-  const previousRows = snapshotReady
-    ? (await env.DB.prepare(`
-        SELECT chapter_id AS id, volume, number, name, first_seen_at AS firstSeenAt
-        FROM ranobelib_chapters WHERE book_ref = ?
-      `).bind(book.ref).all<RanobeLibChapter>()).results
-    : undefined;
-
-  const chapters = await client.getChapters(book.ref);
-  const latest = chapters.length ? chapters[chapters.length - 1]! : null;
-  const delta = detectReleaseDelta(book.ref, previousRows, chapters);
-  const recoveredScheduled = snapshotReady && previousRows
-    ? detectScheduledReleaseTransitions(previousRows, chapters)
-    : [];
-  const recentBootstrap = hasRecordedRelease
-    ? []
-    : detectRecentBootstrapReleaseCandidates(chapters);
-  const releaseChapters = snapshotReady
-    ? uniqueChapters([...(delta?.added ?? []), ...recoveredScheduled, ...recentBootstrap])
-    : recentBootstrap;
-
-  if (!snapshotReady) {
-    await insertChapters(env, book.ref, chapters);
-  } else if (delta) {
-    if (delta.added.length) await insertChapters(env, book.ref, delta.added);
-    if (delta.removed.length) {
-      await executeStatements(env, delta.removed.map((chapter) => env.DB.prepare(
-        'DELETE FROM ranobelib_chapters WHERE book_ref = ? AND chapter_id = ?',
-      ).bind(book.ref, chapter.id)));
-    }
-  }
-
-  const displayTitle = book.title || state?.title || humanizeSlug(book.slug);
-  const summary = state?.summary ?? null;
-  const coverUrl = normalizeCoverUrl(book.coverUrl ?? state?.cover_url ?? null);
-  let releaseCreated = false;
-  if (releaseChapters.length > 0) {
-    const first = releaseChapters[0]!;
-    const last = releaseChapters[releaseChapters.length - 1]!;
-    const releaseId = `${book.ref}:${first.id}-${last.id}:${releaseChapters.length}`;
-    const result = await env.DB.prepare(`
-      INSERT OR IGNORE INTO ranobelib_releases (
-        id, book_ref, title_snapshot, chapter_count, first_chapter_id, first_volume,
-        first_number, last_chapter_id, last_volume, last_number, summary
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      releaseId,
-      book.ref,
-      displayTitle,
-      releaseChapters.length,
-      first.id,
-      first.volume,
-      first.number,
-      last.id,
-      last.volume,
-      last.number,
-      summarizeAdded(releaseChapters),
-    ).run();
-    releaseCreated = runChanges(result) > 0;
-  }
-
-  await env.DB.prepare(`
-    UPDATE ranobelib_titles SET
-      ranobelib_id = ?, slug = ?, url = ?, title = ?, summary = ?, cover_url = ?,
-      chapter_count = ?, latest_chapter_id = ?, latest_volume = ?, latest_number = ?, latest_name = ?,
-      snapshot_ready = 1, is_active = 1, last_synced_at = CURRENT_TIMESTAMP,
-      last_release_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE last_release_at END,
-      sync_error = NULL
-    WHERE book_ref = ?
-  `).bind(
-    book.id,
-    book.slug,
-    book.url,
-    displayTitle,
-    summary,
-    coverUrl,
-    chapters.length,
-    latest?.id ?? null,
-    latest?.volume ?? null,
-    latest?.number ?? null,
-    latest?.name ?? null,
-    releaseCreated ? 1 : 0,
-    book.ref,
-  ).run();
-
-  return releaseCreated;
-}
-
-async function insertChapters(env: RanobeLibRuntimeEnv, bookRef: string, chapters: RanobeLibChapter[]): Promise<void> {
-  const statements = chapters.map((chapter) => env.DB.prepare(`
-    INSERT INTO ranobelib_chapters (book_ref, chapter_id, volume, number, name)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(book_ref, chapter_id) DO UPDATE SET
-      volume = excluded.volume, number = excluded.number, name = excluded.name
-  `).bind(bookRef, chapter.id, chapter.volume, chapter.number, chapter.name));
-  await executeStatements(env, statements);
-}
-
-function uniqueChapters(chapters: RanobeLibChapter[]): RanobeLibChapter[] {
-  const byId = new Map<number, RanobeLibChapter>();
-  for (const chapter of chapters) byId.set(chapter.id, chapter);
-  return sortChapters([...byId.values()]);
-}
-
-function runChanges(result: unknown): number {
-  if (!result || typeof result !== 'object') return 0;
-  const meta = 'meta' in result && result.meta && typeof result.meta === 'object'
-    ? result.meta as Record<string, unknown>
-    : null;
-  const changes = Number(meta?.changes ?? 0);
-  return Number.isFinite(changes) ? changes : 0;
-}
-
-async function executeStatements(env: RanobeLibRuntimeEnv, statements: D1PreparedStatementLike[]): Promise<void> {
-  if (!statements.length) return;
-  const chunkSize = 50;
-  for (let index = 0; index < statements.length; index += chunkSize) {
-    const chunk = statements.slice(index, index + chunkSize);
-    if (env.DB.batch) {
-      await env.DB.batch(chunk);
-    } else {
-      for (const statement of chunk) await statement.run();
-    }
-  }
 }
 
 async function getCounts(env: RanobeLibRuntimeEnv): Promise<RanobeLibHomeData['stats']> {
@@ -460,39 +251,24 @@ async function getCounts(env: RanobeLibRuntimeEnv): Promise<RanobeLibHomeData['s
   };
 }
 
-async function getSetting(env: RanobeLibRuntimeEnv, key: string): Promise<string | null> {
-  const row = await env.DB.prepare('SELECT value FROM app_settings WHERE key = ?').bind(key).first<{ value: string }>();
-  return typeof row?.value === 'string' ? row.value : null;
-}
-
-async function setSetting(env: RanobeLibRuntimeEnv, key: string, value: string): Promise<void> {
-  await env.DB.prepare(`
-    INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-  `).bind(key, value).run();
-}
-
-async function mapWithConcurrency<T>(items: T[], concurrency: number, task: (item: T) => Promise<void>): Promise<void> {
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
-    while (cursor < items.length) {
-      const index = cursor++;
-      const item = items[index];
-      if (item !== undefined) await task(item);
-    }
-  });
-  await Promise.all(workers);
-}
-
-function circularSlice<T>(items: T[], start: number, count: number): T[] {
-  if (!items.length || count <= 0) return [];
-  const normalizedStart = ((start % items.length) + items.length) % items.length;
-  const result: T[] = [];
-  for (let offset = 0; offset < Math.min(count, items.length); offset += 1) {
-    const item = items[(normalizedStart + offset) % items.length];
-    if (item !== undefined) result.push(item);
-  }
-  return result;
+async function getSchedulerState(env: RanobeLibRuntimeEnv): Promise<{ lastSyncAt: string | null; lastError: string | null }> {
+  const row = await env.DB.prepare(`
+    SELECT
+      MAX(last_synced_at) AS last_sync_at,
+      (
+        SELECT sync_error
+        FROM ranobelib_titles
+        WHERE is_active = 1 AND sync_error IS NOT NULL AND TRIM(sync_error) != ''
+        ORDER BY COALESCE(last_synced_at, first_seen_at) DESC
+        LIMIT 1
+      ) AS last_error
+    FROM ranobelib_titles
+    WHERE is_active = 1
+  `).first<{ last_sync_at: string | null; last_error: string | null }>();
+  return {
+    lastSyncAt: typeof row?.last_sync_at === 'string' ? row.last_sync_at : null,
+    lastError: typeof row?.last_error === 'string' ? row.last_error : null,
+  };
 }
 
 function normalizeTitleCard(row: RanobeLibTitleCard): RanobeLibTitleCard {
@@ -507,27 +283,8 @@ function normalizeReleaseCard(row: RanobeLibReleaseCard): RanobeLibReleaseCard {
   return { ...row, chapter_count: numberFrom(row.chapter_count, 0) };
 }
 
-function normalizeCoverUrl(value: string | null): string | null {
-  if (!value) return null;
-  if (/^https:\/\//i.test(value)) return value;
-  if (value.startsWith('//')) return `https:${value}`;
-  if (value.startsWith('/')) return `https://cover.imglib.info${value}`;
-  if (value.startsWith('uploads/')) return `https://cover.imglib.info/${value}`;
-  return null;
-}
-
-function humanizeSlug(slug: string): string {
-  return slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()).trim();
-}
-
 function teamRefFor(env: RanobeLibRuntimeEnv): string {
   return env.RANOBELIB_TEAM_REF?.trim() || DEFAULT_TEAM_REF;
-}
-
-function batchSizeFor(env: RanobeLibRuntimeEnv): number {
-  const parsed = Number(env.RANOBELIB_SYNC_BATCH_SIZE);
-  if (!Number.isFinite(parsed)) return DEFAULT_BATCH_SIZE;
-  return Math.max(1, Math.min(MAX_BATCH_SIZE, Math.floor(parsed)));
 }
 
 function numberFrom(value: unknown, fallback: number): number {
@@ -539,8 +296,4 @@ function nullableNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
