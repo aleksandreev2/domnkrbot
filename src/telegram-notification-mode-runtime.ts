@@ -18,8 +18,13 @@ import {
   type TelegramNotificationSettingsEnv,
 } from './telegram-notification-settings.js';
 
+type NotificationQueueProducerLike = {
+  send(message: { kind: 'drain' }): Promise<unknown> | unknown;
+};
+
 export type TelegramNotificationModeEnv = TelegramNotificationSettingsEnv & {
   TELEGRAM_BOT_TOKEN?: string;
+  NOTIFICATION_QUEUE?: NotificationQueueProducerLike;
 };
 
 type TelegramUser = {
@@ -118,6 +123,7 @@ export async function handleTelegramNotificationModeUpdate(
     }
 
     await setGlobalDeliverySetting(env, userId, callbackSetting(parsed));
+    await wakeNotificationDelivery(env);
     await editTelegramMessage(env, chatId, messageId, await notificationCenterPayload(env, userId));
     await answerCallback(env, callback.id);
     return true;
@@ -141,6 +147,7 @@ export async function handleTelegramNotificationModeUpdate(
   } else {
     await setTitleDeliverySetting(env, userId, title.book_ref, callbackSetting(parsed));
   }
+  await wakeNotificationDelivery(env);
   await editTelegramMessage(env, chatId, messageId, await titlePanelPayload(env, userId, title));
   await answerCallback(env, callback.id);
   return true;
@@ -186,6 +193,7 @@ export async function handleNotificationCustomInput(
     await setTitleDeliverySetting(env, userId, state.bookRef, setting);
   }
   await clearNotificationCustomInput(env, userId);
+  await wakeNotificationDelivery(env);
   await sendTelegramMessage(env, message.chat.id, {
     text: [
       `✅ Уведомления будут приходить после накопления ${size} глав.`,
@@ -266,6 +274,16 @@ function customPrompt() {
     text: '📦 Введите размер стака от 2 до 100 глав.',
     reply_markup: { inline_keyboard: [] },
   };
+}
+
+async function wakeNotificationDelivery(env: TelegramNotificationModeEnv): Promise<void> {
+  const send = env.NOTIFICATION_QUEUE?.send?.bind(env.NOTIFICATION_QUEUE);
+  if (!send) return;
+  try {
+    await send({ kind: 'drain' });
+  } catch (error) {
+    console.error('Telegram notification Queue wake-up failed after delivery-mode change', error);
+  }
 }
 
 async function upsertTelegramUser(env: TelegramNotificationModeEnv, user: TelegramUser): Promise<void> {
