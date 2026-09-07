@@ -12,6 +12,9 @@ function outboxRow(userId, overrides = {}) {
     user_telegram_id: String(userId),
     status: 'pending',
     attempts: 0,
+    available_at: '2026-09-07 08:00:00',
+    claim_token: null,
+    claim_expires_at: null,
     book_ref: '77--fast-book',
     ranobelib_id: 77,
     title: 'Fast Book',
@@ -36,6 +39,10 @@ class Statement {
   async all() {
     if (this.query.includes('FROM ranobelib_notification_outbox o')) {
       this.db.deliverySelects.push({ query: this.query, values: [...this.values] });
+      if (/o\.claim_token\s*=\s*\?/i.test(this.query)) {
+        const claimToken = String(this.values[0]);
+        return { results: this.db.rows.filter((row) => row.status === 'processing' && row.claim_token === claimToken) };
+      }
       const releaseId = this.values.length > 1 && typeof this.values[0] === 'string' ? this.values[0] : null;
       const limit = Number(this.values.at(-1)) || 20;
       return {
@@ -49,6 +56,25 @@ class Statement {
   }
   async run() {
     this.db.mutations.push({ query: this.query, values: [...this.values] });
+    if (/UPDATE ranobelib_notification_outbox SET status='processing'/i.test(this.query)) {
+      const claimToken = String(this.values[0]);
+      const limit = Number(this.values.at(-1)) || 20;
+      const releaseId = this.values.length >= 3 && typeof this.values[1] === 'string' ? String(this.values[1]) : null;
+      const claimed = this.db.rows
+        .filter((row) => !releaseId || row.release_id === releaseId)
+        .filter((row) => row.status === 'pending' || row.status === 'retry')
+        .slice(0, limit);
+      for (const row of claimed) {
+        row.status = 'processing';
+        row.claim_token = claimToken;
+        row.claim_expires_at = '2026-09-07 08:10:00';
+      }
+      return {
+        success: true,
+        results: claimed.map((row) => ({ release_id: row.release_id, user_telegram_id: row.user_telegram_id })),
+        meta: { changes: claimed.length },
+      };
+    }
     if (/UPDATE ranobelib_notification_outbox SET status='sent'/i.test(this.query)) {
       this.db.setStatus(this.values, 'sent');
     } else if (/UPDATE ranobelib_notification_outbox SET status='disabled'/i.test(this.query)) {
@@ -56,9 +82,14 @@ class Statement {
     } else if (/UPDATE ranobelib_notification_outbox SET status='retry'/i.test(this.query)) {
       this.db.setStatus(this.values, 'retry');
     } else if (/DELETE FROM ranobelib_notification_outbox/i.test(this.query)) {
-      const releaseId = String(this.values.at(-2));
-      const userId = String(this.values.at(-1));
-      this.db.rows = this.db.rows.filter((row) => !(row.release_id === releaseId && row.user_telegram_id === userId));
+      const releaseId = String(this.values.at(-3) ?? this.values.at(-2));
+      const userId = String(this.values.at(-2) ?? this.values.at(-1));
+      const claimToken = this.values.length >= 3 ? String(this.values.at(-1)) : null;
+      this.db.rows = this.db.rows.filter((row) => !(
+        row.release_id === releaseId
+        && row.user_telegram_id === userId
+        && (!claimToken || row.claim_token === claimToken)
+      ));
     }
     return { meta: { changes: 1 } };
   }
@@ -81,10 +112,19 @@ class DB {
     return results;
   }
   setStatus(values, status) {
-    const releaseId = String(values.at(-2));
-    const userId = String(values.at(-1));
-    const row = this.rows.find((item) => item.release_id === releaseId && item.user_telegram_id === userId);
-    if (row) row.status = status;
+    const hasClaim = values.length >= 3;
+    const releaseId = String(values.at(hasClaim ? -3 : -2));
+    const userId = String(values.at(hasClaim ? -2 : -1));
+    const claimToken = hasClaim ? String(values.at(-1)) : null;
+    const row = this.rows.find((item) =>
+      item.release_id === releaseId
+      && item.user_telegram_id === userId
+      && (!claimToken || item.claim_token === claimToken));
+    if (row) {
+      row.status = status;
+      row.claim_token = null;
+      row.claim_expires_at = null;
+    }
   }
 }
 
@@ -129,6 +169,27 @@ test('delivery uses one SQL eligibility query and no per-user subscription SELEC
   assert.ok(db.mutations.some((m) => /DELETE FROM ranobelib_notification_outbox/i.test(m.query)));
 });
 
+test('two concurrent drains atomically claim outbox rows so Telegram is called only once per recipient', async () => {
+  const { drainNotificationOutbox } = await loadDelivery();
+  const db = new DB([outboxRow('100'), outboxRow('200')]);
+  const sentTo = [];
+
+  const results = await withFetch(async (_url, init) => {
+    const payload = JSON.parse(init.body);
+    sentTo.push(String(payload.chat_id));
+    await new Promise((resolve) => setTimeout(resolve, 8));
+    return telegramOk();
+  }, () => Promise.all([
+    drainNotificationOutbox({ DB: db, TELEGRAM_BOT_TOKEN: 'token' }),
+    drainNotificationOutbox({ DB: db, TELEGRAM_BOT_TOKEN: 'token' }),
+  ]));
+
+  assert.deepEqual([...sentTo].sort(), ['100', '200']);
+  assert.equal(results[0].claimed + results[1].claimed, 2);
+  assert.ok(db.mutations.some((m) => /status='processing'/i.test(m.query)), 'delivery must claim before sending');
+  assert.ok(db.mutations.some((m) => /claim_token/i.test(m.query)), 'claim must be owned by a unique token');
+});
+
 test('a full twenty-recipient batch sends concurrently but never exceeds five active Telegram requests', async () => {
   const { drainNotificationOutbox } = await loadDelivery();
   const db = new DB(Array.from({ length: 20 }, (_, index) => outboxRow(String(1000 + index))));
@@ -148,7 +209,7 @@ test('a full twenty-recipient batch sends concurrently but never exceeds five ac
   assert.equal(result.retry, 0);
   assert.ok(maxActive > 1, `expected concurrent sends, saw maxActive=${maxActive}`);
   assert.ok(maxActive <= 5, `expected max five active sends, saw ${maxActive}`);
-  assert.ok(db.allQueries.length <= 21, `unexpected D1 query explosion: ${db.allQueries.length}`);
+  assert.ok(db.allQueries.length <= 22, `unexpected D1 query explosion: ${db.allQueries.length}`);
 });
 
 test('403 disables, 429 respects retry_after seconds, and other temporary errors retry without aborting the batch', async () => {
