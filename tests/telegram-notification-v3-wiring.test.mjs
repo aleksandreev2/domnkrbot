@@ -13,10 +13,14 @@ const FAST_SCAN_CRON = '* * * * *';
 const DISCOVERY_CRON = '*/30 * * * *';
 const FALLBACK_DELIVERY_CRON = '*/5 * * * *';
 const MEMBERSHIP_CRON = '0 * * * *';
+const IDLE_SCAN_CRON = '17 */3 * * *';
 
-test('Wrangler declares exactly four isolated notification v3 crons and one bounded Queue consumer', () => {
-  assert.deepEqual(new Set(wrangler.triggers?.crons ?? []), new Set([FAST_SCAN_CRON, DISCOVERY_CRON, FALLBACK_DELIVERY_CRON, MEMBERSHIP_CRON]));
-  assert.equal(wrangler.triggers.crons.length, 4);
+test('Wrangler declares exactly five isolated notification crons and one bounded Queue consumer', () => {
+  assert.deepEqual(
+    new Set(wrangler.triggers?.crons ?? []),
+    new Set([FAST_SCAN_CRON, DISCOVERY_CRON, FALLBACK_DELIVERY_CRON, MEMBERSHIP_CRON, IDLE_SCAN_CRON]),
+  );
+  assert.equal(wrangler.triggers.crons.length, 5);
   const producers = wrangler.queues?.producers ?? [];
   const consumers = wrangler.queues?.consumers ?? [];
   assert.equal(producers.length, 1);
@@ -27,12 +31,14 @@ test('Wrangler declares exactly four isolated notification v3 crons and one boun
   assert.equal(consumers[0].max_concurrency, 1);
 });
 
-test('scheduled routing isolates scanner, discovery, fallback delivery and forty-user membership sweep', () => {
+test('scheduled routing isolates hot scan, idle scan, discovery, fallback delivery and membership', () => {
   assert.match(entry, /const\s+FAST_SCAN_CRON\s*=\s*['"]\* \* \* \* \*['"]/);
+  assert.match(entry, /const\s+IDLE_SCAN_CRON\s*=\s*['"]17 \*\/3 \* \* \*['"]/);
   assert.match(entry, /const\s+DISCOVERY_CRON\s*=\s*['"]\*\/30 \* \* \* \*['"]/);
   assert.match(entry, /const\s+FALLBACK_DELIVERY_CRON\s*=\s*['"]\*\/5 \* \* \* \*['"]/);
   assert.match(entry, /const\s+MEMBERSHIP_CRON\s*=\s*['"]0 \* \* \* \*['"]/);
   assert.match(entry, /controller\.cron\s*===\s*FAST_SCAN_CRON[\s\S]*?scanDueRanobeLibTitles[\s\S]*?return;/);
+  assert.match(entry, /controller\.cron\s*===\s*IDLE_SCAN_CRON[\s\S]*?scanIdleRanobeLibTitles[\s\S]*?return;/);
   assert.match(entry, /controller\.cron\s*===\s*DISCOVERY_CRON[\s\S]*?discoverRanobeLibTeam[\s\S]*?return;/);
   assert.match(entry, /controller\.cron\s*===\s*FALLBACK_DELIVERY_CRON[\s\S]*?drainNotificationOutbox[\s\S]*?return;/);
   assert.match(entry, /controller\.cron\s*===\s*MEMBERSHIP_CRON[\s\S]*?runChannelMembershipMaintenance\(env,\s*40\)[\s\S]*?return;/);
@@ -44,6 +50,8 @@ test('scheduled routing isolates scanner, discovery, fallback delivery and forty
 test('scanner sends one generic drain wake-up only after an invocation created releases', () => {
   assert.match(entry, /const\s+scan\s*=\s*await\s+scanDueRanobeLibTitles/);
   assert.match(entry, /scan\.newReleases\s*>\s*0[\s\S]*?queueNotificationWakeup\(env\)/);
+  assert.match(entry, /const\s+idleScan\s*=\s*await\s+scanIdleRanobeLibTitles/);
+  assert.match(entry, /idleScan\.newReleases\s*>\s*0[\s\S]*?queueNotificationWakeup\(env\)/);
   assert.doesNotMatch(entry, /queueNotificationWakeup\(env,\s*releaseId\)/);
   assert.doesNotMatch(entry, /NotificationWakeup[^\n]*releaseId/);
   assert.match(entry, /NOTIFICATION_QUEUE\?\.send\(\{[\s\S]*?kind:\s*['"]drain['"][\s\S]*?\}\)/);
