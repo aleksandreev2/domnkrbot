@@ -5,12 +5,13 @@ import test from 'node:test';
 const wrangler = JSON.parse(fs.readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
 const entry = fs.readFileSync(new URL('../src/live-entry-v2.ts', import.meta.url), 'utf8');
 
-test('notification v3 schedule gives scanner, discovery, fallback delivery and membership independent invocations', () => {
+test('notification schedule gives hot scan, idle scan, discovery, fallback delivery and membership independent invocations', () => {
   assert.deepEqual(
     wrangler.triggers?.crons,
-    ['* * * * *', '*/30 * * * *', '*/5 * * * *', '0 * * * *'],
+    ['* * * * *', '17 */3 * * *', '*/30 * * * *', '*/5 * * * *', '0 * * * *'],
   );
   assert.match(entry, /FAST_SCAN_CRON/);
+  assert.match(entry, /IDLE_SCAN_CRON/);
   assert.match(entry, /DISCOVERY_CRON/);
   assert.match(entry, /FALLBACK_DELIVERY_CRON/);
   assert.match(entry, /MEMBERSHIP_CRON/);
