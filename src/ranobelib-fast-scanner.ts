@@ -95,7 +95,7 @@ export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT):
     FROM ranobelib_titles
     WHERE is_active = 1
       AND (snapshot_ready = 0 OR notification_subscriber_count > 0)
-      AND (snapshot_ready = 0 OR next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
+      AND (next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
     ORDER BY COALESCE(next_check_at, '') ASC,
              notification_subscriber_count DESC,
              scan_priority DESC,
