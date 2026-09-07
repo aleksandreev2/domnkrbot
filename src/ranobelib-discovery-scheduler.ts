@@ -20,8 +20,7 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
   const client = new RanobeLibClient();
   const books = await client.discoverTeamBooks(teamRef);
 
-  // A valid team should never collapse an existing catalog to zero because of a transient
-  // upstream/API parsing failure. Validate before the first destructive membership update.
+  // Never collapse an existing catalog because of a transient upstream or parsing failure.
   if (books.length === 0) throw new Error(`RanobeLib team ${teamRef} returned no book links`);
 
   const { results: activeRows } = await env.DB.prepare(
@@ -29,9 +28,20 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
   ).all<{ book_ref: string }>();
   const before = new Set(activeRows.map((row) => String(row.book_ref || '')).filter(Boolean));
   const after = new Set(books.map((book) => book.ref));
+  const refsJson = JSON.stringify([...after]);
 
-  await env.DB.prepare('UPDATE ranobelib_titles SET is_active = 0').run();
-  await executeStatements(env.DB, books.map((book) => titleUpsert(env.DB, book)));
+  // Deactivate only titles missing from a validated non-empty discovery result. Doing this
+  // before the bulk upsert lets the upsert distinguish already-active rows from titles that
+  // are genuinely new/reactivated, so only the latter are scheduled immediately.
+  await env.DB.prepare(`
+    UPDATE ranobelib_titles SET is_active = 0
+    WHERE is_active = 1
+      AND book_ref NOT IN (
+        SELECT CAST(value AS TEXT) FROM json_each(?)
+      )
+  `).bind(refsJson).run();
+
+  await bulkUpsertTitles(env.DB, books);
 
   let activated = 0;
   for (const ref of after) if (!before.has(ref)) activated += 1;
@@ -41,34 +51,43 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
   return { discovered: books.length, activated, deactivated };
 }
 
-function titleUpsert(db: D1DatabaseLike, book: RanobeLibTeamBookRef) {
-  return db.prepare(`
-    INSERT INTO ranobelib_titles (book_ref, ranobelib_id, slug, url, title, cover_url, is_active)
-    VALUES (?, ?, ?, ?, ?, ?, 1)
+async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[]): Promise<void> {
+  const payload = JSON.stringify(books.map((book) => ({
+    ref: book.ref,
+    id: book.id,
+    slug: book.slug,
+    url: book.url,
+    title: book.title ?? null,
+    coverUrl: normalizeCoverUrl(book.coverUrl ?? null),
+  })));
+
+  await db.prepare(`
+    INSERT INTO ranobelib_titles (
+      book_ref, ranobelib_id, slug, url, title, cover_url, is_active, next_check_at
+    )
+    SELECT
+      CAST(json_extract(j.value, '$.ref') AS TEXT),
+      CAST(json_extract(j.value, '$.id') AS INTEGER),
+      CAST(json_extract(j.value, '$.slug') AS TEXT),
+      CAST(json_extract(j.value, '$.url') AS TEXT),
+      json_extract(j.value, '$.title'),
+      json_extract(j.value, '$.coverUrl'),
+      1,
+      CURRENT_TIMESTAMP
+    FROM json_each(?) AS j
+    WHERE 1
     ON CONFLICT(book_ref) DO UPDATE SET
       ranobelib_id = excluded.ranobelib_id,
       slug = excluded.slug,
       url = excluded.url,
       title = COALESCE(excluded.title, ranobelib_titles.title),
       cover_url = COALESCE(excluded.cover_url, ranobelib_titles.cover_url),
+      next_check_at = CASE
+        WHEN ranobelib_titles.is_active = 0 THEN CURRENT_TIMESTAMP
+        ELSE ranobelib_titles.next_check_at
+      END,
       is_active = 1
-  `).bind(
-    book.ref,
-    book.id,
-    book.slug,
-    book.url,
-    book.title ?? null,
-    normalizeCoverUrl(book.coverUrl ?? null),
-  );
-}
-
-async function executeStatements(db: D1DatabaseLike, statements: ReturnType<D1DatabaseLike['prepare']>[]): Promise<void> {
-  if (!statements.length) return;
-  if (db.batch) {
-    await db.batch(statements);
-    return;
-  }
-  for (const statement of statements) await statement.run();
+  `).bind(payload).run();
 }
 
 function normalizeCoverUrl(value: string | null): string | null {
