@@ -92,7 +92,66 @@ export function aggregateClaimedDeliveryRows<T extends ClaimedDeliveryRowLike>(r
     if (row.summary) existing.summary = existing.summary ? `${existing.summary}; ${row.summary}` : row.summary;
   }
 
+  for (const group of groups.values()) {
+    if (group.chapterCount > 1 && !hasSafeContiguousRange(group.members)) {
+      group.firstVolume = null;
+      group.firstNumber = null;
+      group.lastVolume = null;
+      group.lastNumber = null;
+    }
+  }
+
   return [...groups.values()];
+}
+
+function hasSafeContiguousRange<T extends ClaimedDeliveryRowLike>(rows: T[]): boolean {
+  if (!rows.length) return false;
+
+  let commonVolume: string | null = null;
+  let expectedFirst: number | null = null;
+
+  for (const row of rows) {
+    const firstVolume = normalizedToken(row.first_volume);
+    const lastVolume = normalizedToken(row.last_volume ?? row.first_volume);
+    const first = parseChapterOrdinal(row.first_number);
+    const last = parseChapterOrdinal(row.last_number ?? row.first_number);
+    const count = Number(row.chapter_count);
+
+    if (
+      !firstVolume
+      || !lastVolume
+      || firstVolume !== lastVolume
+      || first === null
+      || last === null
+      || last < first
+      || !Number.isSafeInteger(count)
+      || count <= 0
+      || last - first + 1 !== count
+    ) {
+      return false;
+    }
+
+    if (commonVolume === null) commonVolume = firstVolume;
+    else if (firstVolume !== commonVolume) return false;
+
+    if (expectedFirst !== null && first !== expectedFirst) return false;
+    expectedFirst = last + 1;
+  }
+
+  return true;
+}
+
+function parseChapterOrdinal(value: unknown): number | null {
+  const text = normalizedToken(value);
+  if (!text || !/^\d+$/.test(text)) return null;
+  const number = Number(text);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
+function normalizedToken(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  return text || null;
 }
 
 function truthyFlag(value: unknown): boolean {
