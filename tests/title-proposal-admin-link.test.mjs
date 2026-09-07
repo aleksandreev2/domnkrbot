@@ -70,6 +70,15 @@ class Statement {
         this.db.proposal.ranobelib_book_ref = bookRef;
       }
     }
+    if (this.query.startsWith('INSERT INTO ranobelib_titles')) {
+      const [bookRef, ranobelibId, slug, url, title, chapterCount] = this.values;
+      this.db.cachedRanobeLib.push({ bookRef, ranobelibId, slug, url, title, chapterCount });
+      if (!this.db.ranobelib) {
+        this.db.ranobelib = {
+          book_ref: String(bookRef), ranobelib_id: Number(ranobelibId), title: String(title), url: String(url), is_active: 0,
+        };
+      }
+    }
     return { meta: { changes: 1 } };
   }
 }
@@ -81,6 +90,7 @@ class DB {
     this.proposal = null;
     this.ranobelib = null;
     this.conflict = null;
+    this.cachedRanobeLib = [];
   }
   prepare(query) { return new Statement(this, query); }
 }
@@ -95,9 +105,75 @@ function env(db = new DB()) {
 }
 
 async function adminRequest(path, { method = 'POST', body, origin = ORIGIN } = {}) {
-  const headers = { cookie: await adminCookie(), origin, 'content-type': 'application/json' };
-  return new Request(`${ORIGIN}${path}`, { method, headers, body: JSON.stringify(body ?? {}) });
+  const headers = { cookie: await adminCookie(), origin };
+  if (body !== undefined) headers['content-type'] = 'application/json';
+  return new Request(`${ORIGIN}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
 }
+
+async function withFetch(fn, responder) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = responder;
+  try { return await fn(); }
+  finally { globalThis.fetch = originalFetch; }
+}
+
+test('admin RanobeLib search queries the global catalog and caches candidates as inactive support rows', async () => {
+  const db = new DB();
+  await withFetch(async () => {
+    const response = await handleTitleProposalAdminApi(await adminRequest('/api/admin/title-proposals/ranobelib-search', {
+      body: { query: 'Found title' },
+    }), env(db));
+    assert.equal(response?.status, 200);
+    const body = await response.json();
+    assert.equal(body.candidates.length, 1);
+    assert.deepEqual(body.candidates[0], {
+      bookRef: '555--found-title',
+      ranobelibId: 555,
+      title: 'Найденный тайтл',
+      url: 'https://ranobelib.me/ru/book/555--found-title',
+      chapterCount: 42,
+    });
+    assert.equal(db.cachedRanobeLib.length, 1);
+    assert.equal(db.cachedRanobeLib[0].bookRef, '555--found-title');
+    const insert = db.runs.find((run) => run.query.startsWith('INSERT INTO ranobelib_titles'));
+    assert.ok(insert);
+    assert.match(insert.query, /is_active,snapshot_ready/);
+    assert.match(insert.query, /VALUES \(\?,\?,\?,\?,\?,\?,0,0,CURRENT_TIMESTAMP\)/);
+  }, async (url, options = {}) => {
+    const parsed = new URL(String(url));
+    assert.equal(parsed.origin, 'https://api.cdnlibs.org');
+    assert.equal(parsed.pathname, '/api/manga');
+    assert.equal(parsed.searchParams.get('q'), 'Found title');
+    assert.equal(options.headers['site-id'], '3');
+    return Response.json({
+      data: [{
+        id: 555,
+        slug_url: '555--found-title',
+        slug: 'found-title',
+        rus_name: 'Найденный тайтл',
+        name: 'Found title',
+        items_count: { uploaded: 42 },
+      }],
+    });
+  });
+});
+
+test('admin RanobeLib search validates query before external requests', async () => {
+  const db = new DB();
+  let fetchCalled = false;
+  await withFetch(async () => {
+    const response = await handleTitleProposalAdminApi(await adminRequest('/api/admin/title-proposals/ranobelib-search', {
+      body: { query: 'x' },
+    }), env(db));
+    assert.equal(response?.status, 400);
+    assert.equal(fetchCalled, false);
+    assert.equal(db.runs.length, 0);
+  }, async () => { fetchCalled = true; throw new Error('must not fetch'); });
+});
 
 test('admin links an external proposal to an existing RanobeLib row in place', async () => {
   const db = new DB();
