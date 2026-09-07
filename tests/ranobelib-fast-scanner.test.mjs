@@ -82,6 +82,7 @@ class ScanStatement {
     return null;
   }
   async all() {
+    if (/snapshot_ready\s*=\s*0/i.test(this.query)) return { results: [] };
     if (/FROM ranobelib_titles/i.test(this.query) && /next_check_at/i.test(this.query)) {
       return { results: [this.db.dueTitle] };
     }
@@ -179,6 +180,101 @@ test('fast scan checks only due titles, preserves team filtering and wakes exact
     assert.equal(db.schedulerUpdates.length, 1);
     assert.ok(db.schedulerUpdates[0].values.includes(0));
     assert.ok(db.schedulerUpdates[0].values.includes(1));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+class BootstrapStatement {
+  constructor(db, query) {
+    this.db = db;
+    this.query = query.replace(/\s+/g, ' ').trim();
+    this.values = [];
+  }
+  bind(...values) { this.values = values; return this; }
+  async first() {
+    if (/SELECT snapshot_ready, last_release_at, title, summary, cover_url/i.test(this.query)) {
+      return { snapshot_ready: 0, last_release_at: null, title: 'New Book', summary: null, cover_url: null };
+    }
+    return null;
+  }
+  async all() {
+    if (/snapshot_ready\s*=\s*0/i.test(this.query)) return { results: [this.db.bootstrapTitle] };
+    if (/snapshot_ready\s*=\s*1/i.test(this.query)) return { results: [] };
+    if (/FROM ranobelib_chapters/i.test(this.query)) throw new Error('bootstrap must not read a nonexistent previous snapshot');
+    return { results: [] };
+  }
+  async run() {
+    if (/INSERT INTO ranobelib_chapters/i.test(this.query)) {
+      this.db.chapterInserts.push({ query: this.query, values: [...this.values] });
+      return { meta: { changes: 120 } };
+    }
+    if (/INSERT OR IGNORE INTO ranobelib_releases/i.test(this.query)) {
+      this.db.releaseInserts.push([...this.values]);
+      return { meta: { changes: 1 } };
+    }
+    if (/UPDATE ranobelib_titles SET/i.test(this.query) && /snapshot_ready\s*=\s*1/i.test(this.query)) {
+      this.db.schedulerUpdates.push({ query: this.query, values: [...this.values] });
+    }
+    return { meta: { changes: 1 } };
+  }
+}
+
+class BootstrapDB {
+  constructor() {
+    this.bootstrapTitle = {
+      book_ref: '88--new-book',
+      ranobelib_id: 88,
+      slug: 'new-book',
+      url: 'https://ranobelib.me/ru/book/88--new-book',
+      title: 'New Book',
+      cover_url: null,
+      consecutive_no_change: 0,
+      last_change_at: null,
+      next_check_at: null,
+      scan_priority: 0,
+    };
+    this.chapterInserts = [];
+    this.releaseInserts = [];
+    this.schedulerUpdates = [];
+  }
+  prepare(query) { return new BootstrapStatement(this, query); }
+  async batch(statements) {
+    const results = [];
+    for (const statement of statements) results.push(await statement.run());
+    return results;
+  }
+}
+
+test('fast scanner bootstraps one newly discovered title without replaying old history or exploding D1 writes', async () => {
+  const scanner = await loadScanner();
+  assert.equal(typeof scanner.selectBootstrapTitles, 'function');
+  const db = new BootstrapDB();
+  const originalFetch = globalThis.fetch;
+  const oldChapters = Array.from({ length: 120 }, (_, index) => chapter(
+    2000 + index,
+    index + 1,
+    11969,
+    '2026-09-01T08:00:00.000Z',
+  ));
+  globalThis.fetch = async (url) => {
+    assert.equal(String(url), 'https://api.cdnlibs.org/api/manga/88--new-book/chapters');
+    return new Response(JSON.stringify({ data: oldChapters }), { headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await scanner.scanDueRanobeLibTitles(
+      { DB: db, RANOBELIB_TEAM_REF: '11969--dom-nekromanta' },
+      { now: new Date('2026-09-07T09:00:00.000Z') },
+    );
+    assert.equal(result.selected, 1);
+    assert.equal(result.succeeded, 1);
+    assert.equal(result.failed, 0);
+    assert.equal(result.newReleases, 0);
+    assert.equal(db.releaseInserts.length, 0, 'old history must not become a release on first snapshot');
+    assert.equal(db.chapterInserts.length, 1, 'all 120 chapters must be persisted by one D1 statement');
+    assert.match(db.chapterInserts[0].query, /json_each/i);
+    assert.ok(db.chapterInserts[0].values.some((value) => typeof value === 'string' && value.includes('"id":2000')));
+    assert.equal(db.schedulerUpdates.length, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
