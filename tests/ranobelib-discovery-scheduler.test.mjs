@@ -40,7 +40,7 @@ async function withFetch(handler, fn) {
   try { return await fn(requests); } finally { globalThis.fetch = original; }
 }
 
-test('team discovery uses one bounded JSON upsert, makes new titles immediately scannable, and never fetches chapters', async () => {
+test('team discovery uses one bounded JSON upsert, refreshes effective demand, makes new titles immediately scannable, and never fetches chapters', async () => {
   const { discoverRanobeLibTeam } = await import('../dist-runtime/ranobelib-discovery-scheduler.js');
   const db = new DB(['999--old-book']);
   const titles = Array.from({ length: 60 }, (_, index) => ({
@@ -61,9 +61,15 @@ test('team discovery uses one bounded JSON upsert, makes new titles immediately 
       assert.equal(result.activated, 60);
       assert.equal(result.deactivated, 1);
       assert.equal(db.upserts.length, 1, '60 titles must not become 60 D1 queries');
-      assert.match(db.upserts[0].query, /json_each/i);
-      assert.match(db.upserts[0].query, /next_check_at/i);
-      assert.match(db.upserts[0].query, /CURRENT_TIMESTAMP/i);
+      const upsert = db.upserts[0].query;
+      assert.match(upsert, /json_each/i);
+      assert.match(upsert, /next_check_at/i);
+      assert.match(upsert, /CURRENT_TIMESTAMP/i);
+      assert.match(upsert, /notification_subscriber_count/i);
+      assert.match(upsert, /subscriber_count_updated_at/i);
+      assert.match(upsert, /telegram_delivery_reachability/i);
+      assert.match(upsert, /title_subscription_exclusions/i);
+      assert.match(upsert, /title_subscriptions/i);
       assert.ok(db.upserts[0].values.some((value) => typeof value === 'string' && value.includes('62387--book-0')));
       assert.equal(db.deactivateCalls, 1);
       assert.ok(db.runs.length <= 2, `discovery write budget exploded: ${db.runs.length}`);

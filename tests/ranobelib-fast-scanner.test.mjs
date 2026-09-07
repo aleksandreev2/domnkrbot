@@ -6,9 +6,9 @@ async function loadScanner() {
   return import('../dist-runtime/ranobelib-fast-scanner.js');
 }
 
-test('notifications v3 uses the frozen 1/2/5/10/30 cadence and exponential failure backoff', async () => {
+test('paid scanner preserves the frozen 1/2/5/10/30 cadence and exponential failure backoff', async () => {
   const scanner = await loadScanner();
-  assert.equal(scanner.FAST_SCAN_LIMIT, 6);
+  assert.equal(scanner.FAST_SCAN_LIMIT, 24);
   const now = new Date('2026-09-07T09:00:00.000Z');
   assert.equal(scanner.computeNextCheckDelayMinutes({ changed: true, consecutiveNoChange: 9, consecutiveFailures: 0, now }), 1);
   assert.equal(scanner.computeNextCheckDelayMinutes({ changed: false, consecutiveNoChange: 1, consecutiveFailures: 0, lastChangeAt: '2026-09-07T08:50:00.000Z', now }), 2);
@@ -23,7 +23,7 @@ test('notifications v3 uses the frozen 1/2/5/10/30 cadence and exponential failu
   assert.equal(scanner.computeNextCheckDelayMinutes({ changed: false, consecutiveNoChange: 0, consecutiveFailures: 9, failed: true, now }), 30);
 });
 
-test('selectDueTitles uses one unified query for active uninitialized or due titles with a hard six-title cap', async () => {
+test('selectDueTitles uses one demand-aware query for HOT titles and uninitialized bootstrap titles with a 24-title cap', async () => {
   const scanner = await loadScanner();
   const calls = [];
   const rows = Array.from({ length: 8 }, (_, index) => ({
@@ -39,6 +39,7 @@ test('selectDueTitles uses one unified query for active uninitialized or due tit
     last_change_at: null,
     next_check_at: index === 0 ? null : '2026-09-07 08:00:00',
     scan_priority: 0,
+    notification_subscriber_count: index === 0 ? 0 : 1,
   }));
   const env = {
     DB: {
@@ -54,14 +55,14 @@ test('selectDueTitles uses one unified query for active uninitialized or due tit
   };
 
   const result = await scanner.selectDueTitles(env);
-  assert.equal(result.length, 6);
+  assert.equal(result.length, 8);
   assert.equal(calls.length, 1);
   assert.match(calls[0].query, /is_active\s*=\s*1/i);
-  assert.match(calls[0].query, /snapshot_ready\s*=\s*0[\s\S]*next_check_at\s+IS\s+NULL[\s\S]*next_check_at\s*<=\s*CURRENT_TIMESTAMP/i);
-  assert.match(calls[0].query, /ORDER BY[\s\S]*COALESCE\s*\(\s*next_check_at/i);
-  assert.match(calls[0].query, /scan_priority/i);
+  assert.match(calls[0].query, /snapshot_ready\s*=\s*0[\s\S]*notification_subscriber_count\s*>\s*0/i);
+  assert.match(calls[0].query, /next_check_at\s+IS\s+NULL[\s\S]*next_check_at\s*<=\s*CURRENT_TIMESTAMP/i);
+  assert.match(calls[0].query, /ORDER BY[\s\S]*COALESCE\s*\(\s*next_check_at[\s\S]*notification_subscriber_count\s+DESC[\s\S]*scan_priority\s+DESC/i);
   assert.match(calls[0].query, /LIMIT\s*\?/i);
-  assert.equal(calls[0].values.at(-1), 6);
+  assert.equal(calls[0].values.at(-1), 24);
 });
 
 class ScanStatement {
@@ -99,6 +100,7 @@ class ScanDB {
       url: 'https://ranobelib.me/ru/book/77--fast-book', title: 'Fast Book', cover_url: null,
       snapshot_ready: 1, consecutive_no_change: 4, consecutive_failures: 2,
       last_change_at: '2026-09-06 10:00:00', next_check_at: '2026-09-07 08:00:00', scan_priority: 1,
+      notification_subscriber_count: 1,
     };
     this.releaseInserts = []; this.schedulerUpdates = [];
   }
@@ -169,6 +171,7 @@ class FailureDB {
       book_ref: '90--broken', ranobelib_id: 90, slug: 'broken', url: 'https://ranobelib.me/ru/book/90--broken',
       title: 'Broken', cover_url: null, snapshot_ready: 1, consecutive_no_change: 7, consecutive_failures: 2,
       last_change_at: '2026-09-06 11:00:00', next_check_at: '2026-09-07 08:00:00', scan_priority: 0,
+      notification_subscriber_count: 1,
     };
     this.failureUpdates = [];
   }
@@ -221,7 +224,7 @@ class BootstrapDB {
     this.bootstrapTitle = {
       book_ref: '88--new-book', ranobelib_id: 88, slug: 'new-book', url: 'https://ranobelib.me/ru/book/88--new-book',
       title: 'New Book', cover_url: null, snapshot_ready: 0, consecutive_no_change: 0, consecutive_failures: 0,
-      last_change_at: null, next_check_at: null, scan_priority: 0,
+      last_change_at: null, next_check_at: null, scan_priority: 0, notification_subscriber_count: 0,
     };
     this.chapterInserts = []; this.releaseInserts = []; this.schedulerUpdates = [];
   }

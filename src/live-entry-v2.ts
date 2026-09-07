@@ -23,7 +23,12 @@ import {
 } from './publication-release-analytics.js';
 import { handlePublishingAnalyticsV2, type PublishingAnalyticsV2Env } from './publishing-analytics-v2.js';
 import { discoverRanobeLibTeam } from './ranobelib-discovery-scheduler.js';
-import { FAST_SCAN_LIMIT, scanDueRanobeLibTitles } from './ranobelib-fast-scanner.js';
+import {
+  FAST_SCAN_LIMIT,
+  IDLE_SCAN_LIMIT,
+  scanDueRanobeLibTitles,
+  scanIdleRanobeLibTitles,
+} from './ranobelib-fast-scanner.js';
 import {
   DELIVERY_BATCH_LIMIT,
   drainNotificationOutbox,
@@ -39,6 +44,7 @@ type QueueMessageLike = { body: unknown };
 type QueueBatchLike = { messages: QueueMessageLike[] };
 
 const FAST_SCAN_CRON = '* * * * *';
+const IDLE_SCAN_CRON = '17 */3 * * *';
 const DISCOVERY_CRON = '*/30 * * * *';
 const FALLBACK_DELIVERY_CRON = '*/5 * * * *';
 const MEMBERSHIP_CRON = '0 * * * *';
@@ -103,6 +109,13 @@ export default {
       const scan = await scanDueRanobeLibTitles(env, { limit: FAST_SCAN_LIMIT });
       if (scan.newReleases > 0) await queueNotificationWakeup(env);
       console.log('RanobeLib fast scan complete', { cron: controller.cron, ...scan });
+      return;
+    }
+
+    if (controller.cron === IDLE_SCAN_CRON) {
+      const idleScan = await scanIdleRanobeLibTitles(env, { limit: IDLE_SCAN_LIMIT });
+      if (idleScan.newReleases > 0) await queueNotificationWakeup(env);
+      console.log('RanobeLib idle scan complete', { cron: controller.cron, ...idleScan });
       return;
     }
 
