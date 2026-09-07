@@ -202,8 +202,8 @@ export async function shouldKickRanobeLibSync(_env: RanobeLibRuntimeEnv): Promis
 
 /**
  * Compatibility adapter for the existing authenticated admin button. It no longer runs the
- * legacy circular crawler: discovery and the bounded HOT scanner are the same modules used by
- * production scheduling.
+ * legacy circular crawler: discovery and the bounded HOT/IDLE scanners are the same modules
+ * used by production scheduling.
  */
 export function syncRanobeLib(
   env: RanobeLibRuntimeEnv,
@@ -223,16 +223,21 @@ async function runModernManualSync(env: RanobeLibRuntimeEnv): Promise<RanobeLibS
     import('./ranobelib-fast-scanner.js'),
   ]);
   const discovery = await discoveryModule.discoverRanobeLibTeam(env);
-  const scan = await scannerModule.scanDueRanobeLibTitles(env, { limit: scannerModule.FAST_SCAN_LIMIT });
+  const hotScan = await scannerModule.scanDueRanobeLibTitles(env, {
+    limit: scannerModule.FAST_SCAN_LIMIT,
+  });
+  const idleScan = await scannerModule.scanIdleRanobeLibTitles(env, {
+    limit: scannerModule.IDLE_SCAN_LIMIT,
+  });
   return {
     teamRef: teamRefFor(env),
     discovered: discovery.discovered,
-    processed: scan.selected,
-    succeeded: scan.succeeded,
-    failed: scan.failed,
-    newReleases: scan.newReleases,
+    processed: hotScan.selected + idleScan.selected,
+    succeeded: hotScan.succeeded + idleScan.succeeded,
+    failed: hotScan.failed + idleScan.failed,
+    newReleases: hotScan.newReleases + idleScan.newReleases,
     nextCursor: 0,
-    errors: scan.errors,
+    errors: [...hotScan.errors, ...idleScan.errors],
   };
 }
 
