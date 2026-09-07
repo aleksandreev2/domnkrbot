@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 async function loadDelivery() {
@@ -80,4 +81,18 @@ test('claimed release rows aggregate by user and title and sum chapter counts', 
   assert.equal(book.firstNumber, '1');
   assert.equal(book.lastVolume, '1');
   assert.equal(book.lastNumber, '13');
+});
+
+test('delivery claim SQL limits ready user-title groups instead of individual outbox rows', () => {
+  const source = readFileSync(new URL('../src/telegram-notification-delivery.ts', import.meta.url), 'utf8');
+  assert.match(source, /WITH\s+ready_groups\s+AS\s*\(/i);
+  assert.match(source, /GROUP BY\s+o\.user_telegram_id\s*,\s*r\.book_ref/i);
+  assert.match(source, /SUM\s*\(\s*r\.chapter_count\s*\)/i);
+  assert.match(source, /telegram_title_delivery_settings/i);
+  assert.match(source, /datetime\s*\(\s*'now'\s*,\s*'-7 days'\s*\)/i);
+  assert.match(source, /LIMIT\s+\?/i);
+  assert.doesNotMatch(
+    source,
+    /WHERE\s+rowid\s+IN\s*\(\s*SELECT\s+rowid\s+FROM\s+ranobelib_notification_outbox[\s\S]{0,500}?LIMIT\s+\?/i,
+  );
 });
