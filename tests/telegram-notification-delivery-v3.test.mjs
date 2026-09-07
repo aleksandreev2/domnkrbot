@@ -41,7 +41,7 @@ class Statement {
       this.db.deliverySelects.push({ query: this.query, values: [...this.values] });
       if (/o\.claim_token\s*=\s*\?/i.test(this.query)) {
         const claimToken = String(this.values[0]);
-        return { results: this.db.rows.filter((row) => row.status === 'processing' && row.claim_token === claimToken) };
+        return { results: this.db.rows.filter((row) => row.claim_token === claimToken) };
       }
       const releaseId = this.values.length > 1 && typeof this.values[0] === 'string' ? this.values[0] : null;
       const limit = Number(this.values.at(-1)) || 20;
@@ -56,16 +56,16 @@ class Statement {
   }
   async run() {
     this.db.mutations.push({ query: this.query, values: [...this.values] });
-    if (/UPDATE ranobelib_notification_outbox SET status='processing'/i.test(this.query)) {
+    if (/UPDATE ranobelib_notification_outbox SET claim_token\s*=\s*\?/i.test(this.query)) {
       const claimToken = String(this.values[0]);
       const limit = Number(this.values.at(-1)) || 20;
       const releaseId = this.values.length >= 3 && typeof this.values[1] === 'string' ? String(this.values[1]) : null;
       const claimed = this.db.rows
         .filter((row) => !releaseId || row.release_id === releaseId)
         .filter((row) => row.status === 'pending' || row.status === 'retry')
+        .filter((row) => !row.claim_token)
         .slice(0, limit);
       for (const row of claimed) {
-        row.status = 'processing';
         row.claim_token = claimToken;
         row.claim_expires_at = '2026-09-07 08:10:00';
       }
@@ -82,13 +82,13 @@ class Statement {
     } else if (/UPDATE ranobelib_notification_outbox SET status='retry'/i.test(this.query)) {
       this.db.setStatus(this.values, 'retry');
     } else if (/DELETE FROM ranobelib_notification_outbox/i.test(this.query)) {
-      const releaseId = String(this.values.at(-3) ?? this.values.at(-2));
-      const userId = String(this.values.at(-2) ?? this.values.at(-1));
-      const claimToken = this.values.length >= 3 ? String(this.values.at(-1)) : null;
+      const releaseId = String(this.values.at(-3));
+      const userId = String(this.values.at(-2));
+      const claimToken = String(this.values.at(-1));
       this.db.rows = this.db.rows.filter((row) => !(
         row.release_id === releaseId
         && row.user_telegram_id === userId
-        && (!claimToken || row.claim_token === claimToken)
+        && row.claim_token === claimToken
       ));
     }
     return { meta: { changes: 1 } };
@@ -112,14 +112,13 @@ class DB {
     return results;
   }
   setStatus(values, status) {
-    const hasClaim = values.length >= 3;
-    const releaseId = String(values.at(hasClaim ? -3 : -2));
-    const userId = String(values.at(hasClaim ? -2 : -1));
-    const claimToken = hasClaim ? String(values.at(-1)) : null;
+    const releaseId = String(values.at(-3));
+    const userId = String(values.at(-2));
+    const claimToken = String(values.at(-1));
     const row = this.rows.find((item) =>
       item.release_id === releaseId
       && item.user_telegram_id === userId
-      && (!claimToken || item.claim_token === claimToken));
+      && item.claim_token === claimToken);
     if (row) {
       row.status = status;
       row.claim_token = null;
@@ -165,6 +164,7 @@ test('delivery uses one SQL eligibility query and no per-user subscription SELEC
   assert.match(query, /AS eligible/i);
   assert.equal(db.allQueries.some((sql) => /SELECT all_titles FROM telegram_subscription_settings WHERE user_telegram_id = \?/i.test(sql)), false);
   assert.equal(db.allQueries.some((sql) => /SELECT 1 AS subscribed FROM title_subscriptions WHERE user_telegram_id = \?/i.test(sql)), false);
+  assert.ok(db.mutations.some((m) => /SET claim_token\s*=\s*\?/i.test(m.query)));
   assert.ok(db.mutations.some((m) => /status='sent'/i.test(m.query)));
   assert.ok(db.mutations.some((m) => /DELETE FROM ranobelib_notification_outbox/i.test(m.query)));
 });
@@ -186,8 +186,11 @@ test('two concurrent drains atomically claim outbox rows so Telegram is called o
 
   assert.deepEqual([...sentTo].sort(), ['100', '200']);
   assert.equal(results[0].claimed + results[1].claimed, 2);
-  assert.ok(db.mutations.some((m) => /status='processing'/i.test(m.query)), 'delivery must claim before sending');
-  assert.ok(db.mutations.some((m) => /claim_token/i.test(m.query)), 'claim must be owned by a unique token');
+  const claim = db.mutations.find((m) => /SET claim_token\s*=\s*\?/i.test(m.query));
+  assert.ok(claim, 'delivery must atomically claim before sending');
+  assert.match(claim.query, /claim_expires_at/i);
+  assert.match(claim.query, /RETURNING release_id, user_telegram_id/i);
+  assert.ok(db.mutations.some((m) => /AND claim_token = \?/i.test(m.query)), 'final mutation must require claim ownership');
 });
 
 test('a full twenty-recipient batch sends concurrently but never exceeds five active Telegram requests', async () => {
