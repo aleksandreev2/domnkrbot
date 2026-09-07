@@ -2,6 +2,10 @@ export type DeliverySetting =
   | { mode: 'instant'; stackSize: null }
   | { mode: 'stack'; stackSize: number };
 
+export type NotificationCustomInputState =
+  | { scope: 'global'; bookRef: null }
+  | { scope: 'title'; bookRef: string };
+
 type D1FirstResult<T> = Promise<T | null>;
 type D1PreparedStatement = {
   bind(...values: unknown[]): D1PreparedStatement;
@@ -16,6 +20,11 @@ export type TelegramNotificationSettingsEnv = { DB: D1Database };
 type DeliverySettingRow = {
   delivery_mode?: unknown;
   stack_size?: unknown;
+};
+
+type CustomInputRow = {
+  scope?: unknown;
+  book_ref?: unknown;
 };
 
 export function normalizeDeliverySetting(mode: unknown, stackSize: unknown): DeliverySetting {
@@ -106,6 +115,58 @@ export async function clearTitleDeliverySetting(
     DELETE FROM telegram_title_delivery_settings
     WHERE user_telegram_id = ? AND book_ref = ?
   `).bind(userId, bookRef).run();
+}
+
+export async function beginNotificationCustomInput(
+  env: TelegramNotificationSettingsEnv,
+  userId: string,
+  state: { scope: 'global' } | { scope: 'title'; bookRef: string },
+): Promise<void> {
+  const scope = state.scope;
+  const bookRef = scope === 'title' ? state.bookRef.trim() : null;
+  if (scope === 'title' && !bookRef) throw new Error('Title custom input requires bookRef');
+  await env.DB.prepare(`
+    INSERT INTO telegram_notification_input_state (
+      user_telegram_id, scope, book_ref, expires_at, created_at
+    ) VALUES (?, ?, ?, datetime('now','+10 minutes'), CURRENT_TIMESTAMP)
+    ON CONFLICT(user_telegram_id) DO UPDATE SET
+      scope = excluded.scope,
+      book_ref = excluded.book_ref,
+      expires_at = excluded.expires_at,
+      created_at = CURRENT_TIMESTAMP
+  `).bind(userId, scope, bookRef).run();
+}
+
+export async function getNotificationCustomInput(
+  env: TelegramNotificationSettingsEnv,
+  userId: string,
+): Promise<NotificationCustomInputState | null> {
+  await env.DB.prepare(`
+    DELETE FROM telegram_notification_input_state
+    WHERE user_telegram_id = ? AND expires_at <= CURRENT_TIMESTAMP
+  `).bind(userId).run();
+
+  const row = await env.DB.prepare(`
+    SELECT scope, book_ref
+    FROM telegram_notification_input_state
+    WHERE user_telegram_id = ? AND expires_at > CURRENT_TIMESTAMP
+  `).bind(userId).first<CustomInputRow>();
+  if (!row) return null;
+  if (row.scope === 'global') return { scope: 'global', bookRef: null };
+  if (row.scope === 'title' && typeof row.book_ref === 'string' && row.book_ref.trim()) {
+    return { scope: 'title', bookRef: row.book_ref.trim() };
+  }
+  return null;
+}
+
+export async function clearNotificationCustomInput(
+  env: TelegramNotificationSettingsEnv,
+  userId: string,
+): Promise<void> {
+  await env.DB.prepare(`
+    DELETE FROM telegram_notification_input_state
+    WHERE user_telegram_id = ?
+  `).bind(userId).run();
 }
 
 export async function ensureTelegramNotificationSettingsSchema(
