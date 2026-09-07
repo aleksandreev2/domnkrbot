@@ -22,7 +22,6 @@ import {
   type PublicationReleaseAnalyticsEnv,
 } from './publication-release-analytics.js';
 import { handlePublishingAnalyticsV2, type PublishingAnalyticsV2Env } from './publishing-analytics-v2.js';
-import { reactivateTelegramUserFromWebhookRequest } from './notification-demand.js';
 import { discoverRanobeLibTeam } from './ranobelib-discovery-scheduler.js';
 import {
   FAST_SCAN_LIMIT,
@@ -60,7 +59,6 @@ type Env = PublicationCommentGateEnv
   & NotificationDeliveryEnv
   & {
     RANOBELIB_TEAM_REF?: string;
-    TELEGRAM_WEBHOOK_SECRET?: string;
     NOTIFICATION_QUEUE?: QueueProducerLike;
   };
 
@@ -85,13 +83,6 @@ function parseWakeup(body: unknown): NotificationWakeup | null {
 
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
-    // Reactivate a blocked notification recipient before any specialized Telegram webhook
-    // owner can return early. This covers /start, download deep-links, proposals and all
-    // subscription callbacks without making normal interactions recalculate demand.
-    await reactivateTelegramUserFromWebhookRequest(request, env).catch((error) => {
-      console.error('Telegram reachability reactivation failed', error);
-    });
-
     const readerDelivery = await handlePublicationReaderDeliveryWebhook(request, env, ctx);
     if (readerDelivery) return readerDelivery;
 
