@@ -70,7 +70,7 @@ A title override is independent from subscription membership. Disabling/excludin
 
 ### 1. Global settings
 
-Extend `telegram_subscription_settings`:
+Retain the existing `telegram_subscription_settings.delivery_mode` column and add `stack_size`:
 
 ```sql
 delivery_mode TEXT NOT NULL DEFAULT 'instant'
@@ -186,9 +186,11 @@ For each still-subscribed, reachable group:
 
 ### Instant
 
-Ready whenever there is at least one due pending member.
+Ready whenever there is at least one due pending member. Instant mode introduces **no intentional batching delay** and never waits for a chapter threshold.
 
-All currently accumulated due members of that title are combined into one message. This also implements the approved `stack -> instant` flush behavior.
+A normal single pending release keeps the existing behavior. If several release rows for the same title happen to be simultaneously pending when the worker drains them, they may be coalesced into one immediate notification. This coalescing is opportunistic and must not postpone delivery in order to collect more chapters.
+
+This same grouped path implements the approved `stack -> instant` flush behavior: all already accumulated pending members become ready immediately and are sent together.
 
 ### Stack
 
@@ -427,7 +429,9 @@ If a title becomes ineligible while rows are pending, existing cleanup behavior 
 
 ## Compatibility
 
-- Existing users default to `instant` and should observe no behavior change until they choose a stack mode.
+- Existing users default to `instant` and retain no-delay delivery semantics.
+- A normal single pending instant release is formatted and linked exactly as today.
+- If multiple instant releases for the same title are already pending at one drain, the grouped worker may coalesce them immediately rather than send avoidable back-to-back messages; it must never wait intentionally to create such a group.
 - Existing pending outbox rows are interpreted using the effective setting at delivery time.
 - No data migration is needed for existing chapter releases/outbox rows beyond the settings schema additions.
 - Queue messages remain wake-up signals only; they do not carry stack contents.
@@ -445,36 +449,37 @@ If a title becomes ineligible while rows are pending, existing cleanup behavior 
 
 At minimum cover:
 
-1. Existing user/default `instant` behavior remains unchanged.
+1. Existing user/default `instant` keeps no-delay behavior and normal single-release output.
 2. Instant single chapter produces one notification.
-3. Stack 5: `2 + 3` becomes one five-chapter notification.
-4. Stack 10: `8 + 5` sends one 13-chapter notification with no leftover members.
-5. One release containing more than the threshold sends the entire release.
-6. Partial stack flushes after 7 days.
-7. Seven-day age is anchored to the first pending member and is not reset by newer releases.
-8. Global mode applies when no title override exists.
-9. Title override wins over global mode.
-10. Global-mode changes preserve title overrides.
-11. Removing an override restores inheritance.
-12. `10 -> instant` with 7 pending makes all 7 ready.
-13. `10 -> 5` with 7 pending makes all 7 ready.
-14. `5 -> 10` with 3 pending does not flush.
-15. Removing a `20` override when global is `5` and 8 are pending flushes all 8.
-16. Custom stack accepts boundary values 2 and 100.
-17. Custom stack rejects 1, 101, decimals, empty input, and non-numeric input.
-18. Expired custom-input state is ignored as a settings reply.
-19. A future-dated retry member blocks newer members from jumping ahead.
-20. When retry becomes due, old + newly accumulated members are sent together.
-21. Concurrent workers cannot send the same group twice.
-22. A group larger than the worker's old row batch limit is not split.
-23. Group success marks every claimed member sent.
-24. Group 403 marks every claimed member disabled.
-25. Group retry reschedules every claimed member consistently.
-26. Exactly one aggregated chapter uses direct chapter URL.
-27. Two or more aggregated chapters use title URL.
-28. Missing direct-link metadata falls back safely to title URL.
-29. Unsubscribed/excluded pending groups are not sent.
-30. 7-day-expired groups are discovered by cron even without a new Queue wake-up.
+3. Multiple already-due instant releases for the same title may coalesce without intentional waiting.
+4. Stack 5: `2 + 3` becomes one five-chapter notification.
+5. Stack 10: `8 + 5` sends one 13-chapter notification with no leftover members.
+6. One release containing more than the threshold sends the entire release.
+7. Partial stack flushes after 7 days.
+8. Seven-day age is anchored to the first pending member and is not reset by newer releases.
+9. Global mode applies when no title override exists.
+10. Title override wins over global mode.
+11. Global-mode changes preserve title overrides.
+12. Removing an override restores inheritance.
+13. `10 -> instant` with 7 pending makes all 7 ready.
+14. `10 -> 5` with 7 pending makes all 7 ready.
+15. `5 -> 10` with 3 pending does not flush.
+16. Removing a `20` override when global is `5` and 8 are pending flushes all 8.
+17. Custom stack accepts boundary values 2 and 100.
+18. Custom stack rejects 1, 101, decimals, empty input, and non-numeric input.
+19. Expired custom-input state is ignored as a settings reply.
+20. A future-dated retry member blocks newer members from jumping ahead.
+21. When retry becomes due, old + newly accumulated members are sent together.
+22. Concurrent workers cannot send the same group twice.
+23. A group larger than the worker's old row batch limit is not split.
+24. Group success marks every claimed member sent.
+25. Group 403 marks every claimed member disabled.
+26. Group retry reschedules every claimed member consistently.
+27. Exactly one aggregated chapter uses direct chapter URL.
+28. Two or more aggregated chapters use title URL.
+29. Missing direct-link metadata falls back safely to title URL.
+30. Unsubscribed/excluded pending groups are not sent.
+31. 7-day-expired groups are discovered by cron even without a new Queue wake-up.
 
 ## Likely implementation surface
 
@@ -501,4 +506,4 @@ This feature does not:
 
 ## Acceptance criteria
 
-The feature is complete when a user can set a global delivery mode, override any individual title, choose 5/10/20/custom 2–100, and reliably receive one grouped notification when the threshold or 7-day timeout is reached, with immediate re-evaluation on mode changes, no lost chapters, no duplicate sends under concurrent workers, and unchanged instant behavior for existing users.
+The feature is complete when a user can set a global delivery mode, override any individual title, choose 5/10/20/custom 2–100, and reliably receive one grouped notification when the threshold or 7-day timeout is reached, with immediate re-evaluation on mode changes, no lost chapters, no duplicate sends under concurrent workers, and no intentional delay for `instant` users.
