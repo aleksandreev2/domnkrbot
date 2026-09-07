@@ -1,6 +1,7 @@
 import {
   recordTelegramDeliveryReachability,
   refreshAllNotificationDemand,
+  type TelegramDeliveryReachabilityOutcome,
 } from './notification-demand.js';
 import type { D1DatabaseLike, D1PreparedStatementLike } from './ranobelib-runtime.js';
 import { formatReleaseNotification } from './telegram-subscriptions.js';
@@ -109,15 +110,14 @@ export async function drainNotificationOutbox(
   // Persist all Telegram reachability observations in one bounded D1 write. A 403 is the
   // only delivery outcome that changes effective demand; successful sends merely refresh
   // the known-active timestamp. Retryable failures intentionally leave reachability alone.
-  const reachability = outcomes.flatMap((outcome) => {
+  const reachability: TelegramDeliveryReachabilityOutcome[] = [];
+  for (const outcome of outcomes) {
     if (outcome.kind === 'sent') {
-      return [{ userTelegramId: outcome.row.user_telegram_id, state: 'active' as const }];
+      reachability.push({ userTelegramId: outcome.row.user_telegram_id, state: 'active' });
+    } else if (outcome.kind === 'disabled') {
+      reachability.push({ userTelegramId: outcome.row.user_telegram_id, state: 'blocked' });
     }
-    if (outcome.kind === 'disabled') {
-      return [{ userTelegramId: outcome.row.user_telegram_id, state: 'blocked' as const }];
-    }
-    return [];
-  });
+  }
   if (reachability.length) await recordTelegramDeliveryReachability(env, reachability);
 
   const reachabilityChanged = outcomes.some((outcome) => outcome.kind === 'disabled');
