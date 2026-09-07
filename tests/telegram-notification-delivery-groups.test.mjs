@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 async function loadDelivery() {
-  return import('../dist-runtime/telegram-notification-delivery.js');
+  return import('../dist-runtime/telegram-notification-delivery-groups.js');
 }
 
 const NOW = Date.parse('2026-09-08T12:00:00Z');
