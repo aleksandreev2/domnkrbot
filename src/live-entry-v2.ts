@@ -29,6 +29,7 @@ import {
   scanDueRanobeLibTitles,
   scanIdleRanobeLibTitles,
 } from './ranobelib-fast-scanner.js';
+import { getRanobeLibHome } from './ranobelib-runtime.js';
 import {
   DELIVERY_BATCH_LIMIT,
   drainNotificationOutbox,
@@ -81,8 +82,26 @@ function parseWakeup(body: unknown): NotificationWakeup | null {
   return { kind: 'drain' };
 }
 
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Catalog reads must never start upstream crawling. HOT/IDLE scheduled jobs are the sole
+    // automatic chapter-polling owners; this route only exposes the latest D1 snapshot.
+    if (request.method === 'GET' && url.pathname === '/api/ranobelib') {
+      return json(await getRanobeLibHome(env));
+    }
+
     const readerDelivery = await handlePublicationReaderDeliveryWebhook(request, env, ctx);
     if (readerDelivery) return readerDelivery;
 

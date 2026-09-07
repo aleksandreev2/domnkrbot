@@ -13,8 +13,7 @@
   "vars": {
     "BOT_USERNAME": "domnekromanta_bot",
     "PUBLISH_CHANNEL_ID": "@domnekromanta",
-    "RANOBELIB_TEAM_REF": "11969--dom-nekromanta",
-    "RANOBELIB_SYNC_BATCH_SIZE": "40"
+    "RANOBELIB_TEAM_REF": "11969--dom-nekromanta"
   },
   "secrets": {
     "required": [

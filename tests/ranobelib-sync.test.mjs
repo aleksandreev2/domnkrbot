@@ -185,13 +185,22 @@ test('default fetch is invoked as a plain function for Cloudflare Workers compat
   }
 });
 
-test('production sync checks the whole current team while staying below the 50 external-subrequest ceiling', () => {
+test('production scanner uses the Paid bounded batch and concurrency instead of the obsolete Free sync setting', () => {
   const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
-  assert.equal(wrangler.vars.RANOBELIB_SYNC_BATCH_SIZE, '40');
+  const scanner = readFileSync(new URL('../src/ranobelib-fast-scanner.ts', import.meta.url), 'utf8');
+
+  assert.equal(wrangler.vars.RANOBELIB_SYNC_BATCH_SIZE, undefined);
+  assert.match(scanner, /export const FAST_SCAN_LIMIT = 24/);
+  assert.match(scanner, /export const FAST_SCAN_CONCURRENCY = 4/);
 });
 
-test('runtime spends only one RanobeLib HTTP request per processed title', () => {
-  const runtime = readFileSync(new URL('../src/ranobelib-runtime.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(runtime, /client\.getTitle\(/);
-  assert.match(runtime, /client\.getChapters\(book\.ref\)/);
+test('fast scanner spends one RanobeLib chapter request per selected title and never fetches title details', () => {
+  const scanner = readFileSync(new URL('../src/ranobelib-fast-scanner.ts', import.meta.url), 'utf8');
+  const scanBookStart = scanner.indexOf('async function scanOneBook');
+  const scanBookEnd = scanner.indexOf('\nasync function ', scanBookStart + 1);
+  const scanBook = scanner.slice(scanBookStart, scanBookEnd > scanBookStart ? scanBookEnd : undefined);
+
+  const chapterCalls = scanBook.match(/getChapters\(book\.ref/g) || [];
+  assert.equal(chapterCalls.length, 1);
+  assert.doesNotMatch(scanBook, /getBookDetails|getTitle\(/);
 });
