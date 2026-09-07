@@ -196,9 +196,6 @@ export async function drainNotificationOutbox(
   const mutations = outcomes.map((outcome) => outcomeMutation(env, outcome, claimToken));
   await executeStatements(env.DB, mutations);
 
-  // Persist all Telegram reachability observations in one bounded D1 write. A 403 is the
-  // only delivery outcome that changes effective demand; successful sends merely refresh
-  // the known-active timestamp. Retryable failures intentionally leave reachability alone.
   const reachability: TelegramDeliveryReachabilityOutcome[] = [];
   for (const outcome of outcomes) {
     if (outcome.kind === 'sent') {
@@ -244,19 +241,88 @@ async function claimDeliveryRows(
   claimToken: string,
 ): Promise<ClaimedKey[]> {
   const statement = env.DB.prepare(`
+    WITH ready_groups AS (
+      SELECT grouped.user_telegram_id, grouped.book_ref
+      FROM (
+        SELECT
+          o.user_telegram_id,
+          r.book_ref,
+          SUM(r.chapter_count) AS pending_chapters,
+          MIN(o.created_at) AS oldest_pending_at,
+          MAX(CASE
+            WHEN o.status = 'retry' AND o.available_at > CURRENT_TIMESTAMP THEN 1
+            ELSE 0
+          END) AS retry_blocked,
+          MAX(CASE
+            WHEN o.claim_token IS NOT NULL
+             AND o.claim_expires_at IS NOT NULL
+             AND o.claim_expires_at > CURRENT_TIMESTAMP THEN 1
+            ELSE 0
+          END) AS lease_blocked,
+          MAX(CASE WHEN (
+            (
+              (COALESCE(s.all_titles, 0) = 1 AND NOT EXISTS (
+                SELECT 1
+                FROM title_subscription_exclusions e
+                WHERE e.user_telegram_id = o.user_telegram_id
+                  AND e.book_ref = r.book_ref
+              ))
+              OR
+              (COALESCE(s.all_titles, 0) <> 1 AND EXISTS (
+                SELECT 1
+                FROM title_subscriptions ts
+                WHERE ts.user_telegram_id = o.user_telegram_id
+                  AND ts.book_ref = r.book_ref
+              ))
+            )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM telegram_delivery_reachability reach
+              WHERE reach.user_telegram_id = o.user_telegram_id
+                AND reach.state = 'blocked'
+            )
+          ) THEN 1 ELSE 0 END) AS eligible,
+          COALESCE(MAX(td.delivery_mode), MAX(s.delivery_mode), 'instant') AS delivery_mode,
+          COALESCE(MAX(td.stack_size), MAX(s.stack_size)) AS stack_size
+        FROM ranobelib_notification_outbox o
+        JOIN ranobelib_releases r ON r.id = o.release_id
+        LEFT JOIN telegram_subscription_settings s
+          ON s.user_telegram_id = o.user_telegram_id
+        LEFT JOIN telegram_title_delivery_settings td
+          ON td.user_telegram_id = o.user_telegram_id
+         AND td.book_ref = r.book_ref
+        WHERE o.status IN ('pending','retry')
+        GROUP BY o.user_telegram_id, r.book_ref
+      ) grouped
+      WHERE grouped.lease_blocked = 0
+        AND grouped.retry_blocked = 0
+        AND (
+          grouped.eligible = 0
+          OR grouped.delivery_mode <> 'stack'
+          OR grouped.stack_size IS NULL
+          OR grouped.stack_size < 2
+          OR grouped.stack_size > 100
+          OR grouped.pending_chapters >= grouped.stack_size
+          OR grouped.oldest_pending_at <= datetime('now','-7 days')
+        )
+      ORDER BY grouped.oldest_pending_at ASC
+      LIMIT ?2
+    )
     UPDATE ranobelib_notification_outbox
-    SET claim_token = ?,
+    SET claim_token = ?1,
         claim_expires_at = datetime('now', '+' || ${CLAIM_LEASE_MINUTES} || ' minutes'),
         updated_at = CURRENT_TIMESTAMP
-    WHERE rowid IN (
-      SELECT rowid
-      FROM ranobelib_notification_outbox
-      WHERE status IN ('pending','retry')
-        AND available_at <= CURRENT_TIMESTAMP
-        AND (claim_token IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= CURRENT_TIMESTAMP)
-      ORDER BY created_at ASC
-      LIMIT ?
-    )
+    WHERE status IN ('pending','retry')
+      AND available_at <= CURRENT_TIMESTAMP
+      AND (claim_token IS NULL OR claim_expires_at IS NULL OR claim_expires_at <= CURRENT_TIMESTAMP)
+      AND EXISTS (
+        SELECT 1
+        FROM ranobelib_releases claimed_release
+        JOIN ready_groups selected
+          ON selected.book_ref = claimed_release.book_ref
+         AND selected.user_telegram_id = ranobelib_notification_outbox.user_telegram_id
+        WHERE claimed_release.id = ranobelib_notification_outbox.release_id
+      )
     RETURNING release_id, user_telegram_id
   `);
   return resultRows<ClaimedKey>(await statement.bind(claimToken, limit).run());
@@ -483,8 +549,8 @@ async function telegramCall<T>(
   const body = await response.json().catch(() => null) as (TelegramErrorBody & { result?: T }) | null;
   if (!response.ok || !body?.ok) {
     const message = body?.description || `Telegram ${method} failed with HTTP ${response.status}`;
-    const errorCode = Number.isFinite(body?.error_code) ? Number(body?.error_code) : null;
-    const retryAfter = Number.isFinite(body?.parameters?.retry_after) ? Number(body?.parameters?.retry_after) : null;
+    const errorCode = Number.isFinite(body?.error_code) ? Number(body.error_code) : null;
+    const retryAfter = Number.isFinite(body?.parameters?.retry_after) ? Number(body.parameters?.retry_after) : null;
     throw new TelegramApiError(message, response.status, errorCode, retryAfter);
   }
   return body.result as T;
