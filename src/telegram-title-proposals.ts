@@ -62,6 +62,34 @@ type ProposalSession = {
   updated_at: string;
 };
 
+type RanobeLibTeam = {
+  id?: number;
+  name?: string;
+  slug?: string;
+  slug_url?: string;
+};
+
+type RanobeLibCandidate = {
+  id?: number;
+  name?: string;
+  rus_name?: string;
+  eng_name?: string;
+  slug?: string;
+  slug_url?: string;
+  status?: { id?: number; label?: string };
+  scanlateStatus?: { id?: number; label?: string };
+  items_count?: { uploaded?: number; total?: number };
+  teams?: RanobeLibTeam[];
+};
+
+type RanobeLibChapter = {
+  id?: number;
+  volume?: string | number;
+  number?: string | number;
+  name?: string;
+  index?: number;
+};
+
 export interface TelegramTitleProposalEnv {
   DB: D1Database;
   TELEGRAM_BOT_TOKEN?: string;
@@ -76,6 +104,8 @@ const MAX_TELEGRAM_RAW_BYTES = 20 * 1024 * 1024;
 const ALLOWED_RAW_EXTENSIONS = new Set([
   'zip', 'rar', '7z', 'tar', 'gz', 'tgz', 'txt', 'md', 'rtf', 'pdf', 'epub', 'doc', 'docx',
 ]);
+const RANOBELIB_API_BASE = 'https://api.cdnlibs.org/api';
+const RANOBELIB_SITE_ID = '3';
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
@@ -98,6 +128,148 @@ function escapeHtml(value: unknown): string {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[char] ?? char));
+}
+
+function parseRanobeLibBookRef(value: string): string | null {
+  const trimmed = value.trim();
+  if (/^\d+--[a-z0-9][a-z0-9-]*$/i.test(trimmed)) return trimmed;
+  if (!/^https?:\/\//i.test(trimmed)) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.hostname !== 'ranobelib.me' && !url.hostname.endsWith('.ranobelib.me')) return null;
+    const match = url.pathname.match(/\/(?:ru\/)?(?:book|manga)\/(\d+--[a-z0-9][a-z0-9-]*)/i);
+    return match?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function ranobeLibBookUrl(ref: string): string {
+  return `https://ranobelib.me/ru/book/${ref}`;
+}
+
+function ranobeLibCandidateRef(candidate: RanobeLibCandidate): string | null {
+  const slugUrl = candidate.slug_url?.trim() ?? '';
+  if (/^\d+--[a-z0-9][a-z0-9-]*$/i.test(slugUrl)) return slugUrl;
+  const slug = candidate.slug?.trim() ?? '';
+  if (Number.isSafeInteger(candidate.id) && candidate.id && slug) return `${candidate.id}--${slug}`;
+  return null;
+}
+
+function ranobeLibDisplayTitle(candidate: RanobeLibCandidate): string {
+  return candidate.rus_name?.trim()
+    || candidate.name?.trim()
+    || candidate.eng_name?.trim()
+    || ranobeLibCandidateRef(candidate)
+    || 'Без названия';
+}
+
+function ranobeLibOriginalTitle(candidate: RanobeLibCandidate): string {
+  return candidate.name?.trim()
+    || candidate.eng_name?.trim()
+    || candidate.rus_name?.trim()
+    || ranobeLibDisplayTitle(candidate);
+}
+
+async function fetchRanobeLib(url: URL): Promise<unknown> {
+  const response = await fetch(url.toString(), {
+    headers: {
+      accept: 'application/json',
+      'site-id': RANOBELIB_SITE_ID,
+    },
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(`RanobeLib API HTTP ${response.status}`);
+  return body;
+}
+
+async function searchRanobeLib(query: string): Promise<RanobeLibCandidate[]> {
+  const url = new URL(`${RANOBELIB_API_BASE}/manga`);
+  url.searchParams.append('site_id[]', RANOBELIB_SITE_ID);
+  url.searchParams.set('q', query);
+  url.searchParams.set('limit', '10');
+  const body = await fetchRanobeLib(url) as { data?: unknown } | null;
+  return Array.isArray(body?.data) ? body.data.slice(0, 10) as RanobeLibCandidate[] : [];
+}
+
+async function fetchRanobeLibTitle(ref: string): Promise<RanobeLibCandidate> {
+  const url = new URL(`${RANOBELIB_API_BASE}/manga/${encodeURIComponent(ref)}`);
+  url.searchParams.append('site_id[]', RANOBELIB_SITE_ID);
+  const body = await fetchRanobeLib(url) as { data?: unknown } | null;
+  if (!body?.data || typeof body.data !== 'object' || Array.isArray(body.data)) {
+    throw new Error('RanobeLib title payload is missing');
+  }
+  return body.data as RanobeLibCandidate;
+}
+
+async function fetchRanobeLibChapters(ref: string): Promise<RanobeLibChapter[]> {
+  const url = new URL(`${RANOBELIB_API_BASE}/manga/${encodeURIComponent(ref)}/chapters`);
+  url.searchParams.append('site_id[]', RANOBELIB_SITE_ID);
+  const body = await fetchRanobeLib(url) as { data?: unknown } | null;
+  return Array.isArray(body?.data) ? body.data as RanobeLibChapter[] : [];
+}
+
+function latestRanobeLibChapter(chapters: RanobeLibChapter[]): RanobeLibChapter | null {
+  if (!chapters.length) return null;
+  return chapters.reduce((latest, current) => {
+    const latestIndex = typeof latest.index === 'number' ? latest.index : Number(latest.number) || 0;
+    const currentIndex = typeof current.index === 'number' ? current.index : Number(current.number) || 0;
+    return currentIndex >= latestIndex ? current : latest;
+  });
+}
+
+function buildRanobeLibCandidates(candidates: RanobeLibCandidate[]): Record<string, unknown> {
+  return {
+    text: '<b>Нашла несколько вариантов</b>\n\nВыбери тайтл:',
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        ...candidates.map((candidate, index) => [{
+          text: ranobeLibDisplayTitle(candidate).slice(0, 60),
+          callback_data: `prop:pick:${index}`,
+        }]),
+        [{ text: '❌ Отмена', callback_data: 'prop:cancel' }],
+      ],
+    },
+  };
+}
+
+function buildRanobeLibConfirmation(
+  detail: RanobeLibCandidate,
+  ref: string,
+  chapters: RanobeLibChapter[],
+): Record<string, unknown> {
+  const title = ranobeLibDisplayTitle(detail);
+  const teamNames = (detail.teams ?? []).map((team) => team.name?.trim()).filter(Boolean) as string[];
+  const translationStatus = detail.scanlateStatus?.label?.trim() || detail.status?.label?.trim() || 'неизвестно';
+  const uploaded = detail.items_count?.uploaded ?? chapters.length;
+  const latest = latestRanobeLibChapter(chapters);
+  const latestNumber = latest?.number != null ? String(latest.number) : '—';
+  const latestName = latest?.name?.trim();
+  const lines = [
+    `<b>${escapeHtml(title)}</b>`,
+    '',
+    `RanobeLib: ${escapeHtml(ranobeLibBookUrl(ref))}`,
+    `Статус перевода: ${escapeHtml(translationStatus)}`,
+    `Команда: ${escapeHtml(teamNames.length ? teamNames.join(', ') : 'не указана')}`,
+    `Глав загружено: ${escapeHtml(uploaded)}`,
+    `Последняя глава: Глава ${escapeHtml(latestNumber)}${latestName ? ` — ${escapeHtml(latestName)}` : ''}`,
+    '⚪ Иммунитет: не удалось определить автоматически',
+    '',
+    'Это нужный тайтл?',
+  ];
+  return {
+    text: lines.join('\n'),
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '✅ Да, продолжить', callback_data: 'prop:confirm' }],
+        [{ text: '↩️ Искать заново', callback_data: 'prop:source:ranobelib' }],
+        [{ text: '❌ Отмена', callback_data: 'prop:cancel' }],
+      ],
+    },
+  };
 }
 
 async function telegramCall(
@@ -197,10 +369,50 @@ async function advanceSourceChoice(
   const step = sourceKind === 'ranobelib' ? 'ranobelib_query' : 'external_title';
   await env.DB.prepare(`
     UPDATE telegram_proposal_sessions
-    SET step=?,source_kind=?,updated_at=CURRENT_TIMESTAMP
+    SET step=?,source_kind=?,candidates_json='[]',updated_at=CURRENT_TIMESTAMP
     WHERE user_telegram_id=?
   `).bind(step, sourceKind, String(userId)).run();
   return step;
+}
+
+async function setRanobeLibCandidates(
+  env: TelegramTitleProposalEnv,
+  userId: number,
+  candidates: RanobeLibCandidate[],
+): Promise<void> {
+  await env.DB.prepare(`
+    UPDATE telegram_proposal_sessions
+    SET candidates_json=?,updated_at=CURRENT_TIMESTAMP
+    WHERE user_telegram_id=?
+  `).bind(JSON.stringify(candidates), String(userId)).run();
+}
+
+async function setRanobeLibConfirmation(
+  env: TelegramTitleProposalEnv,
+  userId: number,
+  detail: RanobeLibCandidate,
+  ref: string,
+): Promise<void> {
+  await env.DB.prepare(`
+    UPDATE telegram_proposal_sessions
+    SET step=?,ranobelib_book_ref=?,title=?,original_title=?,source_url=?,candidates_json='[]',updated_at=CURRENT_TIMESTAMP
+    WHERE user_telegram_id=?
+  `).bind(
+    'ranobelib_confirm',
+    ref,
+    ranobeLibDisplayTitle(detail),
+    ranobeLibOriginalTitle(detail),
+    ranobeLibBookUrl(ref),
+    String(userId),
+  ).run();
+}
+
+async function confirmRanobeLib(env: TelegramTitleProposalEnv, userId: number): Promise<void> {
+  await env.DB.prepare(`
+    UPDATE telegram_proposal_sessions
+    SET step=?,updated_at=CURRENT_TIMESTAMP
+    WHERE user_telegram_id=?
+  `).bind('raw', String(userId)).run();
 }
 
 async function setExternalTitle(env: TelegramTitleProposalEnv, userId: number, title: string): Promise<void> {
@@ -372,6 +584,20 @@ async function answerCallback(env: TelegramTitleProposalEnv, callbackId: string,
   });
 }
 
+async function showRanobeLibConfirmation(
+  env: TelegramTitleProposalEnv,
+  userId: number,
+  ref: string,
+  deliver: (payload: Record<string, unknown>) => Promise<void>,
+): Promise<void> {
+  const [detail, chapters] = await Promise.all([
+    fetchRanobeLibTitle(ref),
+    fetchRanobeLibChapters(ref),
+  ]);
+  await setRanobeLibConfirmation(env, userId, detail, ref);
+  await deliver(buildRanobeLibConfirmation(detail, ref, chapters));
+}
+
 async function handleProposalCallback(
   env: TelegramTitleProposalEnv,
   callback: TelegramCallbackQuery,
@@ -401,6 +627,47 @@ async function handleProposalCallback(
           parse_mode: 'HTML',
           reply_markup: { inline_keyboard: [[{ text: '❌ Отмена', callback_data: 'prop:cancel' }]] },
         });
+    await answerCallback(env, callback.id);
+    return json({ ok: true });
+  }
+
+  if (data.startsWith('prop:pick:')) {
+    const session = await loadProposalSession(env, callback.from.id);
+    const index = Number(data.slice('prop:pick:'.length));
+    if (!session || session.step !== 'ranobelib_query' || !Number.isInteger(index) || index < 0) {
+      await answerCallback(env, callback.id, 'Поиск устарел. Начните заново.');
+      return json({ ok: true });
+    }
+    let candidates: RanobeLibCandidate[] = [];
+    try {
+      const parsed = JSON.parse(session.candidates_json);
+      if (Array.isArray(parsed)) candidates = parsed;
+    } catch {
+      candidates = [];
+    }
+    const candidate = candidates[index];
+    const ref = candidate ? ranobeLibCandidateRef(candidate) : null;
+    if (!ref) {
+      await answerCallback(env, callback.id, 'Этот вариант больше недоступен.');
+      return json({ ok: true });
+    }
+    try {
+      await showRanobeLibConfirmation(env, callback.from.id, ref, (payload) => editCallbackMessage(env, callback, payload));
+      await answerCallback(env, callback.id);
+    } catch {
+      await answerCallback(env, callback.id, 'RanobeLib сейчас не отвечает. Попробуйте ещё раз.');
+    }
+    return json({ ok: true });
+  }
+
+  if (data === 'prop:confirm') {
+    const session = await loadProposalSession(env, callback.from.id);
+    if (!session || session.step !== 'ranobelib_confirm' || !session.ranobelib_book_ref) {
+      await answerCallback(env, callback.id, 'Начните заявку заново.');
+      return json({ ok: true });
+    }
+    await confirmRanobeLib(env, callback.from.id);
+    await editCallbackMessage(env, callback, buildRawPrompt());
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -448,6 +715,48 @@ async function handleSessionMessage(
   const userId = message.from?.id;
   if (!userId) return json({ ok: true });
   const text = (message.text ?? '').trim();
+
+  if (session.step === 'ranobelib_query') {
+    if (!text) {
+      await sendMessage(env, message.chat.id, {
+        text: 'Пришли ссылку на карточку RanobeLib или напиши название тайтла.',
+      });
+      return json({ ok: true });
+    }
+    const exactRef = parseRanobeLibBookRef(text);
+    if (exactRef) {
+      try {
+        await showRanobeLibConfirmation(env, userId, exactRef, (payload) => sendMessage(env, message.chat.id, payload));
+      } catch {
+        await sendMessage(env, message.chat.id, {
+          text: 'Не удалось получить карточку RanobeLib. Проверь ссылку и попробуй ещё раз.',
+        });
+      }
+      return json({ ok: true });
+    }
+    if (text.length < 2 || text.length > 180) {
+      await sendMessage(env, message.chat.id, {
+        text: 'Для поиска введи название от 2 до 180 символов или пришли ссылку RanobeLib.',
+      });
+      return json({ ok: true });
+    }
+    try {
+      const candidates = await searchRanobeLib(text);
+      if (!candidates.length) {
+        await sendMessage(env, message.chat.id, {
+          text: 'На RanobeLib ничего не найдено. Попробуй другое название или пришли прямую ссылку.',
+        });
+        return json({ ok: true });
+      }
+      await setRanobeLibCandidates(env, userId, candidates);
+      await sendMessage(env, message.chat.id, buildRanobeLibCandidates(candidates));
+    } catch {
+      await sendMessage(env, message.chat.id, {
+        text: 'RanobeLib сейчас не отвечает. Попробуй поиск ещё раз чуть позже.',
+      });
+    }
+    return json({ ok: true });
+  }
 
   if (session.step === 'external_title') {
     if (text.length < 2 || text.length > 180) {
