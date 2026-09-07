@@ -10,11 +10,7 @@ function catalogResponse(data) {
 }
 
 class Statement {
-  constructor(db, query) {
-    this.db = db;
-    this.query = query.replace(/\s+/g, ' ').trim();
-    this.values = [];
-  }
+  constructor(db, query) { this.db = db; this.query = query.replace(/\s+/g, ' ').trim(); this.values = []; }
   bind(...values) { this.values = values; return this; }
   async first() { return null; }
   async all() {
@@ -24,57 +20,53 @@ class Statement {
     return { results: [] };
   }
   async run() {
+    this.db.runs.push({ query: this.query, values: [...this.values] });
+    if (/INSERT INTO ranobelib_titles/i.test(this.query)) this.db.upserts.push({ query: this.query, values: [...this.values] });
     if (/UPDATE ranobelib_titles SET is_active = 0/i.test(this.query)) this.db.deactivateCalls += 1;
-    if (/INSERT INTO ranobelib_titles/i.test(this.query)) this.db.upserts.push([...this.values]);
     return { meta: { changes: 1 } };
   }
 }
 
 class DB {
-  constructor(activeRefs = []) {
-    this.activeRefs = activeRefs;
-    this.deactivateCalls = 0;
-    this.upserts = [];
-  }
+  constructor(activeRefs = []) { this.activeRefs = activeRefs; this.deactivateCalls = 0; this.upserts = []; this.runs = []; }
   prepare(query) { return new Statement(this, query); }
-  async batch(statements) {
-    for (const statement of statements) await statement.run();
-    return statements.map(() => ({ meta: { changes: 1 } }));
-  }
+  async batch(statements) { const results = []; for (const statement of statements) results.push(await statement.run()); return results; }
 }
 
 async function withFetch(handler, fn) {
   const original = globalThis.fetch;
   const requests = [];
-  globalThis.fetch = async (url, init) => {
-    requests.push(String(url));
-    return handler(String(url), init);
-  };
+  globalThis.fetch = async (url, init) => { requests.push(String(url)); return handler(String(url), init); };
   try { return await fn(requests); } finally { globalThis.fetch = original; }
 }
 
-test('team discovery refreshes only the team catalog and never fetches chapter lists', async () => {
+test('team discovery uses one bounded JSON upsert, makes new titles immediately scannable, and never fetches chapters', async () => {
   const { discoverRanobeLibTeam } = await import('../dist-runtime/ranobelib-discovery-scheduler.js');
   const db = new DB(['999--old-book']);
-  const title = {
-    id: 62387,
-    slug: 'pokemon-master-of-tactics',
-    slug_url: '62387--pokemon-master-of-tactics',
-    rus_name: 'Покемон: Мастер тактики',
-    cover: { default: 'https://cover.cdnlibs.org/uploads/cover/pokemon/default.jpg' },
-  };
+  const titles = Array.from({ length: 60 }, (_, index) => ({
+    id: 62387 + index,
+    slug: `book-${index}`,
+    slug_url: `${62387 + index}--book-${index}`,
+    rus_name: `Книга ${index}`,
+    cover: { default: `https://cover.cdnlibs.org/uploads/cover/book-${index}/default.jpg` },
+  }));
 
   await withFetch(
-    (url) => url === teamCatalogUrl ? catalogResponse([title]) : new Response('unexpected', { status: 500 }),
+    (url) => url === teamCatalogUrl ? catalogResponse(titles) : new Response('unexpected', { status: 500 }),
     async (requests) => {
       const result = await discoverRanobeLibTeam({ DB: db, RANOBELIB_TEAM_REF: '11969--dom-nekromanta' });
       assert.deepEqual(requests, [teamCatalogUrl]);
       assert.equal(requests.some((url) => url.includes('/chapters')), false);
-      assert.equal(result.discovered, 1);
+      assert.equal(result.discovered, 60);
+      assert.equal(result.activated, 60);
       assert.equal(result.deactivated, 1);
+      assert.equal(db.upserts.length, 1, '60 titles must not become 60 D1 queries');
+      assert.match(db.upserts[0].query, /json_each/i);
+      assert.match(db.upserts[0].query, /next_check_at/i);
+      assert.match(db.upserts[0].query, /CURRENT_TIMESTAMP/i);
+      assert.ok(db.upserts[0].values.some((value) => typeof value === 'string' && value.includes('62387--book-0')));
       assert.equal(db.deactivateCalls, 1);
-      assert.equal(db.upserts.length, 1);
-      assert.ok(db.upserts[0].includes('62387--pokemon-master-of-tactics'));
+      assert.ok(db.runs.length <= 2, `discovery write budget exploded: ${db.runs.length}`);
     },
   );
 });
@@ -82,7 +74,6 @@ test('team discovery refreshes only the team catalog and never fetches chapter l
 test('empty team discovery fails before existing active titles can be mass-deactivated', async () => {
   const { discoverRanobeLibTeam } = await import('../dist-runtime/ranobelib-discovery-scheduler.js');
   const db = new DB(['62387--pokemon-master-of-tactics']);
-
   await withFetch(
     (url) => url === teamCatalogUrl ? catalogResponse([]) : new Response('unexpected', { status: 500 }),
     async () => {
