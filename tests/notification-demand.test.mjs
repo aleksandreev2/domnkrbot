@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 async function loadDemand() {
@@ -93,4 +94,20 @@ test('reachability helpers persist blocked and active states without changing su
     assert.doesNotMatch(call.query, /DELETE\s+FROM\s+title_subscriptions/i);
     assert.doesNotMatch(call.query, /UPDATE\s+telegram_subscription_settings/i);
   }
+});
+
+test('migration 0015 is forward-only, adds demand/reachability state, and initializes effective demand', () => {
+  const sql = readFileSync(new URL('../migrations/0015_paid_backend_demand_aware.sql', import.meta.url), 'utf8');
+  assert.match(sql, /ADD COLUMN notification_subscriber_count INTEGER NOT NULL DEFAULT 0/i);
+  assert.match(sql, /ADD COLUMN subscriber_count_updated_at TEXT/i);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS telegram_delivery_reachability/i);
+  assert.match(sql, /CHECK\s*\(\s*state\s+IN\s*\(\s*'active'\s*,\s*'blocked'\s*\)\s*\)/i);
+  assert.match(sql, /title_subscription_exclusions/i);
+  assert.match(sql, /title_subscriptions/i);
+  assert.match(sql, /telegram_subscription_settings/i);
+  assert.match(sql, /telegram_delivery_reachability/i);
+  assert.match(sql, /UPDATE ranobelib_titles/i);
+  assert.match(sql, /subscriber_count_updated_at\s*=\s*CURRENT_TIMESTAMP/i);
+  assert.doesNotMatch(sql, /DROP\s+(TABLE|COLUMN|TRIGGER)/i);
+  assert.doesNotMatch(sql, /DELETE\s+FROM\s+(users|ranobelib_titles|title_subscriptions|telegram_subscription_settings)/i);
 });
