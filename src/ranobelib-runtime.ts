@@ -153,7 +153,6 @@ async function initializeSchema(env: RanobeLibRuntimeEnv): Promise<void> {
 }
 
 export async function getRanobeLibHome(env: RanobeLibRuntimeEnv): Promise<RanobeLibHomeData> {
-  await ensureRanobeLibSchema(env);
   const teamRef = teamRefFor(env);
   const [{ results: titleRows }, { results: releaseRows }, counts, syncState] = await Promise.all([
     env.DB.prepare(`
