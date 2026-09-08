@@ -260,3 +260,22 @@ test('README describes the v2 Telegram navigation and recoverable notification w
   assert.match(readme, /стак/i);
   assert.match(readme, /накоп/i);
 });
+
+test('active notification text input is routed before a resumable proposal draft', async () => {
+  const entry = await read('src/entry.ts');
+  const subscriptionWebhook = await read('src/telegram-subscription-webhook.ts');
+  const inputRoute = 'handleTelegramNotificationTextInputRequest(request, env)';
+  const proposalRoute = 'handleTelegramTitleProposalV2WebhookRequest(request, env)';
+
+  assert.ok(entry.includes(inputRoute), 'entry must expose the focused notification text-input pre-router');
+  assert.ok(
+    entry.indexOf(inputRoute) < entry.indexOf(proposalRoute),
+    'active notification text input must get priority over resumable proposal drafts',
+  );
+  assert.match(subscriptionWebhook, /export\s+async\s+function\s+handleTelegramNotificationTextInputRequest/);
+  assert.match(subscriptionWebhook, /request\.clone\(\)\.json\(\)/);
+  const helperStart = subscriptionWebhook.indexOf('export async function handleTelegramNotificationTextInputRequest');
+  const helperEnd = subscriptionWebhook.indexOf('export async function handleTelegramSubscriptionWebhookRequest');
+  const helper = subscriptionWebhook.slice(helperStart, helperEnd);
+  assert.ok(helper.indexOf('handleNotificationCustomInput') < helper.indexOf('handleNotificationSearchInput'));
+});
