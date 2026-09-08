@@ -70,11 +70,13 @@ test('Queue consumer drains generic D1 work and continues only when delivery rep
   assert.match(delivery, /hasMoreDue:\s*boolean/);
 });
 
-test('delivery has explicit pacing and an indexed more-work probe', () => {
+test('delivery has explicit pacing and a bounded ready-group more-work probe', () => {
   assert.match(delivery, /TELEGRAM_START_INTERVAL_MS\s*=\s*100/);
   assert.match(delivery, /computeTelegramStartDelayMs/);
   assert.match(delivery, /await\s+sleep\(/);
-  assert.match(delivery, /SELECT\s+1\s+AS\s+due[\s\S]*status\s+IN\s*\(\s*['"]pending['"],\s*['"]retry['"]\s*\)[\s\S]*LIMIT\s+1/i);
+  assert.match(delivery, /const\s+probeLimit\s*=\s*limit\s*\+\s*1/);
+  assert.match(delivery, /WITH\s+ready_groups\s+AS\s*\([\s\S]*GROUP BY\s+o\.user_telegram_id\s*,\s*r\.book_ref[\s\S]*LIMIT\s+\?/i);
+  assert.match(delivery, /hasMoreDue:\s*results\.length\s*>\s*limit/);
 });
 
 test('Queue absence still leaves the five-minute D1 fallback and existing fetch routing intact', () => {

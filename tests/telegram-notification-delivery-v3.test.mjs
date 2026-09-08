@@ -140,7 +140,7 @@ function telegramOk() {
   });
 }
 
-test('delivery uses one SQL eligibility query and no per-user subscription SELECTs', async () => {
+test('delivery uses grouped readiness plus claimed-row eligibility without per-user subscription SELECTs', async () => {
   const delivery = await loadDelivery();
   assert.equal(delivery.DELIVERY_BATCH_LIMIT, 20);
   assert.equal(delivery.TELEGRAM_SEND_CONCURRENCY, 5);
@@ -157,14 +157,19 @@ test('delivery uses one SQL eligibility query and no per-user subscription SELEC
   assert.equal(result.sent, 1);
   assert.equal(result.skipped, 1);
   assert.equal(sends, 1);
-  assert.equal(db.deliverySelects.length, 1);
-  const query = db.deliverySelects[0].query;
-  assert.match(query, /r\.first_volume/i);
-  assert.match(query, /EXISTS[\s\S]*telegram_subscription_settings/i);
-  assert.match(query, /title_subscription_exclusions/i);
-  assert.match(query, /title_subscriptions/i);
-  assert.match(query, /telegram_delivery_reachability/i);
-  assert.match(query, /AS eligible/i);
+  assert.equal(db.deliverySelects.length, 2);
+  const readinessQuery = db.deliverySelects.find((item) => /WITH ready_groups AS/i.test(item.query))?.query;
+  const claimedRowsQuery = db.deliverySelects.find((item) => /r\.first_volume/i.test(item.query))?.query;
+  assert.ok(readinessQuery, 'delivery must select bounded ready user-title groups first');
+  assert.ok(claimedRowsQuery, 'delivery must load claimed release metadata after group claim');
+  assert.match(readinessQuery, /SUM\s*\(\s*r\.chapter_count\s*\)/i);
+  assert.match(readinessQuery, /telegram_title_delivery_settings/i);
+  assert.match(readinessQuery, /title_subscription_exclusions/i);
+  assert.match(readinessQuery, /title_subscriptions/i);
+  assert.match(readinessQuery, /telegram_delivery_reachability/i);
+  assert.match(readinessQuery, /AS eligible/i);
+  assert.match(claimedRowsQuery, /r\.first_volume/i);
+  assert.match(claimedRowsQuery, /AS eligible/i);
   assert.equal(db.allQueries.some((sql) => /SELECT all_titles FROM telegram_subscription_settings WHERE user_telegram_id = \?/i.test(sql)), false);
   assert.equal(db.allQueries.some((sql) => /SELECT 1 AS subscribed FROM title_subscriptions WHERE user_telegram_id = \?/i.test(sql)), false);
   assert.ok(db.mutations.some((m) => /SET claim_token\s*=\s*\?/i.test(m.query)));
@@ -242,7 +247,7 @@ test('a full twenty-recipient batch sends concurrently, bounds D1 work, and writ
   assert.equal(result.retry, 0);
   assert.ok(maxActive > 1, `expected concurrent sends, saw maxActive=${maxActive}`);
   assert.ok(maxActive <= 5, `expected max five active sends, saw ${maxActive}`);
-  assert.ok(db.allQueries.length <= 23, `unexpected D1 query explosion: ${db.allQueries.length}`);
+  assert.ok(db.allQueries.length <= 24, `unexpected D1 query explosion: ${db.allQueries.length}`);
   const reachabilityMutations = db.mutations.filter((m) => /INSERT INTO telegram_delivery_reachability/i.test(m.query));
   assert.equal(reachabilityMutations.length, 1, 'twenty successful sends must share one reachability D1 write');
 });
