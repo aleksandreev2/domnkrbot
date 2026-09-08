@@ -288,14 +288,13 @@ async function wakeNotificationDelivery(env: TelegramNotificationModeEnv): Promi
 
 async function upsertTelegramUser(env: TelegramNotificationModeEnv, user: TelegramUser): Promise<void> {
   await env.DB.prepare(`
-    INSERT INTO users (telegram_id, username, first_name, last_name, language_code, last_seen_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    INSERT INTO users (telegram_id, username, first_name, last_name, language_code)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(telegram_id) DO UPDATE SET
       username = excluded.username,
       first_name = excluded.first_name,
       last_name = excluded.last_name,
       language_code = excluded.language_code,
-      last_seen_at = CURRENT_TIMESTAMP,
       updated_at = CURRENT_TIMESTAMP
   `).bind(
     String(user.id),
