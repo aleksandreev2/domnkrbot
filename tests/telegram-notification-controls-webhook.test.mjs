@@ -142,7 +142,11 @@ async function withTelegramCalls(fn) {
   try { return await fn(calls); } finally { globalThis.fetch = original; }
 }
 
-test('/notifications uses the interactive delivery-mode center', async () => {
+function callbacks(call) {
+  return call.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
+}
+
+test('/notifications opens the compact dashboard and defers presets to the mode screen', async () => {
   const db = new DB();
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(messageRequest('/notifications'), env(db));
@@ -150,9 +154,10 @@ test('/notifications uses the interactive delivery-mode center', async () => {
     const send = calls.find((call) => call.method === 'sendMessage');
     assert.ok(send);
     assert.match(send.payload.text, /Режим по умолчанию: ⚡ Мгновенно/);
-    const callbacks = send.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
-    assert.ok(callbacks.includes('subs:mode:g:10'));
-    assert.ok(callbacks.includes('subs:mode:g:c'));
+    assert.ok(callbacks(send).includes('subs:mode:home'));
+    assert.ok(callbacks(send).includes('subs:mine:0'));
+    assert.ok(callbacks(send).includes('subs:all:0'));
+    assert.equal(callbacks(send).some((value) => /^subs:mode:g:/.test(value)), false);
   });
 });
 
@@ -182,7 +187,7 @@ test('start notifications callback supports Telegram users without a last name',
   });
 });
 
-test('global preset callback persists the mode, redraws the center and wakes delivery', async () => {
+test('global preset callback persists the mode, redraws the dedicated mode screen and wakes delivery', async () => {
   const db = new DB();
   const recorder = queueRecorder();
   await withTelegramCalls(async (calls) => {
@@ -195,7 +200,8 @@ test('global preset callback persists the mode, redraws the center and wakes del
     assert.deepEqual(recorder.messages, [{ kind: 'drain' }]);
     const edit = calls.find((call) => call.method === 'editMessageText');
     assert.ok(edit);
-    assert.match(edit.payload.text, /Режим по умолчанию: 📦 По 10/);
+    assert.match(edit.payload.text, /Сейчас: 📦 По 10/);
+    assert.ok(callbacks(edit).includes('subs:center'));
     assert.ok(calls.some((call) => call.method === 'answerCallbackQuery'));
   });
 });
