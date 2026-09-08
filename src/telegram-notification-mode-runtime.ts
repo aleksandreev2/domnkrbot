@@ -4,6 +4,11 @@ import {
   parseNotificationModeCallback,
 } from './telegram-notification-controls.js';
 import {
+  buildNotificationGlobalModeScreen,
+  buildNotificationTitleModeScreen,
+  type NotificationReturnContext,
+} from './telegram-notification-ux.js';
+import {
   beginNotificationCustomInput,
   clearNotificationCustomInput,
   ensureTelegramNotificationSettingsSchema,
@@ -124,7 +129,12 @@ export async function handleTelegramNotificationModeUpdate(
 
     await setGlobalDeliverySetting(env, userId, callbackSetting(parsed));
     await wakeNotificationDelivery(env);
-    await editTelegramMessage(env, chatId, messageId, await notificationCenterPayload(env, userId));
+    await editTelegramMessage(
+      env,
+      chatId,
+      messageId,
+      buildNotificationGlobalModeScreen(await getGlobalDeliverySetting(env, userId)),
+    );
     await answerCallback(env, callback.id);
     return true;
   }
@@ -148,7 +158,10 @@ export async function handleTelegramNotificationModeUpdate(
     await setTitleDeliverySetting(env, userId, title.book_ref, callbackSetting(parsed));
   }
   await wakeNotificationDelivery(env);
-  await editTelegramMessage(env, chatId, messageId, await titlePanelPayload(env, userId, title));
+  const payload = parsed.returnContext
+    ? await titleModePayloadV2(env, userId, title, parsed.returnContext)
+    : await titlePanelPayload(env, userId, title);
+  await editTelegramMessage(env, chatId, messageId, payload);
   await answerCallback(env, callback.id);
   return true;
 }
@@ -233,6 +246,27 @@ async function titlePanelPayload(env: TelegramNotificationModeEnv, userId: strin
     effectiveSetting: titleSetting.setting,
     globalSetting,
     inherited: titleSetting.inherited,
+  });
+}
+
+async function titleModePayloadV2(
+  env: TelegramNotificationModeEnv,
+  userId: string,
+  title: TitleDetails,
+  returnContext: NotificationReturnContext,
+) {
+  const [globalSetting, titleSetting, enabled] = await Promise.all([
+    getGlobalDeliverySetting(env, userId),
+    getTitleDeliverySetting(env, userId, title.book_ref),
+    isEffectivelySubscribed(env, userId, title.book_ref),
+  ]);
+  return buildNotificationTitleModeScreen({
+    title,
+    enabled,
+    effectiveSetting: titleSetting.setting,
+    globalSetting,
+    inherited: titleSetting.inherited,
+    returnContext,
   });
 }
 
