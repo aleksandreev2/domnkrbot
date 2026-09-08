@@ -74,7 +74,8 @@ export async function handleTelegramNotificationTextInputRequest(
   if (!expected || request.headers.get('x-telegram-bot-api-secret-token') !== expected) return null;
 
   const update = await request.clone().json().catch(() => null) as TelegramSubscriptionUpdate | null;
-  const message = update?.message;
+  if (!update) return null;
+  const message = update.message;
   const text = (message?.text ?? '').trim();
   if (!message?.from || !message.chat?.id || message.chat.type !== 'private' || !text || text.startsWith('/')) return null;
 
