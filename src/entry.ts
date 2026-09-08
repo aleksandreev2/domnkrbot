@@ -12,6 +12,7 @@ import {
   type TelegramTitleProposalEnv,
 } from './telegram-title-proposals.js';
 import {
+  handleTelegramNotificationTextInputRequest,
   handleTelegramSubscriptionWebhookRequest,
   type TelegramSubscriptionWebhookEnv,
 } from './telegram-subscription-webhook.js';
@@ -25,6 +26,9 @@ type Env = AdminUserWorkspaceEnv
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const notificationTextInputResponse = await handleTelegramNotificationTextInputRequest(request, env);
+    if (notificationTextInputResponse) return notificationTextInputResponse;
+
     const proposalV2Response = await handleTelegramTitleProposalV2WebhookRequest(request, env);
     if (proposalV2Response) return proposalV2Response;
 
