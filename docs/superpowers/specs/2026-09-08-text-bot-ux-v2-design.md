@@ -4,7 +4,7 @@
 
 Improve the Telegram text bot UX so users always understand where they are, what an action will do, and how to go back without losing work. The redesign keeps the existing bot architecture and feature set, but gives proposal flows, notification management, and proposal browsing one consistent navigation model.
 
-The UI must not use the skull emoji as a navigation or branding element. In particular, the main menu and system navigation buttons must not include `☠️`.
+The UI must not use the skull emoji as a navigation or branding element. The main menu and system navigation buttons must use neutral labels/icons instead.
 
 ## Core UX principles
 
@@ -40,7 +40,7 @@ The UI must not use the skull emoji as a navigation or branding element. In part
 │
 ├── 📚 Предложить новеллу
 │   ├── Шаг 1 — Есть на RanobeLib?
-│   ├── Шаг 2 — Найти/указать тайтл
+│   ├── Шаг 2 — Найти/указать тайтл и источник
 │   ├── Шаг 3 — RAW
 │   ├── Шаг 4 — Комментарий
 │   ├── Шаг 5 — Проверка
@@ -267,7 +267,16 @@ A draft must not be deleted just because the user returned to the main menu.
 
 ### Progress header
 
-Every proposal step shows progress and context.
+Every proposal phase shows progress and context.
+
+The user-facing wizard always has five phases:
+1. RanobeLib availability;
+2. identify the title/source;
+3. RAW;
+4. comment;
+5. review.
+
+The external branch may use more than one text prompt inside phase 2 (title and source URL), but it must still display `Шаг 2 из 5` until title/source identification is complete. This keeps the progress indicator stable across both branches.
 
 Example:
 
@@ -277,8 +286,6 @@ Example:
 
 Пришлите ссылку на RanobeLib или название новеллы.
 ```
-
-The exact number of data-entry screens may vary by RanobeLib/external branch, but the user-facing progress should remain understandable and consistent.
 
 ### Step 1 — RanobeLib availability
 
@@ -342,10 +349,12 @@ Do not show the current `Иммунитет: не удалось определ�
 
 ### External title branch
 
-For titles not on RanobeLib:
-1. collect title;
-2. collect source URL;
-3. continue to RAW.
+For titles not on RanobeLib, phase 2 collects:
+1. title;
+2. source URL;
+3. then proceeds to phase 3 (RAW).
+
+Both text prompts remain part of `Шаг 2 из 5`.
 
 Each input step must offer `↩️ Назад`, `🏠 Главное меню`, and destructive cancellation where appropriate.
 
@@ -584,7 +593,9 @@ proposals:list:<filter>:<page>
 proposals:view:<id>:<filter>:<page>
 ```
 
-Existing callback formats may remain supported temporarily as compatibility aliases, but new screens should not continue to overload `prop:cancel` as both navigation and destructive cancellation.
+All callback formats currently emitted by production must remain accepted throughout the UX v2 rollout. They may be routed to the nearest equivalent v2 screen. Removing legacy callback support is a separate cleanup task after the rollout and is not part of this implementation.
+
+New screens must not continue to overload `prop:cancel` as both navigation and destructive cancellation.
 
 ## State model
 
@@ -612,7 +623,7 @@ Where `Назад` can return to more than one screen, preserve a small origin i
 - Existing users keep all subscriptions, delivery modes, title overrides, proposals, votes, and notification outbox state.
 - UX v2 is a presentation/navigation redesign; it must not reset user data.
 - Existing notification delivery behavior remains unchanged except where UI explicitly changes configuration.
-- Old callback buttons in already-sent Telegram messages should continue to work where practical. Compatibility aliases should route them to the nearest v2 screen instead of failing silently.
+- Old callback buttons in already-sent Telegram messages remain supported during the entire v2 rollout.
 
 ## Analytics
 
@@ -651,7 +662,7 @@ At minimum, cover:
 - Back preserves state.
 - Main menu preserves proposal draft.
 - Destructive cancel requires confirmation and deletes only after confirmation.
-- Legacy `prop:cancel` buttons do not accidentally delete a draft when they are meant as navigation compatibility paths.
+- Legacy navigation callbacks do not accidentally delete a draft.
 
 ### Proposal wizard
 - Resume existing draft.
