@@ -6,11 +6,13 @@ import {
   buildProposalInputPrompt,
   buildProposalRanobeLibCandidates,
   buildProposalRanobeLibConfirmation,
+  buildProposalRanobeLibError,
   buildProposalRawAdded,
   buildProposalRawPrompt,
   buildProposalResume,
   buildProposalReview,
   buildProposalSourceChoice,
+  buildProposalStale,
   type ProposalUiSession,
 } from './telegram-title-proposal-ui.js';
 
@@ -159,15 +161,19 @@ async function handleV2Callback(
     || data === 'prop:cancel'
     || data === 'prop:cancel:confirm'
     || data === 'prop:cancel:keep'
+    || data === 'prop:start:again'
     || data === 'prop:source:ranobelib'
     || data === 'prop:source:external'
     || data === 'prop:confirm'
     || data === 'prop:raw:skip'
     || data === 'prop:raw:continue'
     || data === 'prop:raw:replace'
+    || data === 'prop:raw:clear'
     || data === 'prop:comment:skip'
     || data === 'prop:query:again'
+    || data === 'prop:retry:ranobelib'
     || data === 'prop:noop'
+    || data.startsWith('prop:edit:')
     || data.startsWith('prop:pick:')
     || data.startsWith('prop:results:');
   if (!claimed) return null;
@@ -181,8 +187,8 @@ async function handleV2Callback(
     return json({ ok: true });
   }
 
-  if (data === 'prop:new') {
-    const session = await loadProposalSession(env, callback.from.id);
+  if (data === 'prop:new' || data === 'prop:start:again') {
+    const session = data === 'prop:new' ? await loadProposalSession(env, callback.from.id) : null;
     if (session && isMeaningfulDraft(session)) {
       await editCallbackMessage(env, callback, buildProposalResume(session));
     } else {
@@ -206,7 +212,11 @@ async function handleV2Callback(
     return json({ ok: true });
   }
 
-  if (!session) return null;
+  if (!session) {
+    await editCallbackMessage(env, callback, buildProposalStale());
+    await answerCallback(env, callback.id);
+    return json({ ok: true });
+  }
 
   if (data === 'prop:resume' || data === 'prop:cancel:keep') {
     await editCallbackMessage(env, callback, renderSession(session));
@@ -226,14 +236,35 @@ async function handleV2Callback(
   }
 
   if (data === 'prop:back') {
-    const previous = previousStep(session);
-    if (!previous) {
-      await editCallbackMessage(env, callback, buildMainMenu(origin));
+    if (returnsToReview(session)) {
+      await setSessionStepAndReviewFlag(env, callback.from.id, 'review', 0);
+      await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', return_to_review: 0 }));
     } else {
-      await setSessionStep(env, callback.from.id, previous);
-      const updated = { ...session, step: previous };
-      await editCallbackMessage(env, callback, renderSession(updated));
+      const previous = previousStep(session);
+      if (!previous) {
+        await editCallbackMessage(env, callback, buildMainMenu(origin));
+      } else {
+        await setSessionStep(env, callback.from.id, previous);
+        const updated = { ...session, step: previous };
+        await editCallbackMessage(env, callback, renderSession(updated));
+      }
     }
+    await answerCallback(env, callback.id);
+    return json({ ok: true });
+  }
+
+  if (data.startsWith('prop:edit:')) {
+    const field = data.slice('prop:edit:'.length);
+    let step: string | null = null;
+    if (field === 'title') step = session.source_kind === 'ranobelib' ? 'ranobelib_query' : 'external_title';
+    if (field === 'source') step = session.source_kind === 'ranobelib' ? 'ranobelib_query' : 'external_url';
+    if (field === 'raw') step = 'raw';
+    if (field === 'comment') step = 'comment';
+    if (!step) return null;
+    await setSessionStepAndReviewFlag(env, callback.from.id, step, 1);
+    const updated = { ...session, step, return_to_review: 1 };
+    const payload = step === 'raw' ? buildProposalRawPrompt(updated) : renderSession(updated);
+    await editCallbackMessage(env, callback, payload);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -258,6 +289,24 @@ async function handleV2Callback(
     return json({ ok: true });
   }
 
+  if (data === 'prop:retry:ranobelib') {
+    const ref = session.ranobelib_book_ref?.trim();
+    if (!ref) {
+      await editCallbackMessage(env, callback, buildProposalInputPrompt('ranobelib_query', { ...session, step: 'ranobelib_query' }));
+      await answerCallback(env, callback.id);
+      return json({ ok: true });
+    }
+    try {
+      const [detail, chapters] = await Promise.all([fetchRanobeLibTitle(ref), fetchRanobeLibChapters(ref)]);
+      await saveRanobeLibConfirmation(env, callback.from.id, detail, ref);
+      await editCallbackMessage(env, callback, confirmationPayload(detail, ref, chapters));
+    } catch {
+      await editCallbackMessage(env, callback, buildProposalRanobeLibError());
+    }
+    await answerCallback(env, callback.id);
+    return json({ ok: true });
+  }
+
   if (data.startsWith('prop:results:')) {
     const page = Math.max(0, Number(data.slice('prop:results:'.length)) || 0);
     const candidates = parseCandidates(session.candidates_json);
@@ -275,32 +324,74 @@ async function handleV2Callback(
       await answerCallback(env, callback.id, 'Этот вариант больше недоступен.');
       return json({ ok: true });
     }
+    await savePendingRanobeLibRef(env, callback.from.id, ref);
     try {
       const [detail, chapters] = await Promise.all([fetchRanobeLibTitle(ref), fetchRanobeLibChapters(ref)]);
       await saveRanobeLibConfirmation(env, callback.from.id, detail, ref);
       await editCallbackMessage(env, callback, confirmationPayload(detail, ref, chapters));
-      await answerCallback(env, callback.id);
     } catch {
-      await answerCallback(env, callback.id, 'RanobeLib сейчас не отвечает. Попробуйте ещё раз.');
+      await editCallbackMessage(env, callback, buildProposalRanobeLibError());
     }
+    await answerCallback(env, callback.id);
     return json({ ok: true });
   }
 
   if (data === 'prop:confirm') {
-    await setSessionStep(env, callback.from.id, 'raw');
-    await editCallbackMessage(env, callback, buildProposalRawPrompt({ ...session, step: 'raw' }));
+    if (returnsToReview(session)) {
+      await setSessionStepAndReviewFlag(env, callback.from.id, 'review', 0);
+      await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', return_to_review: 0 }));
+    } else {
+      await setSessionStep(env, callback.from.id, 'raw');
+      await editCallbackMessage(env, callback, buildProposalRawPrompt({ ...session, step: 'raw' }));
+    }
+    await answerCallback(env, callback.id);
+    return json({ ok: true });
+  }
+
+  if (data === 'prop:raw:clear') {
+    await env.DB.prepare(`
+      UPDATE telegram_proposal_sessions
+      SET step='review',raw_file_id=NULL,raw_file_unique_id=NULL,raw_file_name=NULL,raw_file_size=NULL,
+          raw_mime_type=NULL,return_to_review=0,updated_at=CURRENT_TIMESTAMP
+      WHERE user_telegram_id=?
+    `).bind(String(callback.from.id)).run();
+    await editCallbackMessage(env, callback, buildProposalReview({
+      ...session,
+      step: 'review',
+      raw_file_id: null,
+      raw_file_name: null,
+      raw_file_size: null,
+      return_to_review: 0,
+    }));
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
 
   if (data === 'prop:raw:skip') {
-    await env.DB.prepare(`
-      UPDATE telegram_proposal_sessions
-      SET step='comment',raw_file_id=NULL,raw_file_unique_id=NULL,raw_file_name=NULL,raw_file_size=NULL,
-          raw_mime_type=NULL,updated_at=CURRENT_TIMESTAMP
-      WHERE user_telegram_id=?
-    `).bind(String(callback.from.id)).run();
-    await editCallbackMessage(env, callback, buildProposalCommentPrompt({ ...session, step: 'comment', raw_file_id: null, raw_file_name: null, raw_file_size: null }));
+    if (returnsToReview(session)) {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step='review',raw_file_id=NULL,raw_file_unique_id=NULL,raw_file_name=NULL,raw_file_size=NULL,
+            raw_mime_type=NULL,return_to_review=0,updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind(String(callback.from.id)).run();
+      await editCallbackMessage(env, callback, buildProposalReview({
+        ...session,
+        step: 'review',
+        raw_file_id: null,
+        raw_file_name: null,
+        raw_file_size: null,
+        return_to_review: 0,
+      }));
+    } else {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step='comment',raw_file_id=NULL,raw_file_unique_id=NULL,raw_file_name=NULL,raw_file_size=NULL,
+            raw_mime_type=NULL,updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind(String(callback.from.id)).run();
+      await editCallbackMessage(env, callback, buildProposalCommentPrompt({ ...session, step: 'comment', raw_file_id: null, raw_file_name: null, raw_file_size: null }));
+    }
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -310,8 +401,13 @@ async function handleV2Callback(
       await answerCallback(env, callback.id, 'Сначала отправьте RAW-файл или пропустите этот шаг.');
       return json({ ok: true });
     }
-    await setSessionStep(env, callback.from.id, 'comment');
-    await editCallbackMessage(env, callback, buildProposalCommentPrompt({ ...session, step: 'comment' }));
+    if (returnsToReview(session)) {
+      await setSessionStepAndReviewFlag(env, callback.from.id, 'review', 0);
+      await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', return_to_review: 0 }));
+    } else {
+      await setSessionStep(env, callback.from.id, 'comment');
+      await editCallbackMessage(env, callback, buildProposalCommentPrompt({ ...session, step: 'comment' }));
+    }
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -329,12 +425,20 @@ async function handleV2Callback(
   }
 
   if (data === 'prop:comment:skip') {
-    await env.DB.prepare(`
-      UPDATE telegram_proposal_sessions
-      SET step=?,comment='',updated_at=CURRENT_TIMESTAMP
-      WHERE user_telegram_id=?
-    `).bind('review', String(callback.from.id)).run();
-    await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', comment: '' }));
+    if (returnsToReview(session)) {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step=?,comment=?,return_to_review=?,updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind('review', '', 0, String(callback.from.id)).run();
+    } else {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step=?,comment='',updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind('review', String(callback.from.id)).run();
+    }
+    await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', comment: '', return_to_review: 0 }));
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -353,12 +457,21 @@ async function handleSessionMessage(
       await sendMessage(env, message.chat.id, buildProposalInputPrompt('external_title', session));
       return json({ ok: true });
     }
-    await env.DB.prepare(`
-      UPDATE telegram_proposal_sessions
-      SET step=?,title=?,updated_at=CURRENT_TIMESTAMP
-      WHERE user_telegram_id=?
-    `).bind('external_url', text, String(message.from.id)).run();
-    await sendMessage(env, message.chat.id, buildProposalInputPrompt('external_url', { ...session, step: 'external_url', title: text }));
+    if (returnsToReview(session)) {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step=?,title=?,return_to_review=?,updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind('review', text, 0, String(message.from.id)).run();
+      await sendMessage(env, message.chat.id, buildProposalReview({ ...session, step: 'review', title: text, return_to_review: 0 }));
+    } else {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step=?,title=?,updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind('external_url', text, String(message.from.id)).run();
+      await sendMessage(env, message.chat.id, buildProposalInputPrompt('external_url', { ...session, step: 'external_url', title: text }));
+    }
     return json({ ok: true });
   }
 
@@ -367,24 +480,34 @@ async function handleSessionMessage(
       await sendMessage(env, message.chat.id, buildProposalInputPrompt('external_url', session));
       return json({ ok: true });
     }
-    await env.DB.prepare(`
-      UPDATE telegram_proposal_sessions
-      SET step=?,source_url=?,updated_at=CURRENT_TIMESTAMP
-      WHERE user_telegram_id=?
-    `).bind('raw', text, String(message.from.id)).run();
-    await sendMessage(env, message.chat.id, buildProposalRawPrompt({ ...session, step: 'raw', source_url: text }));
+    if (returnsToReview(session)) {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step=?,source_url=?,return_to_review=?,updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind('review', text, 0, String(message.from.id)).run();
+      await sendMessage(env, message.chat.id, buildProposalReview({ ...session, step: 'review', source_url: text, return_to_review: 0 }));
+    } else {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step=?,source_url=?,updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind('raw', text, String(message.from.id)).run();
+      await sendMessage(env, message.chat.id, buildProposalRawPrompt({ ...session, step: 'raw', source_url: text }));
+    }
     return json({ ok: true });
   }
 
   if (session.step === 'ranobelib_query' && text) {
     const directRef = parseRanobeLibBookRef(text);
     if (directRef) {
+      await savePendingRanobeLibRef(env, message.from.id, directRef);
       try {
         const [detail, chapters] = await Promise.all([fetchRanobeLibTitle(directRef), fetchRanobeLibChapters(directRef)]);
         await saveRanobeLibConfirmation(env, message.from.id, detail, directRef);
         await sendMessage(env, message.chat.id, confirmationPayload(detail, directRef, chapters));
       } catch {
-        await sendMessage(env, message.chat.id, buildProposalInputPrompt('ranobelib_query', session));
+        await sendMessage(env, message.chat.id, buildProposalRanobeLibError());
       }
       return json({ ok: true });
     }
@@ -400,7 +523,7 @@ async function handleSessionMessage(
       `).bind(JSON.stringify(candidates), String(message.from.id)).run();
       await sendMessage(env, message.chat.id, candidatePayload(candidates, 0));
     } catch {
-      await sendMessage(env, message.chat.id, buildProposalInputPrompt('ranobelib_query', session));
+      await sendMessage(env, message.chat.id, buildProposalRanobeLibError());
     }
     return json({ ok: true });
   }
@@ -437,12 +560,20 @@ async function handleSessionMessage(
       await sendMessage(env, message.chat.id, buildProposalCommentPrompt(session));
       return json({ ok: true });
     }
-    await env.DB.prepare(`
-      UPDATE telegram_proposal_sessions
-      SET step=?,comment=?,updated_at=CURRENT_TIMESTAMP
-      WHERE user_telegram_id=?
-    `).bind('review', text, String(message.from.id)).run();
-    await sendMessage(env, message.chat.id, buildProposalReview({ ...session, step: 'review', comment: text }));
+    if (returnsToReview(session)) {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step=?,comment=?,return_to_review=?,updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind('review', text, 0, String(message.from.id)).run();
+    } else {
+      await env.DB.prepare(`
+        UPDATE telegram_proposal_sessions
+        SET step=?,comment=?,updated_at=CURRENT_TIMESTAMP
+        WHERE user_telegram_id=?
+      `).bind('review', text, String(message.from.id)).run();
+    }
+    await sendMessage(env, message.chat.id, buildProposalReview({ ...session, step: 'review', comment: text, return_to_review: 0 }));
     return json({ ok: true });
   }
 
@@ -484,6 +615,10 @@ function previousStep(session: ProposalSession): string | null {
     case 'review': return 'comment';
     default: return null;
   }
+}
+
+function returnsToReview(session: ProposalUiSession): boolean {
+  return Number(session.return_to_review) === 1;
 }
 
 function isMeaningfulDraft(session: ProposalSession): boolean {
@@ -555,6 +690,23 @@ async function setSessionStep(env: TelegramTitleProposalV2Env, userId: number, s
   await env.DB.prepare(`
     UPDATE telegram_proposal_sessions SET step=?,updated_at=CURRENT_TIMESTAMP WHERE user_telegram_id=?
   `).bind(step, String(userId)).run();
+}
+
+async function setSessionStepAndReviewFlag(
+  env: TelegramTitleProposalV2Env,
+  userId: number,
+  step: string,
+  returnToReview: 0 | 1,
+): Promise<void> {
+  await env.DB.prepare(`
+    UPDATE telegram_proposal_sessions SET step=?,return_to_review=?,updated_at=CURRENT_TIMESTAMP WHERE user_telegram_id=?
+  `).bind(step, returnToReview, String(userId)).run();
+}
+
+async function savePendingRanobeLibRef(env: TelegramTitleProposalV2Env, userId: number, ref: string): Promise<void> {
+  await env.DB.prepare(`
+    UPDATE telegram_proposal_sessions SET ranobelib_book_ref=?,updated_at=CURRENT_TIMESTAMP WHERE user_telegram_id=?
+  `).bind(ref, String(userId)).run();
 }
 
 async function deleteProposalSession(env: TelegramTitleProposalV2Env, userId: number): Promise<void> {
