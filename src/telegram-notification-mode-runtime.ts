@@ -300,7 +300,7 @@ async function upsertTelegramUser(env: TelegramNotificationModeEnv, user: Telegr
     String(user.id),
     user.username ?? null,
     user.first_name ?? '',
-    user.last_name ?? null,
+    user.last_name ?? '',
     user.language_code ?? null,
   ).run();
 }

@@ -34,6 +34,9 @@ class Statement {
     if (this.db.rejectUnknownUserColumns && /INSERT INTO users/i.test(this.query) && /last_seen_at/i.test(this.query)) {
       throw new Error('table users has no column named last_seen_at');
     }
+    if (this.db.rejectNullUserLastName && /INSERT INTO users/i.test(this.query) && this.values[3] == null) {
+      throw new Error('NOT NULL constraint failed: users.last_name');
+    }
     if (/INSERT INTO telegram_subscription_settings/i.test(this.query) && /delivery_mode/i.test(this.query)) {
       const mode = String(this.values.at(-2));
       const stackSize = this.values.at(-1) == null ? null : Number(this.values.at(-1));
@@ -59,6 +62,7 @@ class DB {
     this.override = null;
     this.customInput = null;
     this.rejectUnknownUserColumns = false;
+    this.rejectNullUserLastName = false;
     this.title = {
       ranobelib_id: 1000,
       book_ref: '1000--one',
@@ -155,6 +159,19 @@ test('/notifications uses the interactive delivery-mode center', async () => {
 test('start notifications callback uses only columns that exist in the users table', async () => {
   const db = new DB();
   db.rejectUnknownUserColumns = true;
+  await withTelegramCalls(async (calls) => {
+    const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('prop:notifications'), env(db));
+    assert.equal(response?.status, 200);
+    const edit = calls.find((call) => call.method === 'editMessageText');
+    assert.ok(edit);
+    assert.match(edit.payload.text, /Режим по умолчанию: ⚡ Мгновенно/);
+    assert.ok(calls.some((call) => call.method === 'answerCallbackQuery'));
+  });
+});
+
+test('start notifications callback supports Telegram users without a last name', async () => {
+  const db = new DB();
+  db.rejectNullUserLastName = true;
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('prop:notifications'), env(db));
     assert.equal(response?.status, 200);
