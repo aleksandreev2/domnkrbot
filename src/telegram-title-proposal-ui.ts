@@ -110,22 +110,27 @@ export function buildProposalInputPrompt(step: string, session: ProposalUiSessio
   };
 }
 
-export function buildProposalRawPrompt(_session: ProposalUiSession): TelegramPayload {
+export function buildProposalRawPrompt(session: ProposalUiSession): TelegramPayload {
+  const editing = Number(session.return_to_review) === 1;
+  const rows: TelegramButton[][] = [];
+  if (editing && session.raw_file_id) {
+    rows.push([{ text: '🗑 Убрать RAW', callback_data: 'prop:raw:clear' }]);
+  } else {
+    rows.push([{ text: '⏭ Пропустить', callback_data: 'prop:raw:skip' }]);
+  }
+  rows.push(...proposalNav({ back: true, cancel: true }));
   return {
     text: [
       ...header('Предложить новеллу', 3),
       '<b>RAW</b>',
       '',
-      'Если у вас есть оригинал новеллы — отправьте файл сюда.',
+      editing && session.raw_file_id
+        ? `Сейчас прикреплён: <b>${escapeHtml(session.raw_file_name || 'файл')}</b>. Отправьте новый документ, чтобы заменить его.`
+        : 'Если у вас есть оригинал новеллы — отправьте файл сюда.',
       'Поддерживается документ до 20 МБ. Ссылку вместо файла бот не принимает.',
     ].join('\n'),
     parse_mode: 'HTML',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '⏭ Пропустить', callback_data: 'prop:raw:skip' }],
-        ...proposalNav({ back: true, cancel: true }),
-      ],
-    },
+    reply_markup: { inline_keyboard: rows },
   };
 }
 
@@ -142,6 +147,9 @@ export function buildProposalRawAdded(session: ProposalUiSession): TelegramPaylo
       inline_keyboard: [
         [{ text: 'Продолжить', callback_data: 'prop:raw:continue' }],
         [{ text: '🔄 Заменить файл', callback_data: 'prop:raw:replace' }],
+        ...(Number(session.return_to_review) === 1
+          ? [[{ text: '🗑 Убрать RAW', callback_data: 'prop:raw:clear' }]]
+          : []),
         [backButton('prop:back')],
         [mainMenuButton()],
       ],
@@ -188,7 +196,14 @@ export function buildProposalReview(session: ProposalUiSession): TelegramPayload
     reply_markup: {
       inline_keyboard: [
         [{ text: '📨 Отправить', callback_data: 'prop:submit' }],
-        [{ text: '✏️ Изменить', callback_data: 'prop:edit' }],
+        [
+          { text: '✏️ Название', callback_data: 'prop:edit:title' },
+          { text: '🔗 Источник', callback_data: 'prop:edit:source' },
+        ],
+        [
+          { text: '📎 RAW', callback_data: 'prop:edit:raw' },
+          { text: '💬 Комментарий', callback_data: 'prop:edit:comment' },
+        ],
         ...proposalNav({ back: true, cancel: true }),
       ],
     },
@@ -243,6 +258,34 @@ export function buildProposalRanobeLibConfirmation(detail: RanobeLibConfirmation
         [{ text: '✅ Да, продолжить', callback_data: 'prop:confirm' }],
         [{ text: '🔎 Искать другой', callback_data: 'prop:query:again' }],
         [backButton('prop:back')],
+        [mainMenuButton()],
+      ],
+    },
+  };
+}
+
+export function buildProposalRanobeLibError(): TelegramPayload {
+  return {
+    text: '<b>Не удалось загрузить данные RanobeLib.</b>\n\nЧерновик сохранён. Можно повторить запрос или выбрать другой тайтл.',
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔄 Повторить', callback_data: 'prop:retry:ranobelib' }],
+        [{ text: '🔎 Изменить запрос', callback_data: 'prop:query:again' }],
+        [backButton('prop:back')],
+        [mainMenuButton()],
+      ],
+    },
+  };
+}
+
+export function buildProposalStale(): TelegramPayload {
+  return {
+    text: '<b>Черновик не найден или устарел.</b>\n\nМожно начать новую заявку.',
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '➕ Начать заново', callback_data: 'prop:start:again' }],
         [mainMenuButton()],
       ],
     },
