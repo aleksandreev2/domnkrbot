@@ -31,6 +31,30 @@ const proposalSession = (overrides = {}) => ({
   ...overrides,
 });
 
+const callbackUpdate = (data) => ({
+  callback_query: {
+    id: 'callback-1',
+    from: { id: 101, first_name: 'Test' },
+    data,
+    message: { message_id: 77, chat: { id: 101, type: 'private' } },
+  },
+});
+
+const webhookRequest = (update, secret) => new Request('https://bot.example/telegram/webhook', {
+  method: 'POST',
+  headers: {
+    'content-type': 'application/json',
+    ...(secret ? { 'x-telegram-bot-api-secret-token': secret } : {}),
+  },
+  body: JSON.stringify(update),
+});
+
+const forbiddenDb = {
+  prepare() {
+    throw new Error('D1 must not be touched');
+  },
+};
+
 test('notification journey preserves dashboard, list, title, mode, search and Home contexts', async () => {
   const botUi = await import('../dist-runtime/telegram-bot-ui.js');
   const ux = await import('../dist-runtime/telegram-notification-ux.js');
@@ -152,6 +176,46 @@ test('historical Telegram callbacks still route into useful v2 behavior', async 
   const cabinet = await read('src/telegram-title-proposal-cabinet.ts');
   assert.match(cabinet, /if\s*\(!body\s*\|\|\s*body\.includes\(['"]:['"]\)\)\s*return null;/);
   assert.match(cabinet, /return\s*\{\s*proposalId:\s*body,\s*filter:\s*null,\s*page:\s*0\s*\}/);
+});
+
+test('proposal v2 webhook fails closed when Telegram secret is missing', async () => {
+  const proposalV2 = await import('../dist-runtime/telegram-title-proposals-v2.js');
+  const result = await proposalV2.handleTelegramTitleProposalV2WebhookRequest(
+    webhookRequest(callbackUpdate('prop:home')),
+    { DB: forbiddenDb },
+  );
+  assert.equal(result, null);
+});
+
+test('proposal cabinet webhook fails closed when Telegram secret is missing', async () => {
+  const cabinet = await import('../dist-runtime/telegram-title-proposal-cabinet.js');
+  const result = await cabinet.handleTelegramTitleProposalCabinetWebhookRequest(
+    webhookRequest(callbackUpdate('prop:mine')),
+    { DB: forbiddenDb },
+  );
+  assert.equal(result, null);
+});
+
+test('proposal v2 leaves an unclaimed submit update readable for the next webhook handler', async () => {
+  const proposalV2 = await import('../dist-runtime/telegram-title-proposals-v2.js');
+  const update = callbackUpdate('prop:submit');
+  const request = webhookRequest(update, 'secret');
+  assert.equal(await proposalV2.handleTelegramTitleProposalV2WebhookRequest(request, {
+    DB: forbiddenDb,
+    TELEGRAM_WEBHOOK_SECRET: 'secret',
+  }), null);
+  assert.deepEqual(await request.clone().json(), update);
+});
+
+test('proposal cabinet leaves an unclaimed submit update readable for the legacy submit handler', async () => {
+  const cabinet = await import('../dist-runtime/telegram-title-proposal-cabinet.js');
+  const update = callbackUpdate('prop:submit');
+  const request = webhookRequest(update, 'secret');
+  assert.equal(await cabinet.handleTelegramTitleProposalCabinetWebhookRequest(request, {
+    DB: forbiddenDb,
+    TELEGRAM_WEBHOOK_SECRET: 'secret',
+  }), null);
+  assert.deepEqual(await request.clone().json(), update);
 });
 
 test('legacy handoff screens reached from v2 submit/release controls stay non-destructive and skull-free', async () => {
