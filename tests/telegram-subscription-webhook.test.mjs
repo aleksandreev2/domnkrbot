@@ -91,6 +91,8 @@ async function withTelegramCalls(fn) {
   try { return await fn(calls); } finally { globalThis.fetch = original; }
 }
 
+const callbackValues = (call) => call.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
+
 test('plain /start is left for the main Telegram menu handler', async () => {
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/start'), env);
@@ -107,18 +109,18 @@ test('/subscriptions opens the Telegram subscription list', async () => {
   });
 });
 
-test('/notifications opens the interactive notification delivery-mode center', async () => {
+test('/notifications opens the compact notification dashboard', async () => {
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(telegramRequest('/notifications'), env);
     assert.equal(response?.status, 200);
     const send = calls.find((call) => call.kind === 'telegram' && call.method === 'sendMessage');
     assert.ok(send);
     assert.match(send.payload.text, /Режим по умолчанию: ⚡ Мгновенно/);
-    const callbacks = send.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
-    assert.ok(callbacks.includes('subs:mode:g:i'));
-    assert.ok(callbacks.includes('subs:mode:g:10'));
-    assert.ok(callbacks.includes('subs:mode:g:c'));
-    assert.ok(callbacks.includes('subs:list:0'));
+    assert.ok(callbackValues(send).includes('subs:mine:0'));
+    assert.ok(callbackValues(send).includes('subs:search:h'));
+    assert.ok(callbackValues(send).includes('subs:all:0'));
+    assert.ok(callbackValues(send).includes('subs:mode:home'));
+    assert.equal(callbackValues(send).some((value) => /^subs:mode:g:/.test(value)), false);
   });
 });
 
@@ -132,7 +134,7 @@ test('subscription callbacks are handled without blocking on RanobeLib catalog b
   });
 });
 
-test('/start notifications button callback opens the interactive notification center', async () => {
+test('/start notifications button callback opens the same compact dashboard', async () => {
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('prop:notifications'), env);
     assert.equal(response?.status, 200);
@@ -140,9 +142,11 @@ test('/start notifications button callback opens the interactive notification ce
     const edit = calls.find((call) => call.kind === 'telegram' && call.method === 'editMessageText');
     assert.ok(edit);
     assert.match(edit.payload.text, /Режим по умолчанию: ⚡ Мгновенно/);
-    const callbacks = edit.payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
-    assert.ok(callbacks.includes('subs:mode:g:5'));
-    assert.ok(callbacks.includes('subs:mode:g:20'));
+    assert.ok(callbackValues(edit).includes('subs:mine:0'));
+    assert.ok(callbackValues(edit).includes('subs:search:h'));
+    assert.ok(callbackValues(edit).includes('subs:all:0'));
+    assert.ok(callbackValues(edit).includes('subs:mode:home'));
+    assert.equal(callbackValues(edit).some((value) => /^subs:mode:g:/.test(value)), false);
     assert.ok(calls.some((call) => call.kind === 'telegram' && call.method === 'answerCallbackQuery'));
   });
 });
