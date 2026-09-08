@@ -17,6 +17,8 @@ export type NotificationReturnContext = {
   page: number;
 };
 
+export type NotificationSearchReturnScope = 'home' | 'mine' | 'all';
+
 export type NotificationUxCallback =
   | { kind: 'dashboard' }
   | { kind: 'mine'; page: number }
@@ -24,6 +26,9 @@ export type NotificationUxCallback =
   | { kind: 'title'; titleId: number; origin: NotificationReturnContext['origin']; page: number }
   | { kind: 'toggle'; titleId: number; origin: NotificationReturnContext['origin']; page: number }
   | { kind: 'title-mode'; titleId: number; origin: NotificationReturnContext['origin']; page: number }
+  | { kind: 'search-start'; returnScope: NotificationSearchReturnScope }
+  | { kind: 'search-page'; page: number }
+  | { kind: 'search-again' }
   | { kind: 'clear-confirm' }
   | { kind: 'clear-yes' }
   | { kind: 'mode-home' };
@@ -96,6 +101,56 @@ export function buildNotificationTitleList(input: {
     text: input.rows.length
       ? `📚 <b>${title}</b>\n\nНажмите на тайтл, чтобы открыть его настройки.`
       : `📚 <b>${title}</b>\n\nЗдесь пока ничего нет.`,
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: rows },
+  };
+}
+
+export function buildNotificationSearchPrompt(returnScope: NotificationSearchReturnScope): TelegramPayload {
+  return {
+    text: [
+      '🔎 <b>Поиск тайтла</b>',
+      '',
+      'Введите название тайтла или его часть.',
+      'Поиск идёт по переводам, которые уже есть в каталоге бота.',
+    ].join('\n'),
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '↩️ Назад', callback_data: searchReturnCallback(returnScope) }],
+        [mainMenuButton()],
+      ],
+    },
+  };
+}
+
+export function buildNotificationSearchResults(input: {
+  query: string;
+  rows: NotificationUiTitle[];
+  page: number;
+  returnScope: NotificationSearchReturnScope;
+}): TelegramPayload {
+  const page = safePage(input.page);
+  const rows: TelegramButton[][] = input.rows.slice(0, PAGE_SIZE).map((item) => [{
+    text: `📚 ${truncate(item.title, 46)}`,
+    callback_data: `subs:title:${item.ranobelib_id}:s:${page}`,
+  }]);
+
+  const pager: TelegramButton[] = [];
+  if (page > 0) pager.push({ text: '◀️', callback_data: `subs:search:page:${page - 1}` });
+  pager.push({ text: `${page + 1}`, callback_data: 'subs:noop' });
+  if (input.rows.length >= PAGE_SIZE) pager.push({ text: '▶️', callback_data: `subs:search:page:${page + 1}` });
+  if (pager.length > 1) rows.push(pager);
+
+  rows.push([{ text: '🔎 Искать снова', callback_data: 'subs:search:again' }]);
+  rows.push([{ text: '↩️ Назад', callback_data: searchReturnCallback(input.returnScope) }]);
+  rows.push([mainMenuButton()]);
+
+  const query = escapeHtml(String(input.query ?? '').trim());
+  return {
+    text: input.rows.length
+      ? `🔎 <b>Результаты поиска</b>\n\nЗапрос: <b>${query}</b>\nНажмите на тайтл, чтобы открыть его настройки.`
+      : `🔎 <b>Ничего не найдено</b>\n\nПо запросу <b>${query}</b> ничего не найдено. Попробуйте другое название.`,
     parse_mode: 'HTML',
     reply_markup: { inline_keyboard: rows },
   };
@@ -234,8 +289,21 @@ export function parseNotificationUxCallback(value: string): NotificationUxCallba
   if (value === 'subs:all:clear:confirm') return { kind: 'clear-confirm' };
   if (value === 'subs:all:clear:yes') return { kind: 'clear-yes' };
   if (value === 'subs:mode:home') return { kind: 'mode-home' };
+  if (value === 'subs:search:again') return { kind: 'search-again' };
 
-  let match = /^subs:mine:(\d{1,4})$/.exec(value);
+  let match = /^subs:search:([hma])$/.exec(value);
+  if (match?.[1]) {
+    const returnScope: NotificationSearchReturnScope = match[1] === 'm'
+      ? 'mine'
+      : match[1] === 'a'
+        ? 'all'
+        : 'home';
+    return { kind: 'search-start', returnScope };
+  }
+  match = /^subs:search:page:(\d{1,4})$/.exec(value);
+  if (match?.[1]) return { kind: 'search-page', page: safePage(Number(match[1])) };
+
+  match = /^subs:mine:(\d{1,4})$/.exec(value);
   if (match?.[1]) return { kind: 'mine', page: safePage(Number(match[1])) };
   match = /^subs:all:(\d{1,4})$/.exec(value);
   if (match?.[1]) return { kind: 'all-list', page: safePage(Number(match[1])) };
@@ -277,8 +345,14 @@ export function formatDeliverySetting(setting: NotificationDeliverySetting): str
 
 function listCallback(context: NotificationReturnContext): string {
   if (context.origin === 'm') return `subs:mine:${safePage(context.page)}`;
-  if (context.origin === 's') return `subs:search:results:${safePage(context.page)}`;
+  if (context.origin === 's') return `subs:search:page:${safePage(context.page)}`;
   return `subs:all:${safePage(context.page)}`;
+}
+
+function searchReturnCallback(scope: NotificationSearchReturnScope): string {
+  if (scope === 'mine') return 'subs:mine:0';
+  if (scope === 'all') return 'subs:all:0';
+  return 'subs:center';
 }
 
 function modeButton(text: string, active: boolean): string {
