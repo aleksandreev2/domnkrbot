@@ -30,6 +30,8 @@
     "src/telegram-notification-settings.ts",
     "src/telegram-notification-controls.ts",
     "src/telegram-notification-mode-runtime.ts",
+    "src/telegram-notification-ux.ts",
+    "src/telegram-notification-ux-runtime.ts",
     "src/telegram-text-bot-ux-schema.ts",
     "src/telegram-bot-ui.ts",
     "src/telegram-title-proposal-ui.ts",
