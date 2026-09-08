@@ -7,12 +7,12 @@ class RecordingStatement {
   constructor(db, query) { this.db = db; this.query = query.replace(/\s+/g, ' ').trim(); this.values = []; }
   bind(...values) { this.values = values; return this; }
   async run() { this.db.runs.push({ query: this.query, values: this.values }); return { meta: { changes: 1 } }; }
-  async first() { return null; }
+  async first() { return this.db.firstRow; }
   async all() { return { results: [] }; }
 }
 
 class RecordingDb {
-  constructor() { this.runs = []; }
+  constructor(firstRow = null) { this.runs = []; this.firstRow = firstRow; }
   prepare(query) { return new RecordingStatement(this, query); }
 }
 
@@ -116,6 +116,24 @@ test('/propose starts a resumable source-choice session', async () => {
     const rows = send.payload.reply_markup.inline_keyboard;
     assert.equal(rows[0][0].callback_data, 'prop:source:ranobelib');
     assert.equal(rows[1][0].callback_data, 'prop:source:external');
+  });
+});
+
+test('unrelated slash commands bypass a legacy proposal session', async () => {
+  const env = makeEnv();
+  env.DB = new RecordingDb({
+    user_telegram_id: '42',
+    chat_id: '42',
+    step: 'external_title',
+    source_kind: 'external',
+    title: '',
+    source_url: '',
+  });
+  await withTelegramCalls(async (calls) => {
+    const response = await handleTelegramTitleProposalWebhookRequest(telegramRequest('/notifications'), env);
+    assert.equal(response, null);
+    assert.equal(calls.length, 0);
+    assert.equal(env.DB.runs.length, 0);
   });
 });
 

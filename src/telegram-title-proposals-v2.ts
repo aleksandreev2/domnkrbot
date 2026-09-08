@@ -1,5 +1,13 @@
 import { buildMainMenu, type TelegramPayload } from './telegram-bot-ui.js';
-import { ensureTelegramTextBotUxSchema } from './telegram-text-bot-ux-schema.js';
+import {
+  clearNotificationSearch,
+  ensureTelegramTextBotUxSchema,
+  setProposalInputActive,
+} from './telegram-text-bot-ux-schema.js';
+import {
+  clearNotificationCustomInput,
+  ensureTelegramNotificationSettingsSchema,
+} from './telegram-notification-settings.js';
 import {
   buildProposalCommentPrompt,
   buildProposalDeleteConfirmation,
@@ -62,6 +70,7 @@ type ProposalSession = ProposalUiSession & {
   candidates_json: string;
   raw_file_unique_id: string | null;
   raw_mime_type: string | null;
+  input_active: number | string | null;
   updated_at: string;
 };
 
@@ -114,7 +123,10 @@ export async function handleTelegramTitleProposalV2WebhookRequest(
   const message = update.message;
   const text = message?.text?.trim() ?? '';
   if (message?.chat?.type === 'private' && message.from && isPlainCommand(text, 'start')) {
+    await ensureUxSchema(env);
     await upsertTelegramUser(env, message.from);
+    await setProposalInputActive(env, String(message.from.id), 0);
+    await clearTransientNotificationInput(env, message.from.id);
     await sendMessage(env, message.chat.id, buildMainMenu(origin));
     return json({ ok: true });
   }
@@ -122,8 +134,10 @@ export async function handleTelegramTitleProposalV2WebhookRequest(
   if (message?.chat?.type === 'private' && message.from && isPlainCommand(text, 'propose')) {
     await ensureUxSchema(env);
     await upsertTelegramUser(env, message.from);
+    await clearTransientNotificationInput(env, message.from.id);
     const session = await loadProposalSession(env, message.from.id);
     if (session && isMeaningfulDraft(session)) {
+      await setProposalInputActive(env, String(message.from.id), 0);
       await sendMessage(env, message.chat.id, buildProposalResume(session));
     } else {
       await resetProposalSession(env, message.from, message.chat.id);
@@ -145,6 +159,7 @@ export async function handleTelegramTitleProposalV2WebhookRequest(
   await ensureUxSchema(env);
   const session = await loadProposalSession(env, message.from.id);
   if (!session) return null;
+  if (Number(session.input_active ?? 1) !== 1) return json({ ok: true });
   return handleSessionMessage(env, message, session);
 }
 
@@ -180,8 +195,10 @@ async function handleV2Callback(
 
   await ensureUxSchema(env);
   await upsertTelegramUser(env, callback.from);
+  await clearTransientNotificationInput(env, callback.from.id);
 
   if (data === 'prop:home') {
+    await setProposalInputActive(env, String(callback.from.id), 0);
     await editCallbackMessage(env, callback, buildMainMenu(origin));
     await answerCallback(env, callback.id);
     return json({ ok: true });
@@ -190,6 +207,7 @@ async function handleV2Callback(
   if (data === 'prop:new' || data === 'prop:start:again') {
     const session = data === 'prop:new' ? await loadProposalSession(env, callback.from.id) : null;
     if (session && isMeaningfulDraft(session)) {
+      await setProposalInputActive(env, String(callback.from.id), 0);
       await editCallbackMessage(env, callback, buildProposalResume(session));
     } else {
       await resetProposalSession(env, callback.from, callback.message!.chat.id);
@@ -219,6 +237,7 @@ async function handleV2Callback(
   }
 
   if (data === 'prop:resume' || data === 'prop:cancel:keep') {
+    await setProposalInputActive(env, String(callback.from.id), 1);
     await editCallbackMessage(env, callback, renderSession(session));
     await answerCallback(env, callback.id);
     return json({ ok: true });
@@ -226,6 +245,7 @@ async function handleV2Callback(
 
   if (data === 'prop:cancel') {
     if (isMeaningfulDraft(session)) {
+      await setProposalInputActive(env, String(callback.from.id), 0);
       await editCallbackMessage(env, callback, buildProposalDeleteConfirmation());
     } else {
       await deleteProposalSession(env, callback.from.id);
@@ -634,7 +654,10 @@ async function ensureUxSchema(env: TelegramTitleProposalV2Env): Promise<void> {
   const key = env.DB as unknown as object;
   let pending = schemaPromises.get(key);
   if (!pending) {
-    pending = ensureTelegramTextBotUxSchema(env).catch((error) => {
+    pending = (async () => {
+      await ensureTelegramTextBotUxSchema(env);
+      await ensureTelegramNotificationSettingsSchema(env);
+    })().catch((error) => {
       schemaPromises.delete(key);
       throw error;
     });
@@ -667,19 +690,19 @@ async function resetProposalSession(env: TelegramTitleProposalV2Env, user: Teleg
     INSERT INTO telegram_proposal_sessions (
       user_telegram_id,chat_id,step,source_kind,ranobelib_book_ref,title,original_title,source_url,
       candidates_json,raw_file_id,raw_file_unique_id,raw_file_name,raw_file_size,raw_mime_type,comment,return_to_review,
-      created_at,updated_at
-    ) VALUES (?,?,?,NULL,NULL,'','','','[]',NULL,NULL,NULL,NULL,NULL,'',0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      input_active,created_at,updated_at
+    ) VALUES (?,?,?,NULL,NULL,'','','','[]',NULL,NULL,NULL,NULL,NULL,'',0,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
     ON CONFLICT(user_telegram_id) DO UPDATE SET
       chat_id=excluded.chat_id,step=excluded.step,source_kind=NULL,ranobelib_book_ref=NULL,title='',original_title='',
       source_url='',candidates_json='[]',raw_file_id=NULL,raw_file_unique_id=NULL,raw_file_name=NULL,raw_file_size=NULL,
-      raw_mime_type=NULL,comment='',return_to_review=0,updated_at=CURRENT_TIMESTAMP
+      raw_mime_type=NULL,comment='',return_to_review=0,input_active=1,updated_at=CURRENT_TIMESTAMP
   `).bind(String(user.id), String(chatId), 'choose_source').run();
 }
 
 async function loadProposalSession(env: TelegramTitleProposalV2Env, userId: number): Promise<ProposalSession | null> {
   return env.DB.prepare(`
     SELECT user_telegram_id,chat_id,step,source_kind,ranobelib_book_ref,title,original_title,source_url,candidates_json,
-           raw_file_id,raw_file_unique_id,raw_file_name,raw_file_size,raw_mime_type,comment,return_to_review,updated_at
+           raw_file_id,raw_file_unique_id,raw_file_name,raw_file_size,raw_mime_type,comment,return_to_review,input_active,updated_at
     FROM telegram_proposal_sessions
     WHERE user_telegram_id=? AND updated_at >= datetime('now','-24 hours')
     LIMIT 1
@@ -690,6 +713,11 @@ async function setSessionStep(env: TelegramTitleProposalV2Env, userId: number, s
   await env.DB.prepare(`
     UPDATE telegram_proposal_sessions SET step=?,updated_at=CURRENT_TIMESTAMP WHERE user_telegram_id=?
   `).bind(step, String(userId)).run();
+}
+
+async function clearTransientNotificationInput(env: TelegramTitleProposalV2Env, userId: number): Promise<void> {
+  await clearNotificationSearch(env, String(userId));
+  await clearNotificationCustomInput(env, String(userId));
 }
 
 async function setSessionStepAndReviewFlag(

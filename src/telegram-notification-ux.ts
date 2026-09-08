@@ -286,7 +286,7 @@ export function buildNotificationTitleModeScreen(input: {
 
 export function parseNotificationUxCallback(value: string): NotificationUxCallback | null {
   if (value === 'subs:center') return { kind: 'dashboard' };
-  if (value === 'subs:all:clear:confirm') return { kind: 'clear-confirm' };
+  if (value === 'subs:all:clear' || value === 'subs:all:clear:confirm') return { kind: 'clear-confirm' };
   if (value === 'subs:all:clear:yes') return { kind: 'clear-yes' };
   if (value === 'subs:mode:home') return { kind: 'mode-home' };
   if (value === 'subs:search:again') return { kind: 'search-again' };

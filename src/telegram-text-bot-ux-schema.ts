@@ -37,6 +37,16 @@ export async function ensureTelegramTextBotUxSchema(env: TelegramTextBotUxSchema
     if (!/duplicate column name:\s*return_to_review/i.test(message)) throw error;
   }
 
+  try {
+    await env.DB.prepare(`
+      ALTER TABLE telegram_proposal_sessions
+      ADD COLUMN input_active INTEGER NOT NULL DEFAULT 0 CHECK (input_active IN (0, 1))
+    `).run();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/duplicate column name:\s*input_active/i.test(message)) throw error;
+  }
+
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS telegram_notification_search_state (
       user_telegram_id TEXT PRIMARY KEY,
@@ -139,6 +149,18 @@ export async function clearNotificationSearch(
     DELETE FROM telegram_notification_search_state
     WHERE user_telegram_id = ?
   `).bind(userId).run();
+}
+
+export async function setProposalInputActive(
+  env: TelegramTextBotUxSchemaEnv,
+  userTelegramId: string,
+  inputActive: 0 | 1,
+): Promise<void> {
+  const userId = normalizeUserId(userTelegramId);
+  if (!userId) return;
+  await env.DB.prepare(`
+    UPDATE telegram_proposal_sessions SET input_active=?,updated_at=CURRENT_TIMESTAMP WHERE user_telegram_id=?
+  `).bind(inputActive, userId).run();
 }
 
 function normalizeUserId(value: unknown): string {

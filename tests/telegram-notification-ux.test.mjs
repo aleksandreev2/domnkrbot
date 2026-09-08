@@ -155,6 +155,7 @@ test('new notification callback parser accepts compact v2 routes and historical 
   assert.deepEqual(parseNotificationUxCallback('subs:title:toggle:1000:a:1'), { kind: 'toggle', titleId: 1000, origin: 'a', page: 1 });
   assert.deepEqual(parseNotificationUxCallback('subs:title:mode:1000:s:6'), { kind: 'title-mode', titleId: 1000, origin: 's', page: 6 });
   assert.deepEqual(parseNotificationUxCallback('subs:all:clear:confirm'), { kind: 'clear-confirm' });
+  assert.deepEqual(parseNotificationUxCallback('subs:all:clear'), { kind: 'clear-confirm' });
   assert.deepEqual(parseNotificationUxCallback('subs:all:clear:yes'), { kind: 'clear-yes' });
   assert.deepEqual(parseNotificationUxCallback('subs:mode:home'), { kind: 'mode-home' });
   assert.equal(parseNotificationUxCallback('subs:title:0:m:0'), null);

@@ -1,6 +1,9 @@
 ALTER TABLE telegram_proposal_sessions
   ADD COLUMN return_to_review INTEGER NOT NULL DEFAULT 0 CHECK (return_to_review IN (0, 1));
 
+ALTER TABLE telegram_proposal_sessions
+  ADD COLUMN input_active INTEGER NOT NULL DEFAULT 0 CHECK (input_active IN (0, 1));
+
 CREATE TABLE telegram_notification_search_state (
   user_telegram_id TEXT PRIMARY KEY,
   query TEXT NOT NULL DEFAULT '',

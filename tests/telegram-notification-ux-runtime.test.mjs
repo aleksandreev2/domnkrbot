@@ -147,6 +147,8 @@ test('prop:notifications and /notifications open dashboard without global preset
     assert.match(call.payload.text, /Подписки:/);
     assert.ok(cb(call).includes('subs:mode:home'));
     assert.equal(cb(call).some((value) => /^subs:mode:g:/.test(value)), false);
+    assert.ok(db.queries.some(({ query, values }) => query.includes('UPDATE telegram_proposal_sessions SET input_active=?') && values[0] === 0));
+    assert.ok(db.queries.some(({ query }) => query.includes('DELETE FROM telegram_notification_input_state')));
   });
   await withTelegram(async (calls) => {
     await handleTelegramSubscriptionWebhookRequest(messageRequest('/notifications'), env(db));
@@ -213,7 +215,7 @@ test('My and All lists query active local catalog in pages of eight', async () =
 test('disable-all first asks confirmation and only confirmed callback mutates subscriptions', async () => {
   const db = new DB();
   await withTelegram(async (calls) => {
-    await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:all:clear:confirm'), env(db));
+    await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:all:clear'), env(db));
     assert.equal(db.subscriptions.size, 1);
     assert.ok(cb(edit(calls)).includes('subs:all:clear:yes'));
   });

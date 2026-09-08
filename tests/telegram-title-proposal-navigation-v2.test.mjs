@@ -154,6 +154,18 @@ test('v2 /start renders the neutral root menu without a skull', async () => {
   });
 });
 
+test('/start pauses a stored draft and clears transient notification text capture', async () => {
+  const { handleTelegramTitleProposalV2WebhookRequest } = await loadRuntime();
+  const state = env(proposalSession('external_title'));
+  await withTelegramCalls(async () => {
+    const response = await handleTelegramTitleProposalV2WebhookRequest(messageRequest({ text: '/start' }), state);
+    assert.equal(response?.status, 200);
+    assert.equal(state.DB.session.input_active, 0);
+    assert.ok(state.DB.runs.some((run) => run.query.includes('DELETE FROM telegram_notification_search_state')));
+    assert.ok(state.DB.runs.some((run) => run.query.includes('DELETE FROM telegram_notification_input_state')));
+  });
+});
+
 test('prop:new offers to resume a meaningful draft instead of resetting it and pauses free-text input', async () => {
   const { handleTelegramTitleProposalV2WebhookRequest } = await loadRuntime();
   const state = env(proposalSession('raw'));

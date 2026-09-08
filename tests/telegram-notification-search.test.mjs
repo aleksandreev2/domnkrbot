@@ -60,6 +60,10 @@ class Statement {
       this.db.customInput = null;
       return { meta: { changes: 1 } };
     }
+    if (this.query.includes('UPDATE telegram_proposal_sessions') && this.query.includes('input_active=?')) {
+      this.db.proposalInputActive = Number(this.values[0]);
+      return { meta: { changes: 1 } };
+    }
     return { meta: { changes: 1 } };
   }
   async first() {
@@ -119,6 +123,7 @@ class DB {
     this.searchState = null;
     this.customInput = null;
     this.global = { mode: 'instant', stackSize: null };
+    this.proposalInputActive = 1;
     this.queries = [];
   }
   prepare(query) { return new Statement(this, query); }
@@ -289,6 +294,20 @@ test('completed search results are navigation state, not a continuing free-text 
     const response = await handleTelegramNotificationTextInputRequest(messageRequest('Это уже другой текст'), env(db));
     assert.equal(response, null);
     assert.equal(db.searchState.query, 'культивация');
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('slash navigation exits every pending text capture before later handlers run', async () => {
+  const db = new DB();
+  db.searchState = { query: '', page: 0, returnScope: 'home', active: true };
+  db.customInput = { scope: 'global', bookRef: null };
+  await withTelegram(async (calls) => {
+    const response = await handleTelegramNotificationTextInputRequest(messageRequest('/help'), env(db));
+    assert.equal(response, null);
+    assert.equal(db.searchState, null);
+    assert.equal(db.customInput, null);
+    assert.equal(db.proposalInputActive, 0);
     assert.equal(calls.length, 0);
   });
 });

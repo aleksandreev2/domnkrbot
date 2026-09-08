@@ -229,6 +229,7 @@ test('legacy handoff screens reached from v2 submit/release controls stay non-de
     'src/telegram-subscription-webhook.ts',
     'src/telegram-subscriptions.ts',
     'src/telegram-title-proposals.ts',
+    'src/worker.ts',
   ];
   for (const path of files) {
     const source = await read(path);

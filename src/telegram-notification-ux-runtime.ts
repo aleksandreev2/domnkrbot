@@ -3,6 +3,7 @@ import {
   getGlobalDeliverySetting,
   getTitleDeliverySetting,
   ensureTelegramNotificationSettingsSchema,
+  clearNotificationCustomInput,
   type DeliverySetting,
 } from './telegram-notification-settings.js';
 import {
@@ -14,9 +15,11 @@ import {
 } from './telegram-subscriptions.js';
 import {
   beginNotificationSearch,
+  clearNotificationSearch,
   getNotificationSearchState,
   saveNotificationSearchPage,
   saveNotificationSearchQuery,
+  setProposalInputActive,
   ensureTelegramTextBotUxSchema,
   type NotificationSearchReturn,
 } from './telegram-text-bot-ux-schema.js';
@@ -59,14 +62,18 @@ export async function handleTelegramNotificationUxUpdate(
   await ensureNotificationUxSchema(env);
   await upsertTelegramUser(env, callback.from);
   const userId = String(callback.from.id);
+  await setProposalInputActive(env, userId, 0);
+  await clearNotificationCustomInput(env, userId);
 
   if (parsed.kind === 'dashboard') {
+    await clearNotificationSearch(env, userId);
     await respond(env, callback, chatId, await dashboardPayload(env, userId));
     await answerCallback(env, callback.id);
     return true;
   }
 
   if (parsed.kind === 'mine' || parsed.kind === 'all-list') {
+    await clearNotificationSearch(env, userId);
     const kind = parsed.kind === 'mine' ? 'mine' : 'all';
     const rows = kind === 'mine'
       ? await listMyTitles(env, userId, parsed.page)
@@ -77,7 +84,6 @@ export async function handleTelegramNotificationUxUpdate(
   }
 
   if (parsed.kind === 'search-start') {
-    await ensureTelegramTextBotUxSchema(env);
     await beginNotificationSearch(env, userId, parsed.returnScope);
     await respond(env, callback, chatId, buildNotificationSearchPrompt(parsed.returnScope));
     await answerCallback(env, callback.id);
@@ -85,7 +91,6 @@ export async function handleTelegramNotificationUxUpdate(
   }
 
   if (parsed.kind === 'search-again') {
-    await ensureTelegramTextBotUxSchema(env);
     const state = await getNotificationSearchState(env, userId);
     const returnScope = state?.returnScope ?? 'home';
     await beginNotificationSearch(env, userId, returnScope);
@@ -95,7 +100,6 @@ export async function handleTelegramNotificationUxUpdate(
   }
 
   if (parsed.kind === 'search-page') {
-    await ensureTelegramTextBotUxSchema(env);
     const state = await getNotificationSearchState(env, userId);
     if (!state?.query) {
       await beginNotificationSearch(env, userId, state?.returnScope ?? 'home');
@@ -176,7 +180,7 @@ export async function handleNotificationSearchInput(
   await ensureTelegramTextBotUxSchema(env);
   const userId = String(message.from.id);
   const state = await getNotificationSearchState(env, userId);
-  if (!state) return false;
+  if (!state || state.query) return false;
 
   await saveNotificationSearchQuery(env, userId, text);
   const rows = await searchLocalTitles(env, text, 0);
@@ -199,9 +203,13 @@ export async function sendTelegramNotificationDashboard(
 ): Promise<void> {
   await ensureNotificationUxSchema(env);
   await upsertTelegramUser(env, user);
+  const userId = String(user.id);
+  await setProposalInputActive(env, userId, 0);
+  await clearNotificationSearch(env, userId);
+  await clearNotificationCustomInput(env, userId);
   await telegramCall(env, 'sendMessage', {
     chat_id: chatId,
-    ...(await dashboardPayload(env, String(user.id))),
+    ...(await dashboardPayload(env, userId)),
   });
 }
 
@@ -379,6 +387,7 @@ async function count(statement: D1PreparedStatement): Promise<number> {
 async function ensureNotificationUxSchema(env: TelegramNotificationUxEnv): Promise<void> {
   await ensureTelegramSubscriptionSchema(env);
   await ensureTelegramNotificationSettingsSchema(env);
+  await ensureTelegramTextBotUxSchema(env);
 }
 
 function asUiSetting(setting: DeliverySetting): NotificationDeliverySetting {

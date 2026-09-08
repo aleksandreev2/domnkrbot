@@ -1264,6 +1264,8 @@ export async function handleTelegramTitleProposalWebhookRequest(
     return json({ ok: true });
   }
 
+  if (text.startsWith('/')) return null;
+
   if (!message.from) return null;
   const session = await loadProposalSession(env, message.from.id);
   if (!session) return null;

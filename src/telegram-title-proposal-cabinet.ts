@@ -1,4 +1,13 @@
 import { mainMenuButton, type TelegramButton, type TelegramPayload } from './telegram-bot-ui.js';
+import {
+  clearNotificationCustomInput,
+  ensureTelegramNotificationSettingsSchema,
+} from './telegram-notification-settings.js';
+import {
+  clearNotificationSearch,
+  ensureTelegramTextBotUxSchema,
+  setProposalInputActive,
+} from './telegram-text-bot-ux-schema.js';
 
 type D1PreparedStatement = {
   bind(...values: unknown[]): D1PreparedStatement;
@@ -68,6 +77,17 @@ export async function handleTelegramTitleProposalCabinetWebhookRequest(
   if (!callback?.data || callback.message?.chat?.type !== 'private' || !callback.message.chat.id) return null;
 
   const data = callback.data;
+  const list = parseListCallback(data);
+  const view = parseViewCallback(data);
+  if (data !== 'prop:mine' && !list && !view) return null;
+
+  await ensureTelegramTextBotUxSchema(env);
+  await ensureTelegramNotificationSettingsSchema(env);
+  const userId = String(callback.from.id);
+  await setProposalInputActive(env, userId, 0);
+  await clearNotificationSearch(env, userId);
+  await clearNotificationCustomInput(env, userId);
+
   if (data === 'prop:mine') {
     const counts = await loadCounts(env, callback.from.id);
     await editCallbackMessage(env, callback, buildCabinetLanding(counts));
@@ -75,7 +95,6 @@ export async function handleTelegramTitleProposalCabinetWebhookRequest(
     return json({ ok: true });
   }
 
-  const list = parseListCallback(data);
   if (list) {
     const rows = await loadList(env, callback.from.id, list.filter, list.page);
     await editCallbackMessage(env, callback, buildCabinetList(rows, list.filter, list.page));
@@ -83,7 +102,6 @@ export async function handleTelegramTitleProposalCabinetWebhookRequest(
     return json({ ok: true });
   }
 
-  const view = parseViewCallback(data);
   if (view) {
     const row = await loadProposal(env, view.proposalId);
     if (!row || (row.status === 'rejected' && row.user_telegram_id !== String(callback.from.id))) {

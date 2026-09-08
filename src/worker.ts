@@ -266,7 +266,7 @@ async function sendSiteButton(env: Env, chatId: number, origin: string, text: st
     chat_id: chatId,
     text,
     parse_mode: 'HTML',
-    reply_markup: { inline_keyboard: [[{ text: '☠️ Открыть сайт', url: origin }]] },
+    reply_markup: { inline_keyboard: [[{ text: '🌐 Открыть сайт', url: origin }]] },
   });
 }
 

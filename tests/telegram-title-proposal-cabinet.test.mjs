@@ -187,6 +187,9 @@ test('proposal card preserves filter/page Back context, shows owner note and Hom
     const data = callbackData(edit);
     assert.ok(data.includes('prop:mine:a:2'));
     assert.ok(data.includes('prop:home'));
+    assert.ok(state.DB.queries.some(({ query, values }) => query.includes('UPDATE telegram_proposal_sessions SET input_active=?') && values[0] === 0));
+    assert.ok(state.DB.queries.some(({ query }) => query.includes('DELETE FROM telegram_notification_search_state')));
+    assert.ok(state.DB.queries.some(({ query }) => query.includes('DELETE FROM telegram_notification_input_state')));
   });
 });
 

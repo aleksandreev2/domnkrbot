@@ -22,6 +22,11 @@ import {
   type DeliverySetting,
   type TelegramNotificationSettingsEnv,
 } from './telegram-notification-settings.js';
+import {
+  clearNotificationSearch,
+  ensureTelegramTextBotUxSchema,
+  setProposalInputActive,
+} from './telegram-text-bot-ux-schema.js';
 
 type NotificationQueueProducerLike = {
   send(message: { kind: 'drain' }): Promise<unknown> | unknown;
@@ -71,7 +76,10 @@ let schemaPromise: Promise<void> | null = null;
 
 async function ensureModeSchema(env: TelegramNotificationModeEnv): Promise<void> {
   if (!schemaPromise) {
-    schemaPromise = ensureTelegramNotificationSettingsSchema(env).catch((error) => {
+    schemaPromise = (async () => {
+      await ensureTelegramNotificationSettingsSchema(env);
+      await ensureTelegramTextBotUxSchema(env);
+    })().catch((error) => {
       schemaPromise = null;
       throw error;
     });
@@ -95,6 +103,7 @@ export async function handleTelegramNotificationModeUpdate(
   await ensureModeSchema(env);
   await upsertTelegramUser(env, callback.from);
   const userId = String(callback.from.id);
+  await setProposalInputActive(env, userId, 0);
   const chatId = callback.message.chat.id;
   const messageId = callback.message.message_id;
 
@@ -121,12 +130,14 @@ export async function handleTelegramNotificationModeUpdate(
 
   if (parsed.scope === 'global') {
     if (parsed.action === 'custom') {
+      await clearNotificationSearch(env, userId);
       await beginNotificationCustomInput(env, userId, { scope: 'global' });
       await sendTelegramMessage(env, chatId, customPrompt());
       await answerCallback(env, callback.id);
       return true;
     }
 
+    await clearNotificationCustomInput(env, userId);
     await setGlobalDeliverySetting(env, userId, callbackSetting(parsed));
     await wakeNotificationDelivery(env);
     await editTelegramMessage(
@@ -146,12 +157,14 @@ export async function handleTelegramNotificationModeUpdate(
   }
 
   if (parsed.action === 'custom') {
+    await clearNotificationSearch(env, userId);
     await beginNotificationCustomInput(env, userId, { scope: 'title', bookRef: title.book_ref });
     await sendTelegramMessage(env, chatId, customPrompt());
     await answerCallback(env, callback.id);
     return true;
   }
 
+  await clearNotificationCustomInput(env, userId);
   if (parsed.action === 'inherit') {
     await clearTitleDeliverySetting(env, userId, title.book_ref);
   } else {
@@ -173,7 +186,11 @@ export async function sendTelegramDeliveryModeCenter(
 ): Promise<void> {
   await ensureModeSchema(env);
   await upsertTelegramUser(env, user);
-  await sendTelegramMessage(env, chatId, await notificationCenterPayload(env, String(user.id)));
+  const userId = String(user.id);
+  await setProposalInputActive(env, userId, 0);
+  await clearNotificationSearch(env, userId);
+  await clearNotificationCustomInput(env, userId);
+  await sendTelegramMessage(env, chatId, await notificationCenterPayload(env, userId));
 }
 
 export async function handleNotificationCustomInput(
