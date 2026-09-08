@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { handleTelegramSubscriptionWebhookRequest } from '../dist-runtime/telegram-subscription-webhook.js';
+import {
+  handleTelegramNotificationTextInputRequest,
+  handleTelegramSubscriptionWebhookRequest,
+} from '../dist-runtime/telegram-subscription-webhook.js';
 
 const normalize = (value) => value.replace(/\s+/g, ' ').trim();
 
@@ -223,6 +226,18 @@ test('starting search stores return scope and renders a prompt without any upstr
   });
 });
 
+test('starting search cancels a stale custom-stack text prompt', async () => {
+  const db = new DB();
+  db.customInput = { scope: 'global', bookRef: null };
+  await withTelegram(async () => {
+    const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:search:h'), env(db));
+    assert.equal(response?.status, 200);
+    assert.equal(db.customInput, null);
+    assert.ok(db.searchState);
+    assert.equal(db.searchState.query, '');
+  });
+});
+
 test('ordinary search text queries only active local titles, paginates by eight and opens search-origin cards', async () => {
   const db = new DB();
   db.searchState = { query: '', page: 0, returnScope: 'home', active: true };
@@ -267,6 +282,28 @@ test('ordinary search text queries only active local titles, paginates by eight 
   });
 });
 
+test('completed search results are navigation state, not a continuing free-text capture', async () => {
+  const db = new DB();
+  db.searchState = { query: 'культивация', page: 0, returnScope: 'home', active: true };
+  await withTelegram(async (calls) => {
+    const response = await handleTelegramNotificationTextInputRequest(messageRequest('Это уже другой текст'), env(db));
+    assert.equal(response, null);
+    assert.equal(db.searchState.query, 'культивация');
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('leaving an awaiting search through the notification dashboard clears its text capture', async () => {
+  const db = new DB();
+  db.searchState = { query: '', page: 0, returnScope: 'home', active: true };
+  await withTelegram(async (calls) => {
+    const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:center'), env(db));
+    assert.equal(response?.status, 200);
+    assert.equal(db.searchState, null);
+    assert.ok(telegramCall(calls, 'editMessageText'));
+  });
+});
+
 test('empty search results keep the query and offer try-again plus the original return context', async () => {
   const db = new DB();
   db.searchState = { query: '', page: 0, returnScope: 'all', active: true };
@@ -277,6 +314,32 @@ test('empty search results keep the query and offer try-again plus the original 
     assert.match(send.payload.text, /ничего не найдено/i);
     assert.ok(callbacks(send).includes('subs:search:again'));
     assert.ok(callbacks(send).includes('subs:all:0'));
+  });
+});
+
+test('starting custom stack input clears an awaiting search state', async () => {
+  const db = new DB();
+  db.searchState = { query: '', page: 0, returnScope: 'home', active: true };
+  await withTelegram(async (calls) => {
+    const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:mode:g:c'), env(db));
+    assert.equal(response?.status, 200);
+    assert.equal(db.searchState, null);
+    assert.deepEqual(db.customInput, { scope: 'global', bookRef: null });
+    const send = telegramCall(calls, 'sendMessage');
+    assert.ok(send);
+    assert.match(send.payload.text, /размер стака/i);
+  });
+});
+
+test('choosing a preset delivery mode cancels an older custom-stack prompt', async () => {
+  const db = new DB();
+  db.customInput = { scope: 'global', bookRef: null };
+  await withTelegram(async (calls) => {
+    const response = await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:mode:g:5'), env(db));
+    assert.equal(response?.status, 200);
+    assert.equal(db.customInput, null);
+    assert.deepEqual(db.global, { mode: 'stack', stackSize: 5 });
+    assert.ok(telegramCall(calls, 'editMessageText'));
   });
 });
 
