@@ -238,8 +238,11 @@ function buildProposalCard(row: ProposalRow, viewerId: number, context: ParsedVi
 function parseListCallback(data: string): { filter: CabinetFilter; page: number } | null {
   const match = data.match(/^prop:mine:([adx]):(\d{1,4})$/);
   if (!match) return null;
-  const page = Math.min(9999, Number(match[2]));
-  return { filter: match[1] as CabinetFilter, page: Number.isSafeInteger(page) ? page : 0 };
+  const filter = match[1];
+  const rawPage = match[2];
+  if (!filter || !rawPage) return null;
+  const page = Math.min(9999, Number(rawPage));
+  return { filter: filter as CabinetFilter, page: Number.isSafeInteger(page) ? page : 0 };
 }
 
 function parseViewCallback(data: string): ParsedView | null {
@@ -247,10 +250,14 @@ function parseViewCallback(data: string): ParsedView | null {
   const body = data.slice('prop:view:'.length);
   const contextual = body.match(/^([^:]+):([adx]):(\d{1,4})$/);
   if (contextual) {
+    const proposalId = contextual[1];
+    const filter = contextual[2];
+    const rawPage = contextual[3];
+    if (!proposalId || !filter || !rawPage) return null;
     return {
-      proposalId: contextual[1],
-      filter: contextual[2] as CabinetFilter,
-      page: Math.min(9999, Number(contextual[3]) || 0),
+      proposalId,
+      filter: filter as CabinetFilter,
+      page: Math.min(9999, Number(rawPage) || 0),
     };
   }
   if (!body || body.includes(':')) return null;
