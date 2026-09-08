@@ -19,7 +19,7 @@ class Statement {
     if (this.query.includes('COUNT(*) AS count FROM title_subscriptions')) return { count: this.db.subscriptions.size };
     if (this.query.includes('COUNT(*) AS count FROM title_subscription_exclusions')) return { count: this.db.exclusions.size };
     if (this.query.includes('COUNT(*) AS count FROM ranobelib_titles')) return { count: this.db.titles.length };
-    if (this.query.includes('SUM(r.chapter_count) AS count')) return { count: this.db.pendingChapters };
+    if (this.query.includes('SUM(r.chapter_count)')) return { count: this.db.pendingChapters };
     if (this.query.includes('FROM ranobelib_titles') && this.query.includes('WHERE ranobelib_id = ?')) {
       return this.db.titles.find((row) => row.ranobelib_id === Number(this.values[0])) ?? null;
     }
@@ -229,14 +229,14 @@ test('stack title card queries pending chapter sum while instant card omits it',
   await withTelegram(async (calls) => {
     await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:title:1000:m:0'), env(db));
     assert.match(edit(calls).payload.text, /Накоплено: 4 \/ 10/);
-    assert.ok(db.queries.some((q) => q.kind === 'first' && q.query.includes('SUM(r.chapter_count) AS count')));
+    assert.ok(db.queries.some((q) => q.kind === 'first' && q.query.includes('SUM(r.chapter_count)')));
   });
   db.global = { mode: 'instant', stackSize: null };
   db.queries.length = 0;
   await withTelegram(async (calls) => {
     await handleTelegramSubscriptionWebhookRequest(callbackRequest('subs:title:1000:m:0'), env(db));
     assert.doesNotMatch(edit(calls).payload.text, /Накоплено:/);
-    assert.equal(db.queries.some((q) => q.query.includes('SUM(r.chapter_count) AS count')), false);
+    assert.equal(db.queries.some((q) => q.query.includes('SUM(r.chapter_count)')), false);
   });
 });
 
