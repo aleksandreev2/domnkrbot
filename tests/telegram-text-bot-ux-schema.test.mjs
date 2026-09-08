@@ -33,7 +33,7 @@ class DB {
 
 test('0017 is forward-only and adds proposal review-return plus notification search state', async () => {
   const sql = await readFile(new URL('../migrations/0017_telegram_text_bot_ux_v2.sql', import.meta.url), 'utf8');
-  assert.match(sql, /ALTER TABLE telegram_proposal_sessions ADD COLUMN return_to_review INTEGER NOT NULL DEFAULT 0/i);
+  assert.match(normalize(sql), /ALTER TABLE telegram_proposal_sessions ADD COLUMN return_to_review INTEGER NOT NULL DEFAULT 0/i);
   assert.match(sql, /CREATE TABLE telegram_notification_search_state/i);
   assert.match(sql, /return_scope TEXT NOT NULL DEFAULT 'home'/i);
   assert.match(sql, /CHECK \(return_scope IN \('home', 'mine', 'all'\)\)/i);
