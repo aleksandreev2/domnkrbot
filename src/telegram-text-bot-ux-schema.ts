@@ -1,4 +1,6 @@
 type D1PreparedStatementLike = {
+  bind(...values: unknown[]): D1PreparedStatementLike;
+  first<T = Record<string, unknown>>(): Promise<T | null>;
   run(): Promise<unknown>;
 };
 
@@ -8,6 +10,20 @@ type D1DatabaseLike = {
 
 export type TelegramTextBotUxSchemaEnv = {
   DB: D1DatabaseLike;
+};
+
+export type NotificationSearchReturn = 'home' | 'mine' | 'all';
+
+export type NotificationSearchState = {
+  query: string;
+  page: number;
+  returnScope: NotificationSearchReturn;
+};
+
+type NotificationSearchStateRow = {
+  query: string | null;
+  page: number | string | null;
+  return_scope: string | null;
 };
 
 export async function ensureTelegramTextBotUxSchema(env: TelegramTextBotUxSchemaEnv): Promise<void> {
@@ -38,4 +54,102 @@ export async function ensureTelegramTextBotUxSchema(env: TelegramTextBotUxSchema
     CREATE INDEX IF NOT EXISTS idx_telegram_notification_search_expiry
     ON telegram_notification_search_state(expires_at)
   `).run();
+}
+
+export async function beginNotificationSearch(
+  env: TelegramTextBotUxSchemaEnv,
+  userTelegramId: string,
+  returnScope: NotificationSearchReturn,
+): Promise<void> {
+  const userId = normalizeUserId(userTelegramId);
+  const scope = normalizeReturnScope(returnScope);
+  if (!userId) return;
+  await env.DB.prepare(`
+    INSERT INTO telegram_notification_search_state (
+      user_telegram_id, query, page, return_scope, expires_at
+    ) VALUES (?, ?, ?, ?, datetime(CURRENT_TIMESTAMP, '+10 minutes'))
+    ON CONFLICT(user_telegram_id) DO UPDATE SET
+      query = excluded.query,
+      page = excluded.page,
+      return_scope = excluded.return_scope,
+      expires_at = excluded.expires_at,
+      created_at = CURRENT_TIMESTAMP
+  `).bind(userId, '', 0, scope).run();
+}
+
+export async function getNotificationSearchState(
+  env: TelegramTextBotUxSchemaEnv,
+  userTelegramId: string,
+): Promise<NotificationSearchState | null> {
+  const userId = normalizeUserId(userTelegramId);
+  if (!userId) return null;
+  const row = await env.DB.prepare(`
+    SELECT query, page, return_scope
+    FROM telegram_notification_search_state
+    WHERE user_telegram_id = ?
+      AND expires_at > CURRENT_TIMESTAMP
+    LIMIT 1
+  `).bind(userId).first<NotificationSearchStateRow>();
+  if (!row) return null;
+  return {
+    query: String(row.query ?? ''),
+    page: safePage(row.page),
+    returnScope: normalizeReturnScope(row.return_scope),
+  };
+}
+
+export async function saveNotificationSearchQuery(
+  env: TelegramTextBotUxSchemaEnv,
+  userTelegramId: string,
+  query: string,
+): Promise<void> {
+  const userId = normalizeUserId(userTelegramId);
+  if (!userId) return;
+  await env.DB.prepare(`
+    UPDATE telegram_notification_search_state
+    SET query = ?,
+        page = ?,
+        expires_at = datetime(CURRENT_TIMESTAMP, '+10 minutes')
+    WHERE user_telegram_id = ?
+  `).bind(String(query ?? '').trim(), 0, userId).run();
+}
+
+export async function saveNotificationSearchPage(
+  env: TelegramTextBotUxSchemaEnv,
+  userTelegramId: string,
+  page: number,
+): Promise<void> {
+  const userId = normalizeUserId(userTelegramId);
+  if (!userId) return;
+  await env.DB.prepare(`
+    UPDATE telegram_notification_search_state
+    SET page = ?,
+        expires_at = datetime(CURRENT_TIMESTAMP, '+10 minutes')
+    WHERE user_telegram_id = ?
+  `).bind(safePage(page), userId).run();
+}
+
+export async function clearNotificationSearch(
+  env: TelegramTextBotUxSchemaEnv,
+  userTelegramId: string,
+): Promise<void> {
+  const userId = normalizeUserId(userTelegramId);
+  if (!userId) return;
+  await env.DB.prepare(`
+    DELETE FROM telegram_notification_search_state
+    WHERE user_telegram_id = ?
+  `).bind(userId).run();
+}
+
+function normalizeUserId(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function normalizeReturnScope(value: unknown): NotificationSearchReturn {
+  return value === 'mine' || value === 'all' ? value : 'home';
+}
+
+function safePage(value: unknown): number {
+  const page = Number(value);
+  return Number.isSafeInteger(page) && page >= 0 ? Math.min(9999, page) : 0;
 }
