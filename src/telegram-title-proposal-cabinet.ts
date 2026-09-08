@@ -60,10 +60,10 @@ export async function handleTelegramTitleProposalCabinetWebhookRequest(
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (request.method !== 'POST' || url.pathname !== '/telegram/webhook') return null;
-  const secret = env.TELEGRAM_WEBHOOK_SECRET?.trim();
-  if (secret && request.headers.get('x-telegram-bot-api-secret-token') !== secret) return null;
+  const secret = env.TELEGRAM_WEBHOOK_SECRET?.trim() ?? '';
+  if (!secret || request.headers.get('x-telegram-bot-api-secret-token') !== secret) return null;
 
-  const update = await request.json().catch(() => null) as TelegramUpdate | null;
+  const update = await request.clone().json().catch(() => null) as TelegramUpdate | null;
   const callback = update?.callback_query;
   if (!callback?.data || callback.message?.chat?.type !== 'private' || !callback.message.chat.id) return null;
 
