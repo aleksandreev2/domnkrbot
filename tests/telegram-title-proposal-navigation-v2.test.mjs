@@ -23,6 +23,7 @@ const proposalSession = (step, extra = {}) => ({
   raw_mime_type: null,
   comment: '',
   return_to_review: 0,
+  input_active: 1,
   updated_at: now(),
   ...extra,
 });
@@ -47,13 +48,18 @@ class Statement {
         title: '',
         original_title: '',
         source_url: '',
+        input_active: 1,
       });
     } else if (this.query.includes('DELETE FROM telegram_proposal_sessions')) {
       this.db.session = null;
+    } else if (this.query.includes('UPDATE telegram_proposal_sessions') && this.query.includes('SET input_active=?')) {
+      if (this.db.session) this.db.session.input_active = Number(this.values[0]);
     } else if (this.query.includes('UPDATE telegram_proposal_sessions') && this.query.includes('SET step=?')) {
       if (this.db.session) {
         this.db.session.step = String(this.values[0]);
         if (this.query.includes('source_kind=?')) this.db.session.source_kind = String(this.values[1]);
+        if (this.query.includes('title=?')) this.db.session.title = String(this.values[1]);
+        if (this.query.includes('source_url=?')) this.db.session.source_url = String(this.values[1]);
       }
     } else if (this.query.includes('UPDATE telegram_proposal_sessions') && this.query.includes('raw_file_id=?')) {
       if (this.db.session) {
@@ -148,13 +154,14 @@ test('v2 /start renders the neutral root menu without a skull', async () => {
   });
 });
 
-test('prop:new offers to resume a meaningful draft instead of resetting it', async () => {
+test('prop:new offers to resume a meaningful draft instead of resetting it and pauses free-text input', async () => {
   const { handleTelegramTitleProposalV2WebhookRequest } = await loadRuntime();
   const state = env(proposalSession('raw'));
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:new'), state);
     assert.equal(response?.status, 200);
     assert.equal(state.DB.runs.some((run) => run.query.includes('INSERT INTO telegram_proposal_sessions')), false);
+    assert.equal(state.DB.session.input_active, 0);
     const edit = calls.find((call) => call.method === 'editMessageText');
     assert.match(edit.payload.text, /незавершённая заявка/i);
     const callbacks = flatButtons(edit).map((button) => button.callback_data);
@@ -164,17 +171,55 @@ test('prop:new offers to resume a meaningful draft instead of resetting it', asy
   });
 });
 
-test('Home returns to root without deleting the current draft', async () => {
+test('Home pauses the current draft so later free text cannot mutate it', async () => {
   const { handleTelegramTitleProposalV2WebhookRequest } = await loadRuntime();
-  const originalSession = proposalSession('comment', { comment: 'Черновик' });
+  const originalSession = proposalSession('external_title', {
+    title: '',
+    source_url: '',
+    comment: 'Черновик',
+  });
   const state = env(originalSession);
   await withTelegramCalls(async (calls) => {
     const response = await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:home'), state);
     assert.equal(response?.status, 200);
     assert.equal(state.DB.runs.some((run) => run.query.includes('DELETE FROM telegram_proposal_sessions')), false);
     assert.equal(state.DB.session, originalSession);
+    assert.equal(state.DB.session.input_active, 0);
     const edit = calls.find((call) => call.method === 'editMessageText');
     assert.match(edit.payload.text, /Дом Некроманта/);
+  });
+
+  await withTelegramCalls(async (calls) => {
+    const response = await handleTelegramTitleProposalV2WebhookRequest(messageRequest({ text: 'Это не должно стать названием' }), state);
+    assert.equal(response?.status, 200, 'paused draft should absorb stray text so legacy proposal routing cannot mutate it');
+    assert.equal(state.DB.session.step, 'external_title');
+    assert.equal(state.DB.session.title, '');
+    assert.equal(calls.length, 0);
+  });
+});
+
+test('Resume reactivates a paused draft and the next valid input advances it', async () => {
+  const { handleTelegramTitleProposalV2WebhookRequest } = await loadRuntime();
+  const state = env(proposalSession('external_title', {
+    title: '',
+    source_url: '',
+    input_active: 0,
+  }));
+
+  await withTelegramCalls(async (calls) => {
+    const response = await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:resume'), state);
+    assert.equal(response?.status, 200);
+    assert.equal(state.DB.session.input_active, 1);
+    const edit = calls.find((call) => call.method === 'editMessageText');
+    assert.match(edit.payload.text, /Шаг 2 из 5/);
+  });
+
+  await withTelegramCalls(async (calls) => {
+    const response = await handleTelegramTitleProposalV2WebhookRequest(messageRequest({ text: 'Новое название' }), state);
+    assert.equal(response?.status, 200);
+    assert.equal(state.DB.session.step, 'external_url');
+    assert.equal(state.DB.session.title, 'Новое название');
+    assert.ok(calls.some((call) => call.method === 'sendMessage'));
   });
 });
 
@@ -200,12 +245,13 @@ test('Resume renders the stored phase and Back moves one logical step without de
   });
 });
 
-test('meaningful draft cancellation requires confirmation and only confirmed cancellation deletes it', async () => {
+test('meaningful draft cancellation pauses input, requires confirmation and only confirmed cancellation deletes it', async () => {
   const { handleTelegramTitleProposalV2WebhookRequest } = await loadRuntime();
   const state = env(proposalSession('raw'));
   await withTelegramCalls(async (calls) => {
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:cancel'), state);
     assert.ok(state.DB.session);
+    assert.equal(state.DB.session.input_active, 0);
     assert.equal(state.DB.runs.some((run) => run.query.includes('DELETE FROM telegram_proposal_sessions')), false);
     const edit = calls.find((call) => call.method === 'editMessageText');
     assert.match(edit.payload.text, /Удалить черновик заявки/);
@@ -213,7 +259,13 @@ test('meaningful draft cancellation requires confirmation and only confirmed can
     assert.ok(callbacks.includes('prop:cancel:confirm'));
     assert.ok(callbacks.includes('prop:cancel:keep'));
   });
+  await withTelegramCalls(async (calls) => {
+    await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:cancel:keep'), state);
+    assert.equal(state.DB.session.input_active, 1);
+    assert.ok(calls.some((call) => call.method === 'editMessageText'));
+  });
   await withTelegramCalls(async () => {
+    await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:cancel'), state);
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:cancel:confirm'), state);
     assert.equal(state.DB.session, null);
     assert.ok(state.DB.runs.some((run) => run.query.includes('DELETE FROM telegram_proposal_sessions')));
