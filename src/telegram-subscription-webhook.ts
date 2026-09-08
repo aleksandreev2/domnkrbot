@@ -7,8 +7,11 @@ import {
 import {
   handleNotificationCustomInput,
   handleTelegramNotificationModeUpdate,
-  sendTelegramDeliveryModeCenter,
 } from './telegram-notification-mode-runtime.js';
+import {
+  handleTelegramNotificationUxUpdate,
+  sendTelegramNotificationDashboard,
+} from './telegram-notification-ux-runtime.js';
 import {
   ensureTelegramSubscriptionCatalog,
   withTelegramSubscriptionCatalogDb,
@@ -74,8 +77,9 @@ export async function handleTelegramSubscriptionWebhookRequest(
 
   const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
   // Telegram callbacks must stay responsive even when RanobeLib is slow or unavailable.
-  // Delivery-mode callbacks are resolved entirely from D1 before the legacy subscription router.
+  // The v2 dashboard/title-card routes are resolved entirely from D1 before legacy controls.
   const subscriptionUpdate = normalizeSubscriptionCallback(update);
+  if (await handleTelegramNotificationUxUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
   if (await handleTelegramNotificationModeUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
   if (await handleTelegramSubscriptionUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
 
@@ -88,7 +92,7 @@ export async function handleTelegramSubscriptionWebhookRequest(
   if (await handleNotificationCustomInput(update, subscriptionEnv)) return json({ ok: true });
 
   if (message.from && isPlainCommand(text, 'notifications')) {
-    await sendTelegramDeliveryModeCenter(subscriptionEnv, message.from, message.chat.id);
+    await sendTelegramNotificationDashboard(subscriptionEnv, message.from, message.chat.id);
     return json({ ok: true });
   }
 
