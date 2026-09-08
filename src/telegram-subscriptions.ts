@@ -134,7 +134,7 @@ export function buildSubscriptionMenu(
   nav.push({ text: `${page + 1} / ${totalPages}`, callback_data: 'subs:noop' });
   if (page + 1 < totalPages) nav.push({ text: '▶️', callback_data: `subs:list:${page + 1}` });
   rows.push(nav);
-  rows.push([{ text: options.allTitles ? '✅ Все переводы включены' : '☠️ Подписаться на все', callback_data: 'subs:all:on' }]);
+  rows.push([{ text: options.allTitles ? '✅ Все переводы включены' : '🔔 Подписаться на все', callback_data: 'subs:all:on' }]);
   rows.push([
     { text: '✅ Мои подписки', callback_data: 'subs:mine:0' },
     { text: '🔕 Отключить все', callback_data: 'subs:all:clear' },
@@ -438,7 +438,6 @@ export async function handleTelegramSubscriptionUpdate(
     ? all.filter((title) => allTitles ? !excludedIds.has(title.ranobelib_id) : subscribedIds.has(title.ranobelib_id))
     : all;
   const menu = buildSubscriptionMenu(visible, { page: requestedPage, subscribedIds, excludedIds, allTitles });
-
   await editTelegramMessage(env, callback.message.chat.id, callback.message.message_id, menu);
   await answerCallback(env, callback.id, notice);
   return true;

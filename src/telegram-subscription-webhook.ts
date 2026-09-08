@@ -7,13 +7,26 @@ import {
 import {
   handleNotificationCustomInput,
   handleTelegramNotificationModeUpdate,
-  sendTelegramDeliveryModeCenter,
 } from './telegram-notification-mode-runtime.js';
+import {
+  clearNotificationCustomInput,
+  ensureTelegramNotificationSettingsSchema,
+} from './telegram-notification-settings.js';
+import {
+  handleNotificationSearchInput,
+  handleTelegramNotificationUxUpdate,
+  sendTelegramNotificationDashboard,
+} from './telegram-notification-ux-runtime.js';
 import {
   ensureTelegramSubscriptionCatalog,
   withTelegramSubscriptionCatalogDb,
 } from './telegram-subscription-catalog.js';
 import type { RanobeLibRuntimeEnv } from './ranobelib-runtime.js';
+import {
+  clearNotificationSearch,
+  ensureTelegramTextBotUxSchema,
+  setProposalInputActive,
+} from './telegram-text-bot-ux-schema.js';
 
 export type TelegramSubscriptionWebhookEnv = TelegramSubscriptionEnv & RanobeLibRuntimeEnv & {
   TELEGRAM_WEBHOOK_SECRET?: string;
@@ -59,6 +72,38 @@ async function prepareCatalog(env: TelegramSubscriptionWebhookEnv): Promise<void
   }
 }
 
+export async function handleTelegramNotificationTextInputRequest(
+  request: Request,
+  env: TelegramSubscriptionWebhookEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (request.method !== 'POST' || url.pathname !== '/telegram/webhook') return null;
+
+  const expected = env.TELEGRAM_WEBHOOK_SECRET?.trim() ?? '';
+  if (!expected || request.headers.get('x-telegram-bot-api-secret-token') !== expected) return null;
+
+  const update = await request.clone().json().catch(() => null) as TelegramSubscriptionUpdate | null;
+  if (!update) return null;
+  const message = update.message;
+  const text = (message?.text ?? '').trim();
+  if (!message?.from || !message.chat?.id || message.chat.type !== 'private' || !text) return null;
+
+  if (text.startsWith('/')) {
+    await ensureTelegramNotificationSettingsSchema(env);
+    await ensureTelegramTextBotUxSchema(env);
+    const userId = String(message.from.id);
+    await setProposalInputActive(env, userId, 0);
+    await clearNotificationSearch(env, userId);
+    await clearNotificationCustomInput(env, userId);
+    return null;
+  }
+
+  const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
+  if (await handleNotificationCustomInput(update, subscriptionEnv)) return json({ ok: true });
+  if (await handleNotificationSearchInput(update, env)) return json({ ok: true });
+  return null;
+}
+
 export async function handleTelegramSubscriptionWebhookRequest(
   request: Request,
   env: TelegramSubscriptionWebhookEnv,
@@ -74,8 +119,11 @@ export async function handleTelegramSubscriptionWebhookRequest(
 
   const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
   // Telegram callbacks must stay responsive even when RanobeLib is slow or unavailable.
-  // Delivery-mode callbacks are resolved entirely from D1 before the legacy subscription router.
+  // The v2 dashboard/title-card/search routes use the raw D1 binding so their
+  // snapshot_ready filters are preserved; only legacy subscription routes keep
+  // the compatibility DB wrapper that exposes discovered pre-snapshot titles.
   const subscriptionUpdate = normalizeSubscriptionCallback(update);
+  if (await handleTelegramNotificationUxUpdate(subscriptionUpdate, env)) return json({ ok: true });
   if (await handleTelegramNotificationModeUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
   if (await handleTelegramSubscriptionUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
 
@@ -83,12 +131,13 @@ export async function handleTelegramSubscriptionWebhookRequest(
   const text = (message?.text ?? '').trim();
   if (!message?.chat?.id || message.chat.type !== 'private') return null;
 
-  // An active custom-size prompt gets first chance at ordinary private text. Slash commands
-  // intentionally pass through so /notifications, /subscriptions and legacy flows keep working.
+  // Text-input priority is intentional: custom stack size first, then notification search.
+  // Slash commands pass through both handlers so commands keep their normal routing.
   if (await handleNotificationCustomInput(update, subscriptionEnv)) return json({ ok: true });
+  if (await handleNotificationSearchInput(update, env)) return json({ ok: true });
 
   if (message.from && isPlainCommand(text, 'notifications')) {
-    await sendTelegramDeliveryModeCenter(subscriptionEnv, message.from, message.chat.id);
+    await sendTelegramNotificationDashboard(env, message.from, message.chat.id);
     return json({ ok: true });
   }
 

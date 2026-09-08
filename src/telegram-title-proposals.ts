@@ -606,13 +606,21 @@ async function findActiveDuplicate(
 function buildDuplicateMessage(duplicate: ProposalRecord, currentUserId: number): Record<string, unknown> {
   const votes = Number(duplicate.vote_count || 0);
   const buttons: Record<string, string>[][] = [];
-  if (duplicate.user_telegram_id !== String(currentUserId)) {
+  const canSupport = duplicate.user_telegram_id !== String(currentUserId);
+  if (canSupport) {
     buttons.push([{ text: '👍 Поддержать заявку', callback_data: `prop:support:${duplicate.id}` }]);
   }
   buttons.push([{ text: '👁 Посмотреть', callback_data: `prop:view:${duplicate.id}` }]);
-  buttons.push([{ text: '↩️ В меню', callback_data: 'prop:cancel' }]);
+  buttons.push([{ text: '📚 Предложить ещё', callback_data: 'prop:start:again' }]);
+  buttons.push([{ text: '🏠 Главное меню', callback_data: 'prop:home' }]);
   return {
-    text: `<b>Этот тайтл уже предлагали.</b>\n\n«${escapeHtml(duplicate.title)}»\nСейчас у заявки голосов: <b>${votes}</b>.`,
+    text: [
+      '<b>Этот тайтл уже предлагали.</b>',
+      '',
+      `«${escapeHtml(duplicate.title)}»`,
+      `Сейчас у заявки голосов: <b>${votes}</b>.`,
+      ...(canSupport ? ['', 'Кнопка «Поддержать» показывает команде, сколько читателей ждут этот тайтл.'] : []),
+    ].join('\n'),
     parse_mode: 'HTML',
     reply_markup: { inline_keyboard: buttons },
   };
@@ -713,8 +721,8 @@ function buildProposalCreated(id: string): Record<string, unknown> {
     reply_markup: {
       inline_keyboard: [
         [{ text: '👁 Посмотреть заявку', callback_data: `prop:view:${id}` }],
-        [{ text: '🗂 Мои заявки', callback_data: 'prop:mine' }],
-        [{ text: '☠️ Главное меню', callback_data: 'prop:cancel' }],
+        [{ text: '📚 Предложить ещё', callback_data: 'prop:start:again' }],
+        [{ text: '🏠 Главное меню', callback_data: 'prop:home' }],
       ],
     },
   };
@@ -727,8 +735,8 @@ function buildRawStorageUnavailable(): Record<string, unknown> {
     reply_markup: {
       inline_keyboard: [
         [{ text: '📨 Отправить без RAW', callback_data: 'prop:submit:no-raw' }],
-        [{ text: '↩️ Оставить заявку', callback_data: 'prop:edit' }],
-        [{ text: '❌ Отмена', callback_data: 'prop:cancel' }],
+        [{ text: '↩️ Вернуться к проверке', callback_data: 'prop:resume' }],
+        [{ text: '🏠 Главное меню', callback_data: 'prop:home' }],
       ],
     },
   };
@@ -763,7 +771,7 @@ function buildMyProposals(rows: ProposalRecord[]): Record<string, unknown> {
     reply_markup: {
       inline_keyboard: [
         ...rows.map((row) => [{ text: row.title.slice(0, 55), callback_data: `prop:view:${row.id}` }]),
-        [{ text: '☠️ Главное меню', callback_data: 'prop:cancel' }],
+        [{ text: '🏠 Главное меню', callback_data: 'prop:home' }],
       ],
     },
   };
@@ -801,7 +809,7 @@ function buildProposalView(row: ProposalRecord, viewerId: number): Record<string
 
 export function buildProposalMainMenu(origin: string): Record<string, unknown> {
   return {
-    text: '<b>☠️ Дом Некроманта</b>\n\nЧто хотите сделать?',
+    text: '<b>Дом Некроманта</b>\n\nЧто хотите сделать?',
     parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
@@ -876,7 +884,7 @@ function buildReview(session: ProposalSession): Record<string, unknown> {
     reply_markup: {
       inline_keyboard: [
         [{ text: '📨 Отправить', callback_data: 'prop:submit' }],
-        [{ text: '✏️ Изменить', callback_data: 'prop:edit' }],
+        [{ text: '✏️ Изменить название', callback_data: 'prop:edit:title' }],
         [{ text: '❌ Отмена', callback_data: 'prop:cancel' }],
       ],
     },
@@ -1255,6 +1263,8 @@ export async function handleTelegramTitleProposalWebhookRequest(
     await sendMessage(env, message.chat.id, buildSourceChoice());
     return json({ ok: true });
   }
+
+  if (text.startsWith('/')) return null;
 
   if (!message.from) return null;
   const session = await loadProposalSession(env, message.from.id);
