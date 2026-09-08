@@ -63,6 +63,27 @@ async function prepareCatalog(env: TelegramSubscriptionWebhookEnv): Promise<void
   }
 }
 
+export async function handleTelegramNotificationTextInputRequest(
+  request: Request,
+  env: TelegramSubscriptionWebhookEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (request.method !== 'POST' || url.pathname !== '/telegram/webhook') return null;
+
+  const expected = env.TELEGRAM_WEBHOOK_SECRET?.trim() ?? '';
+  if (!expected || request.headers.get('x-telegram-bot-api-secret-token') !== expected) return null;
+
+  const update = await request.clone().json().catch(() => null) as TelegramSubscriptionUpdate | null;
+  const message = update?.message;
+  const text = (message?.text ?? '').trim();
+  if (!message?.from || !message.chat?.id || message.chat.type !== 'private' || !text || text.startsWith('/')) return null;
+
+  const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
+  if (await handleNotificationCustomInput(update, subscriptionEnv)) return json({ ok: true });
+  if (await handleNotificationSearchInput(update, env)) return json({ ok: true });
+  return null;
+}
+
 export async function handleTelegramSubscriptionWebhookRequest(
   request: Request,
   env: TelegramSubscriptionWebhookEnv,
