@@ -32,6 +32,8 @@
     "src/telegram-notification-mode-runtime.ts",
     "src/telegram-text-bot-ux-schema.ts",
     "src/telegram-bot-ui.ts",
+    "src/telegram-title-proposal-ui.ts",
+    "src/telegram-title-proposals-v2.ts",
     "src/telegram-title-proposals.ts",
     "src/telegram-subscription-webhook.ts",
     "src/ranobelib-fast-scanner.ts",
