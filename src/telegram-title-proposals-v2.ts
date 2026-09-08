@@ -39,7 +39,7 @@ type TelegramDocument = {
 type TelegramMessage = {
   message_id: number;
   chat: { id: number; type?: string };
-  from?: TelegramUser;
+  from: TelegramUser;
   text?: string;
   document?: TelegramDocument;
 };
