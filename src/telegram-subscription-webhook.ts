@@ -9,6 +9,7 @@ import {
   handleTelegramNotificationModeUpdate,
 } from './telegram-notification-mode-runtime.js';
 import {
+  handleNotificationSearchInput,
   handleTelegramNotificationUxUpdate,
   sendTelegramNotificationDashboard,
 } from './telegram-notification-ux-runtime.js';
@@ -87,9 +88,10 @@ export async function handleTelegramSubscriptionWebhookRequest(
   const text = (message?.text ?? '').trim();
   if (!message?.chat?.id || message.chat.type !== 'private') return null;
 
-  // An active custom-size prompt gets first chance at ordinary private text. Slash commands
-  // intentionally pass through so /notifications, /subscriptions and legacy flows keep working.
+  // Text-input priority is intentional: custom stack size first, then notification search.
+  // Slash commands pass through both handlers so commands keep their normal routing.
   if (await handleNotificationCustomInput(update, subscriptionEnv)) return json({ ok: true });
+  if (await handleNotificationSearchInput(update, subscriptionEnv)) return json({ ok: true });
 
   if (message.from && isPlainCommand(text, 'notifications')) {
     await sendTelegramNotificationDashboard(subscriptionEnv, message.from, message.chat.id);
