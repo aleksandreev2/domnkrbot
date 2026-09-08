@@ -13,9 +13,19 @@ import {
   type TelegramSubscriptionUpdate,
 } from './telegram-subscriptions.js';
 import {
+  beginNotificationSearch,
+  getNotificationSearchState,
+  saveNotificationSearchPage,
+  saveNotificationSearchQuery,
+  ensureTelegramTextBotUxSchema,
+  type NotificationSearchReturn,
+} from './telegram-text-bot-ux-schema.js';
+import {
   buildNotificationDashboard,
   buildNotificationDisableAllConfirmation,
   buildNotificationGlobalModeScreen,
+  buildNotificationSearchPrompt,
+  buildNotificationSearchResults,
   buildNotificationTitleCard,
   buildNotificationTitleList,
   buildNotificationTitleModeScreen,
@@ -62,6 +72,45 @@ export async function handleTelegramNotificationUxUpdate(
       ? await listMyTitles(env, userId, parsed.page)
       : await listAllTitles(env, parsed.page);
     await respond(env, callback, chatId, buildNotificationTitleList({ kind, rows, page: parsed.page }));
+    await answerCallback(env, callback.id);
+    return true;
+  }
+
+  if (parsed.kind === 'search-start') {
+    await ensureTelegramTextBotUxSchema(env);
+    await beginNotificationSearch(env, userId, parsed.returnScope);
+    await respond(env, callback, chatId, buildNotificationSearchPrompt(parsed.returnScope));
+    await answerCallback(env, callback.id);
+    return true;
+  }
+
+  if (parsed.kind === 'search-again') {
+    await ensureTelegramTextBotUxSchema(env);
+    const state = await getNotificationSearchState(env, userId);
+    const returnScope = state?.returnScope ?? 'home';
+    await beginNotificationSearch(env, userId, returnScope);
+    await respond(env, callback, chatId, buildNotificationSearchPrompt(returnScope));
+    await answerCallback(env, callback.id);
+    return true;
+  }
+
+  if (parsed.kind === 'search-page') {
+    await ensureTelegramTextBotUxSchema(env);
+    const state = await getNotificationSearchState(env, userId);
+    if (!state?.query) {
+      await beginNotificationSearch(env, userId, state?.returnScope ?? 'home');
+      await respond(env, callback, chatId, buildNotificationSearchPrompt(state?.returnScope ?? 'home'));
+      await answerCallback(env, callback.id, 'Поиск устарел. Введите название ещё раз.');
+      return true;
+    }
+    await saveNotificationSearchPage(env, userId, parsed.page);
+    const rows = await searchLocalTitles(env, state.query, parsed.page);
+    await respond(env, callback, chatId, buildNotificationSearchResults({
+      query: state.query,
+      rows,
+      page: parsed.page,
+      returnScope: state.returnScope,
+    }));
     await answerCallback(env, callback.id);
     return true;
   }
@@ -114,6 +163,33 @@ export async function handleTelegramNotificationUxUpdate(
   }
 
   return false;
+}
+
+export async function handleNotificationSearchInput(
+  update: TelegramSubscriptionUpdate,
+  env: TelegramNotificationUxEnv,
+): Promise<boolean> {
+  const message = update.message;
+  const text = message?.text?.trim() ?? '';
+  if (!message?.from || !message.chat?.id || message.chat.type !== 'private' || !text || text.startsWith('/')) return false;
+
+  await ensureTelegramTextBotUxSchema(env);
+  const userId = String(message.from.id);
+  const state = await getNotificationSearchState(env, userId);
+  if (!state) return false;
+
+  await saveNotificationSearchQuery(env, userId, text);
+  const rows = await searchLocalTitles(env, text, 0);
+  await telegramCall(env, 'sendMessage', {
+    chat_id: message.chat.id,
+    ...buildNotificationSearchResults({
+      query: text,
+      rows,
+      page: 0,
+      returnScope: state.returnScope,
+    }),
+  });
+  return true;
 }
 
 export async function sendTelegramNotificationDashboard(
@@ -184,6 +260,24 @@ async function listAllTitles(env: TelegramNotificationUxEnv, page: number): Prom
     ORDER BY title COLLATE NOCASE ASC, ranobelib_id ASC
     LIMIT ? OFFSET ?
   `).bind(8, safePage(page) * 8).all<NotificationUiTitle>()).results;
+}
+
+async function searchLocalTitles(
+  env: TelegramNotificationUxEnv,
+  query: string,
+  page: number,
+): Promise<NotificationUiTitle[]> {
+  const clean = String(query ?? '').trim();
+  if (!clean) return [];
+  return (await env.DB.prepare(`
+    SELECT ranobelib_id,book_ref,title,url
+    FROM ranobelib_titles
+    WHERE is_active = 1
+      AND snapshot_ready = 1
+      AND title LIKE ? COLLATE NOCASE
+    ORDER BY title COLLATE NOCASE ASC, ranobelib_id ASC
+    LIMIT ? OFFSET ?
+  `).bind(`%${clean}%`, 8, safePage(page) * 8).all<NotificationUiTitle>()).results;
 }
 
 async function titleById(env: TelegramNotificationUxEnv, titleId: number): Promise<NotificationUiTitle | null> {
