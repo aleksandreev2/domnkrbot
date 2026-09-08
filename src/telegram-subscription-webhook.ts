@@ -78,9 +78,11 @@ export async function handleTelegramSubscriptionWebhookRequest(
 
   const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
   // Telegram callbacks must stay responsive even when RanobeLib is slow or unavailable.
-  // The v2 dashboard/title-card routes are resolved entirely from D1 before legacy controls.
+  // The v2 dashboard/title-card/search routes use the raw D1 binding so their
+  // snapshot_ready filters are preserved; only legacy subscription routes keep
+  // the compatibility DB wrapper that exposes discovered pre-snapshot titles.
   const subscriptionUpdate = normalizeSubscriptionCallback(update);
-  if (await handleTelegramNotificationUxUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
+  if (await handleTelegramNotificationUxUpdate(subscriptionUpdate, env)) return json({ ok: true });
   if (await handleTelegramNotificationModeUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
   if (await handleTelegramSubscriptionUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
 
@@ -91,10 +93,10 @@ export async function handleTelegramSubscriptionWebhookRequest(
   // Text-input priority is intentional: custom stack size first, then notification search.
   // Slash commands pass through both handlers so commands keep their normal routing.
   if (await handleNotificationCustomInput(update, subscriptionEnv)) return json({ ok: true });
-  if (await handleNotificationSearchInput(update, subscriptionEnv)) return json({ ok: true });
+  if (await handleNotificationSearchInput(update, env)) return json({ ok: true });
 
   if (message.from && isPlainCommand(text, 'notifications')) {
-    await sendTelegramNotificationDashboard(subscriptionEnv, message.from, message.chat.id);
+    await sendTelegramNotificationDashboard(env, message.from, message.chat.id);
     return json({ ok: true });
   }
 
