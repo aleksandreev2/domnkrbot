@@ -1,13 +1,15 @@
 import { deliverySettingLabel, type DeliverySetting } from './telegram-notification-settings.js';
 
+export type NotificationModeReturnContext = { origin: 'm' | 'a' | 's'; page: number };
+
 export type NotificationModeCallback =
   | { scope: 'global'; action: 'instant' }
   | { scope: 'global'; action: 'stack'; stackSize: 5 | 10 | 20 }
   | { scope: 'global'; action: 'custom' }
-  | { scope: 'title'; titleId: number; action: 'instant' }
-  | { scope: 'title'; titleId: number; action: 'stack'; stackSize: 5 | 10 | 20 }
-  | { scope: 'title'; titleId: number; action: 'custom' }
-  | { scope: 'title'; titleId: number; action: 'inherit' };
+  | { scope: 'title'; titleId: number; action: 'instant'; returnContext?: NotificationModeReturnContext }
+  | { scope: 'title'; titleId: number; action: 'stack'; stackSize: 5 | 10 | 20; returnContext?: NotificationModeReturnContext }
+  | { scope: 'title'; titleId: number; action: 'custom'; returnContext?: NotificationModeReturnContext }
+  | { scope: 'title'; titleId: number; action: 'inherit'; returnContext?: NotificationModeReturnContext };
 
 export type NotificationButton = {
   text: string;
@@ -38,16 +40,20 @@ export function parseNotificationModeCallback(value: string): NotificationModeCa
     return { scope: 'global', action: 'stack', stackSize };
   }
 
-  match = /^subs:mode:t:(\d+):(i|5|10|20|c|inherit)$/.exec(value);
+  match = /^subs:mode:t:(\d+):(i|5|10|20|c|inherit)(?::([mas]):(\d{1,4}))?$/.exec(value);
   if (!match) return null;
   const titleId = Number(match[1]);
   if (!Number.isSafeInteger(titleId) || titleId <= 0) return null;
+  const returnContext = match[3] && match[4]
+    ? { origin: match[3] as NotificationModeReturnContext['origin'], page: Math.min(9999, Number(match[4])) }
+    : undefined;
   const action = match[2];
-  if (action === 'i') return { scope: 'title', titleId, action: 'instant' };
-  if (action === 'c') return { scope: 'title', titleId, action: 'custom' };
-  if (action === 'inherit') return { scope: 'title', titleId, action: 'inherit' };
+  const context = returnContext ? { returnContext } : {};
+  if (action === 'i') return { scope: 'title', titleId, action: 'instant', ...context };
+  if (action === 'c') return { scope: 'title', titleId, action: 'custom', ...context };
+  if (action === 'inherit') return { scope: 'title', titleId, action: 'inherit', ...context };
   const stackSize = Number(action) as 5 | 10 | 20;
-  return { scope: 'title', titleId, action: 'stack', stackSize };
+  return { scope: 'title', titleId, action: 'stack', stackSize, ...context };
 }
 
 export function buildDeliveryModeNotificationCenter(state: {
