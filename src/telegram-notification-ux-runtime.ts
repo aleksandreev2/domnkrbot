@@ -1,7 +1,6 @@
 import { refreshAllNotificationDemand, refreshTitleNotificationDemand } from './notification-demand.js';
 import {
   getGlobalDeliverySetting,
-  getPendingStackChapterCount,
   getTitleDeliverySetting,
   ensureTelegramNotificationSettingsSchema,
   type DeliverySetting,
@@ -106,9 +105,10 @@ export async function handleTelegramNotificationUxUpdate(
       return true;
     }
 
-    await respond(env, callback, chatId, await titleCardPayload(env, userId, title, context));
+    const payload = await titleCardPayload(env, userId, title, context);
+    await respond(env, callback, chatId, payload);
     await answerCallback(env, callback.id, parsed.kind === 'toggle'
-      ? ((await isEffectivelySubscribed(env, userId, title.book_ref)) ? 'Уведомления включены.' : 'Уведомления отключены.')
+      ? (payload.text.includes('✅ включены') ? 'Уведомления включены.' : 'Уведомления отключены.')
       : undefined);
     return true;
   }
@@ -201,19 +201,19 @@ async function titleCardPayload(
   title: NotificationUiTitle,
   returnContext: NotificationReturnContext,
 ) {
-  const [enabled, globalSetting, override] = await Promise.all([
+  const [enabled, globalSetting, titleSetting] = await Promise.all([
     isEffectivelySubscribed(env, userId, title.book_ref),
     getGlobalDeliverySetting(env, userId),
     getTitleDeliverySetting(env, userId, title.book_ref),
   ]);
-  const effective = override ?? globalSetting;
+  const effective = titleSetting.setting;
   const pendingChapterCount = effective.mode === 'stack'
-    ? await getPendingStackChapterCount(env, userId, title.book_ref)
+    ? await pendingStackChapterCount(env, userId, title.book_ref)
     : null;
   return buildNotificationTitleCard({
     title,
     enabled,
-    inherited: !override,
+    inherited: titleSetting.inherited,
     effectiveSetting: asUiSetting(effective),
     globalSetting: asUiSetting(globalSetting),
     pendingChapterCount,
@@ -227,7 +227,7 @@ async function titleModePayload(
   title: NotificationUiTitle,
   returnContext: NotificationReturnContext,
 ) {
-  const [enabled, globalSetting, override] = await Promise.all([
+  const [enabled, globalSetting, titleSetting] = await Promise.all([
     isEffectivelySubscribed(env, userId, title.book_ref),
     getGlobalDeliverySetting(env, userId),
     getTitleDeliverySetting(env, userId, title.book_ref),
@@ -235,11 +235,26 @@ async function titleModePayload(
   return buildNotificationTitleModeScreen({
     title,
     enabled,
-    inherited: !override,
-    effectiveSetting: asUiSetting(override ?? globalSetting),
+    inherited: titleSetting.inherited,
+    effectiveSetting: asUiSetting(titleSetting.setting),
     globalSetting: asUiSetting(globalSetting),
     returnContext,
   });
+}
+
+async function pendingStackChapterCount(
+  env: TelegramNotificationUxEnv,
+  userId: string,
+  bookRef: string,
+): Promise<number> {
+  return count(env.DB.prepare(`
+    SELECT COALESCE(SUM(r.chapter_count), 0) AS count
+    FROM ranobelib_notification_outbox o
+    JOIN ranobelib_releases r ON r.id = o.release_id
+    WHERE o.user_telegram_id = ?
+      AND r.book_ref = ?
+      AND o.status IN ('pending','retry')
+  `).bind(userId, bookRef));
 }
 
 async function clearAllSubscriptions(env: TelegramNotificationUxEnv, userId: string): Promise<void> {
