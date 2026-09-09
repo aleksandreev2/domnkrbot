@@ -17,6 +17,14 @@ test('notification schedule gives hot scan, idle scan, discovery, fallback deliv
   assert.match(entry, /MEMBERSHIP_CRON/);
 });
 
+test('membership cron repairs chat_member webhook subscription before running maintenance', () => {
+  assert.match(entry, /ensureWebhookMembershipUpdates/);
+  assert.match(
+    entry,
+    /if \(controller\.cron === MEMBERSHIP_CRON\) \{[\s\S]*?ensureWebhookMembershipUpdates\(env\)[\s\S]*?runChannelMembershipMaintenance\(env, 40\)/,
+  );
+});
+
 test('legacy ten-minute combined notification schedule is removed', () => {
   assert.equal(wrangler.triggers?.crons?.includes('*/10 * * * *'), false);
   const scheduledBody = entry.slice(entry.indexOf('async scheduled('));
