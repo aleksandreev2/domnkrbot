@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { classifyTelegramWebhookUpdate } from '../dist-runtime/telegram-webhook-routing.js';
@@ -59,4 +60,24 @@ test('plain slash commands never enter generic private-text state consumers', ()
   for (const text of ['/help', '/site', '/unknown']) {
     assert.notEqual(classifyTelegramWebhookUpdate(privateMessage(text)), 'generic-private-text');
   }
+});
+
+test('production entry validates once and directly dispatches classified Telegram webhook routes', async () => {
+  const source = await readFile(new URL('../src/live-entry-v2.ts', import.meta.url), 'utf8');
+  const outerWebhook = source.indexOf("url.pathname === '/telegram/webhook'");
+  assert.ok(outerWebhook >= 0, 'live entry must own the Telegram webhook boundary');
+  assert.match(source, /classifyTelegramWebhookUpdate/);
+  assert.match(source, /x-telegram-bot-api-secret-token/);
+  assert.match(source, /dispatchTelegramWebhook/);
+  assert.match(source, /case 'chat-member'[\s\S]*handleChannelMembershipWebhook/);
+  assert.match(source, /case 'download-start'[\s\S]*handleChannelMembershipAppealWebhook[\s\S]*handlePublicationReaderDeliveryWebhook/);
+  assert.match(source, /case 'reader-gate'[\s\S]*handlePublicationReaderDeliveryWebhook/);
+  assert.match(source, /case 'membership-appeal'[\s\S]*handleChannelMembershipAppealWebhook/);
+  assert.match(source, /case 'notifications'[\s\S]*handleTelegramSubscriptionWebhookRequest/);
+  assert.match(source, /case 'proposal'[\s\S]*appEntry\.fetch/);
+  assert.match(source, /case 'generic-private-text'[\s\S]*handleChannelMembershipAppealWebhook[\s\S]*appEntry\.fetch/);
+  assert.match(source, /Telegram webhook handled/);
+
+  const genericAppeal = source.indexOf('await handleChannelMembershipAppealWebhook(request', outerWebhook);
+  assert.ok(genericAppeal > outerWebhook, 'generic appeal fallback must come after the outer Telegram dispatcher');
 });
