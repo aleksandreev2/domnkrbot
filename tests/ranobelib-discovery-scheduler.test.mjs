@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&page=1';
+const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&fields[]=status_id&page=1';
 
 function catalogResponse(data) {
   return new Response(JSON.stringify({ data, meta: { current_page: 1, has_next_page: false } }), {
@@ -40,7 +40,7 @@ async function withFetch(handler, fn) {
   try { return await fn(requests); } finally { globalThis.fetch = original; }
 }
 
-test('team discovery uses one bounded JSON upsert, refreshes effective demand, makes new titles immediately scannable, and never fetches chapters', async () => {
+test('team discovery uses one bounded JSON upsert, refreshes effective demand, makes new active titles immediately scannable, and never fetches chapters', async () => {
   const { discoverRanobeLibTeam } = await import('../dist-runtime/ranobelib-discovery-scheduler.js');
   const db = new DB(['999--old-book']);
   const titles = Array.from({ length: 60 }, (_, index) => ({
@@ -48,6 +48,7 @@ test('team discovery uses one bounded JSON upsert, refreshes effective demand, m
     slug: `book-${index}`,
     slug_url: `${62387 + index}--book-${index}`,
     rus_name: `Книга ${index}`,
+    scanlateStatus: { id: 1, label: 'Продолжается' },
     cover: { default: `https://cover.cdnlibs.org/uploads/cover/book-${index}/default.jpg` },
   }));
 
@@ -67,6 +68,7 @@ test('team discovery uses one bounded JSON upsert, refreshes effective demand, m
       assert.match(upsert, /CURRENT_TIMESTAMP/i);
       assert.match(upsert, /notification_subscriber_count/i);
       assert.match(upsert, /subscriber_count_updated_at/i);
+      assert.match(upsert, /translation_status_id/i);
       assert.match(upsert, /telegram_delivery_reachability/i);
       assert.match(upsert, /title_subscription_exclusions/i);
       assert.match(upsert, /title_subscriptions/i);
