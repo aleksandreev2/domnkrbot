@@ -27,6 +27,8 @@ type CustomInputRow = {
   book_ref?: unknown;
 };
 
+const notificationSettingsSchemaPromises = new WeakMap<object, Promise<void>>();
+
 export function normalizeDeliverySetting(mode: unknown, stackSize: unknown): DeliverySetting {
   if (mode !== 'stack') return { mode: 'instant', stackSize: null };
   const size = typeof stackSize === 'number'
@@ -169,7 +171,7 @@ export async function clearNotificationCustomInput(
   `).bind(userId).run();
 }
 
-export async function ensureTelegramNotificationSettingsSchema(
+async function initializeTelegramNotificationSettingsSchema(
   env: TelegramNotificationSettingsEnv,
 ): Promise<void> {
   try {
@@ -213,4 +215,19 @@ export async function ensureTelegramNotificationSettingsSchema(
     'CREATE INDEX IF NOT EXISTS idx_telegram_notification_input_expiry ON telegram_notification_input_state(expires_at)',
   ];
   for (const statement of statements) await env.DB.prepare(statement).run();
+}
+
+export async function ensureTelegramNotificationSettingsSchema(
+  env: TelegramNotificationSettingsEnv,
+): Promise<void> {
+  const key = env.DB as object;
+  const existing = notificationSettingsSchemaPromises.get(key);
+  if (existing) return existing;
+
+  const promise = initializeTelegramNotificationSettingsSchema(env).catch((error) => {
+    notificationSettingsSchemaPromises.delete(key);
+    throw error;
+  });
+  notificationSettingsSchemaPromises.set(key, promise);
+  return promise;
 }
