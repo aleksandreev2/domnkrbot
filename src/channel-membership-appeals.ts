@@ -54,6 +54,7 @@ type AppealAdminRow = AppealRow & {
 
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' };
 const APPEAL_COMMENT_MAX = 1500;
+const appealSchemaPromises = new WeakMap<object, Promise<void>>();
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
@@ -84,7 +85,7 @@ async function telegramCall<T>(env: ChannelMembershipAppealEnv, method: string, 
   return body.result as T;
 }
 
-async function ensureAppealSchema(env: ChannelMembershipAppealEnv): Promise<void> {
+async function initializeAppealSchema(env: ChannelMembershipAppealEnv): Promise<void> {
   await ensureChannelMembershipSchema(env as ChannelMembershipEnv);
   const statements = [
     `CREATE TABLE IF NOT EXISTS channel_membership_appeals (
@@ -105,6 +106,19 @@ async function ensureAppealSchema(env: ChannelMembershipAppealEnv): Promise<void
       ON channel_membership_appeals(user_telegram_id) WHERE status IN ('draft','pending')`,
   ];
   for (const statement of statements) await env.DB.prepare(statement).run();
+}
+
+async function ensureAppealSchema(env: ChannelMembershipAppealEnv): Promise<void> {
+  const key = env.DB as object;
+  const existing = appealSchemaPromises.get(key);
+  if (existing) return existing;
+
+  const promise = initializeAppealSchema(env).catch((error) => {
+    appealSchemaPromises.delete(key);
+    throw error;
+  });
+  appealSchemaPromises.set(key, promise);
+  return promise;
 }
 
 async function setting(env: ChannelMembershipAppealEnv, key: string): Promise<string> {
