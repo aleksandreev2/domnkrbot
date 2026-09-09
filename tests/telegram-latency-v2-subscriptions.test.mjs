@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { handleTelegramSubscriptionUpdate } from '../dist-runtime/telegram-subscriptions.js';
+import {
+  handleTelegramSubscriptionUpdate,
+  sendTelegramNotificationCenter,
+  sendTelegramSubscriptionMenu,
+} from '../dist-runtime/telegram-subscriptions.js';
 
 const normalize = (value) => String(value).replace(/\s+/g, ' ').trim();
 
@@ -39,6 +43,14 @@ class LatencyStatement {
       this.db.events.push('demand:global-start');
       return this.db.globalRefreshGate ? this.db.globalRefreshGate.promise : { meta: { changes: 0 } };
     }
+    if (this.query.startsWith('INSERT INTO users')) {
+      this.db.events.push('bookkeeping:user-upsert');
+      if (this.db.bookkeepingGate) await this.db.bookkeepingGate.promise;
+    }
+    if (this.query.startsWith('INSERT INTO telegram_delivery_reachability')) {
+      this.db.events.push('bookkeeping:reachable');
+      if (this.db.bookkeepingGate) await this.db.bookkeepingGate.promise;
+    }
     if (this.query.startsWith('INSERT OR IGNORE INTO title_subscriptions')
       || this.query.startsWith('DELETE FROM title_subscriptions WHERE user_telegram_id = ? AND book_ref = ?')
       || this.query.startsWith('INSERT OR IGNORE INTO title_subscription_exclusions')) {
@@ -57,6 +69,7 @@ class LatencyDB {
     this.globalDemandRefreshes = 0;
     this.targetRefreshGate = null;
     this.globalRefreshGate = null;
+    this.bookkeepingGate = null;
   }
   prepare(query) { return new LatencyStatement(this, query); }
 }
@@ -114,6 +127,29 @@ test('subs:center starts callback acknowledgement before its first D1 operation'
   assert.ok(ackIndex < d1Index, `ack must start before D1; events=${JSON.stringify(db.events.slice(0, 8))}`);
 });
 
+test('legacy center renders while user/reachability bookkeeping is still pending', async () => {
+  const db = new LatencyDB();
+  db.bookkeepingGate = deferred();
+  const scheduled = [];
+
+  await withTelegram(db.events, async () => {
+    const handling = handleTelegramSubscriptionUpdate(
+      centerUpdate(),
+      env(db),
+      { waitUntil(promise) { scheduled.push(promise); } },
+    );
+    await flush();
+
+    assert.ok(db.events.includes('bookkeeping:user-upsert'), 'interaction bookkeeping should still be started');
+    assert.ok(db.events.includes('telegram:editMessageText'), `navigation render must not wait for bookkeeping; events=${JSON.stringify(db.events)}`);
+    assert.ok(scheduled.length >= 2, 'early ack and navigation bookkeeping must both be registered with waitUntil');
+
+    db.bookkeepingGate.resolve();
+    assert.equal(await handling, true);
+    await Promise.allSettled(scheduled);
+  });
+});
+
 test('single-title mutation starts callback acknowledgement before its first D1 operation', async () => {
   const db = new LatencyDB();
   const scheduled = [];
@@ -164,6 +200,22 @@ test('subs:center performs zero global notification-demand refreshes', async () 
     assert.equal(await handleTelegramSubscriptionUpdate(centerUpdate(), env(db), { waitUntil() {} }), true);
   });
   assert.equal(db.globalDemandRefreshes, 0, 'read-only navigation must not recompute demand for every active title');
+});
+
+test('subscription and notification command menus perform zero global demand refreshes', async () => {
+  for (const send of [sendTelegramSubscriptionMenu, sendTelegramNotificationCenter]) {
+    const db = new LatencyDB();
+    const scheduled = [];
+    await withTelegram(db.events, async () => {
+      await send(
+        env(db),
+        { id: 42, first_name: 'Reader' },
+        42,
+        ...(send === sendTelegramSubscriptionMenu ? [0, { waitUntil(promise) { scheduled.push(promise); } }] : [{ waitUntil(promise) { scheduled.push(promise); } }]),
+      );
+    });
+    assert.equal(db.globalDemandRefreshes, 0, 'pure command navigation must not recompute demand for every active title');
+  }
 });
 
 test('single-title mutation persists before targeted demand refresh is deferred', async () => {
