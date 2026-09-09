@@ -35,6 +35,7 @@ import {
   scanIdleRanobeLibTitles,
 } from './ranobelib-fast-scanner.js';
 import { getRanobeLibHome } from './ranobelib-runtime.js';
+import { notifyAdminsForProposalId } from './telegram-title-proposal-admin-alert.js';
 import {
   DELIVERY_BATCH_LIMIT,
   drainNotificationOutbox,
@@ -133,7 +134,17 @@ export default {
     const analytics = await handlePublishingAnalyticsV2(request, env);
     if (analytics) return analytics;
 
-    return baseWorker.fetch(request, env as never, ctx as never);
+    const response = await baseWorker.fetch(request, env as never, ctx as never);
+    if (request.method === 'POST' && url.pathname === '/api/proposals' && response.status === 201) {
+      const created = await response.clone().json().catch(() => null) as { id?: string } | null;
+      const proposalId = created?.id;
+      if (proposalId) {
+        await notifyAdminsForProposalId(env, proposalId).catch((error) => {
+          console.error('Web proposal admin alert failed', { proposalId, error });
+        });
+      }
+    }
+    return response;
   },
 
   async scheduled(controller: ScheduledControllerLike, env: Env, _ctx: CommentGateExecutionContext): Promise<void> {
