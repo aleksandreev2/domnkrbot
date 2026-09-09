@@ -57,7 +57,7 @@ async function telegramCall<T>(env: TelegramTitleProposalAdminAlertEnv, method: 
 
 async function latestProposal(env: TelegramTitleProposalAdminAlertEnv, userId: number): Promise<ProposalRow | null> {
   return env.DB.prepare(`SELECT id,title,source_url,comment,source_kind,ranobelib_book_ref,created_at
-    FROM chapter_proposals WHERE user_telegram_id=? ORDER BY created_at DESC LIMIT 1`)
+    FROM chapter_proposals WHERE user_telegram_id=? ORDER BY created_at DESC, rowid DESC LIMIT 1`)
     .bind(String(userId)).first<ProposalRow>();
 }
 
