@@ -4,11 +4,13 @@ import {
   getTitleDeliverySetting,
   ensureTelegramNotificationSettingsSchema,
   clearNotificationCustomInput,
+  normalizeDeliverySetting,
   type DeliverySetting,
 } from './telegram-notification-settings.js';
 import {
   ensureTelegramSubscriptionSchema,
   isEffectivelySubscribed,
+  resolveEffectiveSubscription,
   setEffectiveTitleSubscription,
   type TelegramSubscriptionEnv,
   type TelegramSubscriptionUpdate,
@@ -43,7 +45,12 @@ import { renderTelegramScreen, type TelegramScreenExecutionContext } from './tel
 
 type CountRow = { count: number | string | null };
 type AllTitlesRow = { all_titles: number | string | null };
+type DeliverySettingRow = { delivery_mode?: unknown; stack_size?: unknown };
 type D1PreparedStatement = ReturnType<TelegramSubscriptionEnv['DB']['prepare']>;
+type D1BatchResult<T> = { results?: T[] };
+type D1BatchDatabase = TelegramSubscriptionEnv['DB'] & {
+  batch?<T = Record<string, unknown>>(statements: D1PreparedStatement[]): Promise<D1BatchResult<T>[]>;
+};
 
 export type TelegramNotificationUxEnv = TelegramSubscriptionEnv;
 
@@ -223,21 +230,26 @@ export async function sendTelegramNotificationDashboard(
 }
 
 async function dashboardPayload(env: TelegramNotificationUxEnv, userId: string) {
-  const [allTitles, globalSetting, overrideCount] = await Promise.all([
-    userSubscribesToAll(env, userId),
-    getGlobalDeliverySetting(env, userId),
-    count(env.DB.prepare('SELECT COUNT(*) AS count FROM telegram_title_delivery_settings WHERE user_telegram_id = ?').bind(userId)),
+  const [allTitlesRow, globalSettingRow, overrideCountRow, activeCountRow, exclusionCountRow, explicitCountRow] = await batchFirstRows(env, [
+    env.DB.prepare('SELECT all_titles FROM telegram_subscription_settings WHERE user_telegram_id = ? LIMIT 1').bind(userId),
+    env.DB.prepare(`
+      SELECT delivery_mode, stack_size
+      FROM telegram_subscription_settings
+      WHERE user_telegram_id = ?
+    `).bind(userId),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM telegram_title_delivery_settings WHERE user_telegram_id = ?').bind(userId),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM ranobelib_titles WHERE is_active = 1 AND snapshot_ready = 1'),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM title_subscription_exclusions WHERE user_telegram_id = ?').bind(userId),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM title_subscriptions WHERE user_telegram_id = ?').bind(userId),
   ]);
-  let effectiveCount: number;
-  if (allTitles) {
-    const [activeCount, exclusionCount] = await Promise.all([
-      count(env.DB.prepare('SELECT COUNT(*) AS count FROM ranobelib_titles WHERE is_active = 1 AND snapshot_ready = 1')),
-      count(env.DB.prepare('SELECT COUNT(*) AS count FROM title_subscription_exclusions WHERE user_telegram_id = ?').bind(userId)),
-    ]);
-    effectiveCount = Math.max(0, activeCount - exclusionCount);
-  } else {
-    effectiveCount = await count(env.DB.prepare('SELECT COUNT(*) AS count FROM title_subscriptions WHERE user_telegram_id = ?').bind(userId));
-  }
+
+  const allTitles = Number(allTitlesRow?.all_titles ?? 0) === 1;
+  const globalSetting = normalizeDeliverySetting(globalSettingRow?.delivery_mode, globalSettingRow?.stack_size);
+  const overrideCount = countRow(overrideCountRow);
+  const effectiveCount = allTitles
+    ? Math.max(0, countRow(activeCountRow) - countRow(exclusionCountRow))
+    : countRow(explicitCountRow);
+
   return buildNotificationDashboard({
     effectiveCount,
     allTitles,
@@ -312,19 +324,47 @@ async function titleCardPayload(
   title: NotificationUiTitle,
   returnContext: NotificationReturnContext,
 ) {
-  const [enabled, globalSetting, titleSetting] = await Promise.all([
-    isEffectivelySubscribed(env, userId, title.book_ref),
-    getGlobalDeliverySetting(env, userId),
-    getTitleDeliverySetting(env, userId, title.book_ref),
+  const [allTitlesRow, explicitRow, excludedRow, globalSettingRow, titleSettingRow, pendingCountRow] = await batchFirstRows(env, [
+    env.DB.prepare('SELECT all_titles FROM telegram_subscription_settings WHERE user_telegram_id = ? LIMIT 1').bind(userId),
+    env.DB.prepare('SELECT 1 AS subscribed FROM title_subscriptions WHERE user_telegram_id = ? AND book_ref = ? LIMIT 1').bind(userId, title.book_ref),
+    env.DB.prepare('SELECT 1 AS excluded FROM title_subscription_exclusions WHERE user_telegram_id = ? AND book_ref = ? LIMIT 1').bind(userId, title.book_ref),
+    env.DB.prepare(`
+      SELECT delivery_mode, stack_size
+      FROM telegram_subscription_settings
+      WHERE user_telegram_id = ?
+    `).bind(userId),
+    env.DB.prepare(`
+      SELECT delivery_mode, stack_size
+      FROM telegram_title_delivery_settings
+      WHERE user_telegram_id = ? AND book_ref = ?
+    `).bind(userId, title.book_ref),
+    env.DB.prepare(`
+      SELECT COALESCE(SUM(r.chapter_count), 0) AS count
+      FROM ranobelib_notification_outbox o
+      JOIN ranobelib_releases r ON r.id = o.release_id
+      WHERE o.user_telegram_id = ?
+        AND r.book_ref = ?
+        AND o.status IN ('pending','retry')
+    `).bind(userId, title.book_ref),
   ]);
-  const effective = titleSetting.setting;
-  const pendingChapterCount = effective.mode === 'stack'
-    ? await pendingStackChapterCount(env, userId, title.book_ref)
-    : null;
+
+  const allTitles = Number(allTitlesRow?.all_titles ?? 0) === 1;
+  const enabled = resolveEffectiveSubscription({
+    allTitles,
+    explicit: Boolean(explicitRow),
+    excluded: Boolean(excludedRow),
+  });
+  const globalSetting = normalizeDeliverySetting(globalSettingRow?.delivery_mode, globalSettingRow?.stack_size);
+  const inherited = !titleSettingRow;
+  const effective = inherited
+    ? globalSetting
+    : normalizeDeliverySetting(titleSettingRow?.delivery_mode, titleSettingRow?.stack_size);
+  const pendingChapterCount = effective.mode === 'stack' ? countRow(pendingCountRow) : null;
+
   return buildNotificationTitleCard({
     title,
     enabled,
-    inherited: titleSetting.inherited,
+    inherited,
     effectiveSetting: asUiSetting(effective),
     globalSetting: asUiSetting(globalSetting),
     pendingChapterCount,
@@ -384,6 +424,23 @@ async function userSubscribesToAll(env: TelegramNotificationUxEnv, userId: strin
   const row = await env.DB.prepare('SELECT all_titles FROM telegram_subscription_settings WHERE user_telegram_id = ? LIMIT 1')
     .bind(userId).first<AllTitlesRow>();
   return Number(row?.all_titles ?? 0) === 1;
+}
+
+async function batchFirstRows(
+  env: TelegramNotificationUxEnv,
+  statements: D1PreparedStatement[],
+): Promise<Array<Record<string, unknown> | null>> {
+  const db = env.DB as D1BatchDatabase;
+  if (typeof db.batch === 'function') {
+    const results = await db.batch<Record<string, unknown>>(statements);
+    return results.map((result) => Array.isArray(result?.results) ? (result.results[0] ?? null) : null);
+  }
+  return Promise.all(statements.map((statement) => statement.first<Record<string, unknown>>()));
+}
+
+function countRow(row: Record<string, unknown> | null): number {
+  const value = Number(row?.count ?? 0);
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
 }
 
 async function count(statement: D1PreparedStatement): Promise<number> {
