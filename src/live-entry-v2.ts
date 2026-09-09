@@ -263,7 +263,7 @@ async function dispatchTelegramWebhook(
       return (await handleChannelMembershipAppealWebhook(request, env, ctx)) ?? new Response('ok');
 
     case 'notifications':
-      return (await handleTelegramSubscriptionWebhookRequest(request, env as never)) ?? new Response('ok');
+      return (await handleTelegramSubscriptionWebhookRequest(request, env as never, ctx)) ?? new Response('ok');
 
     case 'proposal':
       return appEntry.fetch(request, env as never, ctx);
