@@ -42,10 +42,17 @@ class Statement {
     return { results: [] };
   }
   async run() {
+    if (this.query.includes('WITH demand AS') && this.query.includes('UPDATE ranobelib_titles')) {
+      this.db.events.push('demand:global-start');
+      return this.db.globalRefreshGate ? this.db.globalRefreshGate.promise : { meta: { changes: 0 } };
+    }
     if (this.query.startsWith('INSERT INTO users')) this.db.events.push('write:user-upsert');
     if (this.query.includes('UPDATE telegram_proposal_sessions SET input_active')) this.db.events.push('cleanup:proposal-input');
     if (this.query.includes('DELETE FROM telegram_notification_input_state')) this.db.events.push('cleanup:custom-input');
     if (this.query.startsWith('INSERT OR IGNORE INTO title_subscriptions')) this.db.events.push('write:title-subscription');
+    if (this.query.startsWith('INSERT INTO telegram_subscription_settings')) this.db.events.push('write:all-setting');
+    if (this.query.startsWith('DELETE FROM title_subscriptions WHERE user_telegram_id = ?')) this.db.events.push('write:clear-explicit');
+    if (this.query.startsWith('DELETE FROM title_subscription_exclusions WHERE user_telegram_id = ?')) this.db.events.push('write:clear-exclusions');
     return { meta: { changes: 1 } };
   }
 }
@@ -54,6 +61,7 @@ class DB {
   constructor() {
     this.events = [];
     this.targetRefreshGate = null;
+    this.globalRefreshGate = null;
   }
   prepare(query) { return new Statement(this, query); }
 }
@@ -148,6 +156,38 @@ test('v2 title toggle persists first then defers targeted demand refresh without
     assert.ok(renderIndex > refreshIndex, 'title card must render without awaiting demand refresh completion');
 
     db.targetRefreshGate.resolve({ notification_subscriber_count: 1 });
+    assert.equal(await handling, true);
+    await Promise.allSettled(scheduled);
+  });
+});
+
+test('v2 clear-all persists subscription cleanup then defers global demand refresh before rendering', async () => {
+  const db = new DB();
+  db.globalRefreshGate = deferred();
+  const scheduled = [];
+
+  await withTelegram(db.events, async () => {
+    const handling = handleTelegramNotificationUxUpdate(
+      callbackUpdate('subs:all:clear:yes', 'cb-clear-all'),
+      env(db),
+      context(db.events, scheduled),
+    );
+
+    await flush();
+
+    const settingIndex = db.events.indexOf('write:all-setting');
+    const explicitIndex = db.events.indexOf('write:clear-explicit');
+    const exclusionIndex = db.events.indexOf('write:clear-exclusions');
+    const refreshIndex = db.events.indexOf('demand:global-start');
+    const renderIndex = db.events.indexOf('telegram:editMessageText');
+
+    assert.ok(settingIndex >= 0, 'all_titles=0 must be durable before maintenance');
+    assert.ok(explicitIndex > settingIndex && exclusionIndex > settingIndex, 'explicit subscriptions and exclusions must be cleared after all_titles=0');
+    assert.ok(refreshIndex > Math.max(explicitIndex, exclusionIndex), 'global demand refresh must start only after all clear writes finish');
+    assert.ok(scheduled.length >= 2, 'early ack and global demand maintenance must both be registered with waitUntil');
+    assert.ok(renderIndex > refreshIndex, 'dashboard render must start without waiting for global demand refresh completion');
+
+    db.globalRefreshGate.resolve({ meta: { changes: 0 } });
     assert.equal(await handling, true);
     await Promise.allSettled(scheduled);
   });
