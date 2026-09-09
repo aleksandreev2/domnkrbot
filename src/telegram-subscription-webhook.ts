@@ -109,7 +109,7 @@ export async function handleTelegramSubscriptionWebhookRequest(
   // the compatibility DB wrapper that exposes discovered pre-snapshot titles.
   const subscriptionUpdate = normalizeSubscriptionCallback(update);
   if (await handleTelegramNotificationUxUpdate(subscriptionUpdate, env, ctx)) return json({ ok: true });
-  if (await handleTelegramNotificationModeUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
+  if (await handleTelegramNotificationModeUpdate(subscriptionUpdate, subscriptionEnv, ctx)) return json({ ok: true });
   if (await handleTelegramSubscriptionUpdate(subscriptionUpdate, subscriptionEnv, ctx)) return json({ ok: true });
 
   const message = update.message;
