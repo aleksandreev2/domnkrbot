@@ -93,6 +93,10 @@ async function flush() {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
+function firstD1Index(events) {
+  return events.findIndex((event) => event.startsWith('d1:'));
+}
+
 test('subs:center starts callback acknowledgement before its first D1 operation', async () => {
   const db = new LatencyDB();
   const scheduled = [];
@@ -104,10 +108,54 @@ test('subs:center starts callback acknowledgement before its first D1 operation'
   });
 
   const ackIndex = db.events.indexOf('telegram:answerCallbackQuery');
-  const firstD1Index = db.events.findIndex((event) => event.startsWith('d1:'));
+  const d1Index = firstD1Index(db.events);
   assert.ok(ackIndex >= 0, 'callback must be acknowledged');
-  assert.ok(firstD1Index >= 0, 'center still needs D1 reads');
-  assert.ok(ackIndex < firstD1Index, `ack must start before D1; events=${JSON.stringify(db.events.slice(0, 8))}`);
+  assert.ok(d1Index >= 0, 'center still needs D1 reads');
+  assert.ok(ackIndex < d1Index, `ack must start before D1; events=${JSON.stringify(db.events.slice(0, 8))}`);
+});
+
+test('single-title mutation starts callback acknowledgement before its first D1 operation', async () => {
+  const db = new LatencyDB();
+  const scheduled = [];
+  await withTelegram(db.events, async () => {
+    assert.equal(
+      await handleTelegramSubscriptionUpdate(
+        callbackUpdate('subs:title:100:0', 'cb-title-ack'),
+        env(db),
+        { waitUntil(promise) { scheduled.push(promise); } },
+      ),
+      true,
+    );
+  });
+
+  const ackIndex = db.events.indexOf('telegram:answerCallbackQuery');
+  const d1Index = firstD1Index(db.events);
+  assert.ok(ackIndex >= 0, 'single-title mutation callback must be acknowledged');
+  assert.ok(d1Index >= 0, 'single-title mutation still needs D1');
+  assert.ok(ackIndex < d1Index, `single-title ack must start before D1; events=${JSON.stringify(db.events.slice(0, 8))}`);
+  assert.ok(scheduled.length >= 2, 'execution context should track both early ack and deferred demand maintenance');
+});
+
+test('all-title mutation starts callback acknowledgement before its first D1 operation', async () => {
+  const db = new LatencyDB();
+  const scheduled = [];
+  await withTelegram(db.events, async () => {
+    assert.equal(
+      await handleTelegramSubscriptionUpdate(
+        callbackUpdate('subs:all:on', 'cb-all-ack'),
+        env(db),
+        { waitUntil(promise) { scheduled.push(promise); } },
+      ),
+      true,
+    );
+  });
+
+  const ackIndex = db.events.indexOf('telegram:answerCallbackQuery');
+  const d1Index = firstD1Index(db.events);
+  assert.ok(ackIndex >= 0, 'all-title mutation callback must be acknowledged');
+  assert.ok(d1Index >= 0, 'all-title mutation still needs D1');
+  assert.ok(ackIndex < d1Index, `all-title ack must start before D1; events=${JSON.stringify(db.events.slice(0, 8))}`);
+  assert.ok(scheduled.length >= 2, 'execution context should track both early ack and deferred demand maintenance');
 });
 
 test('subs:center performs zero global notification-demand refreshes', async () => {
@@ -135,7 +183,7 @@ test('single-title mutation persists before targeted demand refresh is deferred'
     const refreshIndex = db.events.indexOf('demand:target-start');
     assert.ok(writeIndex >= 0, 'subscription choice must be persisted');
     assert.ok(refreshIndex > writeIndex, 'targeted demand refresh must start only after durable write');
-    assert.equal(scheduled.length, 1, 'targeted demand refresh must be registered with waitUntil instead of blocking render');
+    assert.ok(scheduled.length >= 2, 'early ack and targeted demand refresh must both be registered with waitUntil');
 
     db.targetRefreshGate.resolve({ notification_subscriber_count: 1 });
     await handling;
@@ -161,7 +209,7 @@ test('all-title mutation persists before global demand refresh is deferred', asy
     const refreshIndex = db.events.indexOf('demand:global-start');
     assert.ok(writeIndex >= 0, 'all-title setting must be persisted');
     assert.ok(refreshIndex > writeIndex, 'global demand refresh must start only after durable write');
-    assert.equal(scheduled.length, 1, 'global demand refresh must be registered with waitUntil instead of blocking render');
+    assert.ok(scheduled.length >= 2, 'early ack and global demand refresh must both be registered with waitUntil');
 
     db.globalRefreshGate.resolve({ meta: { changes: 0 } });
     await handling;
