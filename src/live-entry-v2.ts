@@ -1,5 +1,9 @@
 import baseWorker from './live-entry.js';
 import {
+  handleChannelMembershipAppealAdmin,
+  handleChannelMembershipAppealWebhook,
+} from './channel-membership-appeals.js';
+import {
   ensureWebhookMembershipUpdates,
   runChannelMembershipMaintenance,
   type ChannelMembershipEnv,
@@ -102,6 +106,14 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/ranobelib') {
       return json(await getRanobeLibHome(env));
     }
+
+    // Appeals must run before private reader delivery: an already-blacklisted user must see the
+    // appeal action instead of reaching a download handler first.
+    const membershipAppealWebhook = await handleChannelMembershipAppealWebhook(request, env, ctx);
+    if (membershipAppealWebhook) return membershipAppealWebhook;
+
+    const membershipAppealAdmin = await handleChannelMembershipAppealAdmin(request, env);
+    if (membershipAppealAdmin) return membershipAppealAdmin;
 
     const readerDelivery = await handlePublicationReaderDeliveryWebhook(request, env, ctx);
     if (readerDelivery) return readerDelivery;
