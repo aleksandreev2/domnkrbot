@@ -1,9 +1,9 @@
-import type { TelegramScreenRenderStrategy } from './telegram-screen-renderer.js';
+import type { TelegramRenderStrategy } from './telegram-screen-renderer.js';
 
 export function notificationRenderStrategy(
   callbackData: string,
   currentMessageText = '',
-): TelegramScreenRenderStrategy {
+): TelegramRenderStrategy {
   const data = String(callbackData ?? '').trim();
   const text = String(currentMessageText ?? '');
 
