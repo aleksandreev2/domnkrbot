@@ -196,6 +196,27 @@ async function enforceTelegramBan(env: ChannelMembershipEnv, userId: number | st
     return false;
   }
 }
+
+export async function unblockChannelMember(env: ChannelMembershipEnv, userId: number | string): Promise<boolean> {
+  await ensureChannelMembershipSchema(env);
+  const target = await targetChat(env);
+  if (!target) return false;
+  try {
+    await telegramCall<boolean>(env, 'unbanChatMember', {
+      chat_id: target,
+      user_id: Number(userId),
+      only_if_banned: true,
+    });
+  } catch {
+    return false;
+  }
+  await env.DB.prepare('DELETE FROM channel_telegram_bans WHERE user_telegram_id=?').bind(String(userId)).run();
+  await env.DB.prepare(`UPDATE channel_access_state SET blacklisted_at=NULL,blacklist_reason=NULL,left_at=NULL,
+      last_status='manual_unblock',last_checked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE user_telegram_id=?`)
+    .bind(String(userId)).run();
+  return true;
+}
+
 async function sendSubscriptionRequired(env: ChannelMembershipEnv, userId: number, publicationId: number, target: string): Promise<void> {
   const row: Array<{ text: string; url: string }> = [];
   const join = joinUrl(env, target);
@@ -387,8 +408,8 @@ export async function handleChannelMembershipAdmin(request: Request, env: Channe
   }
   const match = /^\/api\/admin\/membership-access\/(\d+)\/unblock$/.exec(url.pathname);
   if (request.method === 'POST' && match) {
-    await env.DB.prepare(`UPDATE channel_access_state SET blacklisted_at=NULL,blacklist_reason=NULL,left_at=NULL,
-      last_status='manual_unblock',last_checked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE user_telegram_id=?`).bind(match[1]).run();
+    const unblocked = await unblockChannelMember(env, match[1]);
+    if (!unblocked) return json({ error: 'Не удалось снять блокировку пользователя в Telegram-канале.' }, 502);
     return json({ ok: true, user_telegram_id: match[1], admin_user_id: admin.id });
   }
   return json({ error: 'Method not allowed.' }, 405);
