@@ -39,7 +39,7 @@ jobs:
           node --check scripts/configure-bot.mjs
           node --check scripts/check-production.mjs
           test -s public/brand/team-logo.webp
-          grep -Fq 'domnkr-build-20260820-membership1' public/build.txt
+          grep -Fq 'domnkr-build-20260909-channel-ban1' public/build.txt
           grep -Fq 'id="rawDrop"' public/propose/index.html
           grep -Fq '/api/proposal-raw/init' public/propose.js
           grep -Fq '/api/title-proposals' public/propose.js
@@ -79,14 +79,18 @@ jobs:
           grep -Fq 'boosty.to/domnekromanta/single-payment/donation/818248/target?share=target_link' src/publication-ops.ts
           grep -Fq 'publication_reader_events' migrations/0006_publication_delivery_analytics.sql
           grep -Fq 'channel_access_state' migrations/0007_channel_membership_access.sql
+          grep -Fq 'channel_telegram_bans' migrations/0018_channel_telegram_bans.sql
           grep -Fq 'publication_comment_gates' migrations/0009_publication_comment_gate.sql
           grep -Fq 'publication_asset_cache_locks' migrations/0010_telegram_file_cache_lock.sql
           grep -Fq 'getChatMember' src/channel-membership-access.ts
+          grep -Fq 'banChatMember' src/channel-membership-access.ts
+          grep -Fq 'unbanChatMember' src/channel-membership-access.ts
           grep -Fq "const BLACKLIST_REASON = 'left_channel'" src/channel-membership-access.ts
           grep -Fq 'storedStatusWasMember' src/channel-membership-access.ts
           grep -Fq "last_status IN ('creator','administrator','member','restricted')" src/channel-membership-access.ts
           grep -Fq "allowed_updates: ['message', 'callback_query', 'chat_member']" scripts/configure-bot.mjs
           grep -Fq '"main": "src/live-entry-v2.ts"' wrangler.jsonc
+          grep -Fq 'ensureWebhookMembershipUpdates' src/live-entry-v2.ts
           grep -Fq 'handlePublicationCommentGateWebhook' src/live-entry-v2.ts
           grep -Fq 'handlePublicationReaderDeliveryWebhook' src/live-entry-v2.ts
           grep -Fq 'handlePublicationFileCachePrewarm' src/live-entry-v2.ts
@@ -139,4 +143,4 @@ jobs:
         with:
           node-version: 22
       - name: Verify workers.dev serves current build
-        run: EXPECTED_MARKER=domnkr-build-20260820-membership1 node scripts/check-production.mjs
+        run: EXPECTED_MARKER=domnkr-build-20260909-channel-ban1 node scripts/check-production.mjs
