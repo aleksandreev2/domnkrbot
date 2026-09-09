@@ -7,6 +7,11 @@ export function notificationRenderStrategy(
   const data = String(callbackData ?? '').trim();
   const text = String(currentMessageText ?? '');
 
+  // Telegram normally includes the current text for these notification screens.
+  // If it does not, preserve the legacy in-place behavior instead of guessing
+  // that a semantic screen transition occurred and creating a replacement.
+  if (!text.trim()) return 'edit';
+
   if (/^subs:title:toggle:/.test(data)) return 'edit';
   if (/^subs:search:page:\d+$/.test(data)) return 'edit';
 
@@ -21,9 +26,9 @@ export function notificationRenderStrategy(
 }
 
 function isMyTitlesScreen(text: string): boolean {
-  return /(?:^|\n)📚\s*Мои подписки\b/i.test(text);
+  return /(?:^|\n)📚\s*Мои подписки(?=\s|$)/i.test(text);
 }
 
 function isAllTitlesScreen(text: string): boolean {
-  return /(?:^|\n)📚\s*Все переводы\b/i.test(text);
+  return /(?:^|\n)📚\s*Все переводы(?=\s|$)/i.test(text);
 }
