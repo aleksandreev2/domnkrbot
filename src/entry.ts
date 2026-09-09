@@ -39,7 +39,7 @@ export default {
     const notificationTextInputResponse = await handleTelegramNotificationTextInputRequest(request, env);
     if (notificationTextInputResponse) return notificationTextInputResponse;
 
-    const proposalV2Response = await handleTelegramTitleProposalV2WebhookRequest(request, env);
+    const proposalV2Response = await handleTelegramTitleProposalV2WebhookRequest(request, env, ctx);
     if (proposalV2Response) return proposalV2Response;
 
     const proposalCabinetResponse = await handleTelegramTitleProposalCabinetWebhookRequest(request, env);
@@ -61,7 +61,7 @@ export default {
       return proposalResponse;
     }
 
-    const subscriptionResponse = await handleTelegramSubscriptionWebhookRequest(request, env);
+    const subscriptionResponse = await handleTelegramSubscriptionWebhookRequest(request, env, ctx);
     if (subscriptionResponse) return subscriptionResponse;
 
     const adminWorkspaceResponse = await handleAdminUserWorkspace(request, env);

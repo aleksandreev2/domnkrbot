@@ -33,14 +33,21 @@ test('live-entry-v2 classifies Telegram webhooks before unrelated handler chains
   }
 });
 
-test('outer Telegram route is fail-closed and logs only route-level timing metadata', () => {
+test('outer Telegram route is fail-closed and logs only normalized stage timing metadata', () => {
   assert.match(liveV2, /const expectedSecret = env\.TELEGRAM_WEBHOOK_SECRET\?\.trim\(\) \?\? ''/);
   assert.match(liveV2, /const suppliedSecret = request\.headers\.get\('x-telegram-bot-api-secret-token'\) \?\? ''/);
   assert.match(liveV2, /if \(!expectedSecret \|\| suppliedSecret !== expectedSecret\)/);
   assert.match(liveV2, /Forbidden/);
-  assert.match(liveV2, /Telegram webhook handled/);
-  assert.match(liveV2, /durationMs/);
-  assert.doesNotMatch(liveV2, /Telegram webhook handled[^\n]*(?:text|callbackData|token|secret)/i);
+  assert.match(liveV2, /createTelegramLatencyTiming/);
+  assert.match(liveV2, /Telegram webhook latency v2/);
+  assert.match(liveV2, /timing\.snapshot\(route, kind\)/);
+  assert.doesNotMatch(liveV2, /Telegram webhook handled/);
+
+  const logIndex = liveV2.indexOf('Telegram webhook latency v2');
+  const logSlice = liveV2.slice(Math.max(0, logIndex - 200), logIndex + 400);
+  for (const forbidden of ['callbackData', 'callback_data', 'message.text', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_WEBHOOK_SECRET']) {
+    assert.equal(logSlice.includes(forbidden), false, `latency log must not contain ${forbidden}`);
+  }
 });
 
 test('interactive entry accepts execution context and live-entry forwards it', () => {

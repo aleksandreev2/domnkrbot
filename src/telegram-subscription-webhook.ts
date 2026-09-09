@@ -18,6 +18,7 @@ import {
   withTelegramSubscriptionCatalogDb,
 } from './telegram-subscription-catalog.js';
 import type { RanobeLibRuntimeEnv } from './ranobelib-runtime.js';
+import type { ExecutionContextLike } from './telegram-fast-ack.js';
 
 export type TelegramSubscriptionWebhookEnv = TelegramSubscriptionEnv & RanobeLibRuntimeEnv & {
   TELEGRAM_WEBHOOK_SECRET?: string;
@@ -90,6 +91,7 @@ export async function handleTelegramNotificationTextInputRequest(
 export async function handleTelegramSubscriptionWebhookRequest(
   request: Request,
   env: TelegramSubscriptionWebhookEnv,
+  ctx?: ExecutionContextLike,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (request.method !== 'POST' || url.pathname !== '/telegram/webhook') return null;
@@ -106,9 +108,9 @@ export async function handleTelegramSubscriptionWebhookRequest(
   // snapshot_ready filters are preserved; only legacy subscription routes keep
   // the compatibility DB wrapper that exposes discovered pre-snapshot titles.
   const subscriptionUpdate = normalizeSubscriptionCallback(update);
-  if (await handleTelegramNotificationUxUpdate(subscriptionUpdate, env)) return json({ ok: true });
+  if (await handleTelegramNotificationUxUpdate(subscriptionUpdate, env, ctx)) return json({ ok: true });
   if (await handleTelegramNotificationModeUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
-  if (await handleTelegramSubscriptionUpdate(subscriptionUpdate, subscriptionEnv)) return json({ ok: true });
+  if (await handleTelegramSubscriptionUpdate(subscriptionUpdate, subscriptionEnv, ctx)) return json({ ok: true });
 
   const message = update.message;
   const text = (message?.text ?? '').trim();

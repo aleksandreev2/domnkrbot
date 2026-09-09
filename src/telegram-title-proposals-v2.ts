@@ -1,4 +1,5 @@
 import { buildMainMenu, type TelegramPayload } from './telegram-bot-ui.js';
+import { startCallbackAck, type ExecutionContextLike } from './telegram-fast-ack.js';
 import {
   clearNotificationSearch,
   ensureTelegramTextBotUxSchema,
@@ -110,6 +111,7 @@ const schemaPromises = new WeakMap<object, Promise<void>>();
 export async function handleTelegramTitleProposalV2WebhookRequest(
   request: Request,
   env: TelegramTitleProposalV2Env,
+  ctx?: ExecutionContextLike,
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (request.method !== 'POST' || url.pathname !== '/telegram/webhook') return null;
@@ -124,10 +126,13 @@ export async function handleTelegramTitleProposalV2WebhookRequest(
   const text = message?.text?.trim() ?? '';
   if (message?.chat?.type === 'private' && message.from && isPlainCommand(text, 'start')) {
     await ensureUxSchema(env);
-    await upsertTelegramUser(env, message.from);
-    await setProposalInputActive(env, String(message.from.id), 0);
-    await clearTransientNotificationInput(env, message.from.id);
-    await sendMessage(env, message.chat.id, buildMainMenu(origin));
+    const menuPromise = sendMessage(env, message.chat.id, buildMainMenu(origin));
+    const housekeepingPromise = (async () => {
+      await upsertTelegramUser(env, message.from);
+      await setProposalInputActive(env, String(message.from.id), 0);
+      await clearTransientNotificationInput(env, message.from.id);
+    })();
+    await Promise.all([menuPromise, housekeepingPromise]);
     return json({ ok: true });
   }
 
@@ -148,7 +153,7 @@ export async function handleTelegramTitleProposalV2WebhookRequest(
 
   const callback = update.callback_query;
   if (callback?.message?.chat?.type === 'private' && callback.message.chat.id && callback.data) {
-    const callbackResponse = await handleV2Callback(env, callback, origin);
+    const callbackResponse = await handleV2Callback(env, callback, origin, ctx);
     if (callbackResponse) return callbackResponse;
   }
 
@@ -167,6 +172,7 @@ async function handleV2Callback(
   env: TelegramTitleProposalV2Env,
   callback: TelegramCallbackQuery,
   origin: string,
+  ctx?: ExecutionContextLike,
 ): Promise<Response | null> {
   const data = callback.data ?? '';
   const claimed = data === 'prop:new'
@@ -193,9 +199,12 @@ async function handleV2Callback(
     || data.startsWith('prop:results:');
   if (!claimed) return null;
 
+  startCallbackAck(env, callback.id, ctx);
   await ensureUxSchema(env);
-  await upsertTelegramUser(env, callback.from);
-  await clearTransientNotificationInput(env, callback.from.id);
+  await Promise.all([
+    upsertTelegramUser(env, callback.from),
+    clearTransientNotificationInput(env, callback.from.id),
+  ]);
 
   if (data === 'prop:home') {
     await setProposalInputActive(env, String(callback.from.id), 0);
@@ -341,6 +350,7 @@ async function handleV2Callback(
     const candidate = Number.isInteger(index) && index >= 0 ? candidates[index] : undefined;
     const ref = candidate ? ranobeLibCandidateRef(candidate) : null;
     if (!candidate || !ref) {
+      await editCallbackMessage(env, callback, buildProposalStale());
       await answerCallback(env, callback.id, 'Этот вариант больше недоступен.');
       return json({ ok: true });
     }
@@ -418,6 +428,7 @@ async function handleV2Callback(
 
   if (data === 'prop:raw:continue') {
     if (!session.raw_file_id) {
+      await editCallbackMessage(env, callback, buildProposalRawPrompt(session));
       await answerCallback(env, callback.id, 'Сначала отправьте RAW-файл или пропустите этот шаг.');
       return json({ ok: true });
     }
@@ -902,11 +913,8 @@ async function editCallbackMessage(env: TelegramTitleProposalV2Env, callback: Te
   });
 }
 
-async function answerCallback(env: TelegramTitleProposalV2Env, callbackId: string, text?: string): Promise<void> {
-  await telegramCall(env, 'answerCallbackQuery', {
-    callback_query_id: callbackId,
-    ...(text ? { text } : {}),
-  }).catch(() => undefined);
+async function answerCallback(_env: TelegramTitleProposalV2Env, _callbackId: string, _text?: string): Promise<void> {
+  // Claimed v2 callbacks are acknowledged once at the start of handleV2Callback.
 }
 
 async function telegramCall(env: TelegramTitleProposalV2Env, method: string, payload: Record<string, unknown>): Promise<void> {

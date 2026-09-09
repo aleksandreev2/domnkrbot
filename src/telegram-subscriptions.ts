@@ -3,6 +3,7 @@ import {
   refreshAllNotificationDemand,
   refreshTitleNotificationDemand,
 } from './notification-demand.js';
+import { startCallbackAck, type ExecutionContextLike } from './telegram-fast-ack.js';
 
 export type TelegramInlineKeyboardButton = {
   text: string;
@@ -327,6 +328,7 @@ async function ensureDeliveryModeColumn(env: TelegramSubscriptionEnv): Promise<v
 export async function handleTelegramSubscriptionUpdate(
   update: TelegramSubscriptionUpdate,
   env: TelegramSubscriptionEnv,
+  ctx?: ExecutionContextLike,
 ): Promise<boolean> {
   const callback = update.callback_query;
   if (!callback?.data?.startsWith('subs:')) return false;
@@ -343,16 +345,23 @@ export async function handleTelegramSubscriptionUpdate(
     return true;
   }
 
+  const navigation = parsed.kind === 'center' || parsed.kind === 'list' || parsed.kind === 'mine';
+  const earlyAck = navigation || parsed.kind === 'title' || parsed.kind === 'all';
+  if (earlyAck) startCallbackAck(env, callback.id, ctx);
+
   await ensureTelegramSubscriptionSchema(env);
-  await upsertTelegramUser(env, callback.from);
   const userId = String(callback.from.id);
-  await markTelegramUserReachable(env, userId);
-  await refreshAllNotificationDemand(env);
+
+  if (navigation) {
+    await deferNavigationBookkeeping(env, callback.from, ctx);
+  } else {
+    await upsertTelegramUser(env, callback.from);
+    await markTelegramUserReachable(env, userId);
+  }
 
   if (parsed.kind === 'center') {
     const center = buildNotificationCenter(await notificationCenterState(env, userId));
     await editTelegramMessage(env, callback.message.chat.id, callback.message.message_id, center);
-    await answerCallback(env, callback.id);
     return true;
   }
 
@@ -380,7 +389,11 @@ export async function handleTelegramSubscriptionUpdate(
     const before = await isEffectivelySubscribed(env, userId, title.book_ref);
     const enabled = !before;
     await setEffectiveTitleSubscription(env, userId, title.book_ref, enabled);
-    await refreshTitleNotificationDemand(env, title.book_ref);
+    await deferDemandMaintenance(
+      ctx,
+      () => refreshTitleNotificationDemand(env, title.book_ref),
+      'Targeted notification demand refresh failed',
+    );
 
     if (parsed.kind === 'notify-toggle') {
       await telegramCall(env, 'editMessageReplyMarkup', {
@@ -407,14 +420,22 @@ export async function handleTelegramSubscriptionUpdate(
     } else {
       const before = await isEffectivelySubscribed(env, userId, title.book_ref);
       await setEffectiveTitleSubscription(env, userId, title.book_ref, !before);
-      await refreshTitleNotificationDemand(env, title.book_ref);
+      await deferDemandMaintenance(
+        ctx,
+        () => refreshTitleNotificationDemand(env, title.book_ref),
+        'Targeted notification demand refresh failed',
+      );
       notice = before ? 'Уведомления для тайтла отключены.' : 'Уведомления для тайтла включены.';
     }
   } else if (parsed.kind === 'all') {
     if (parsed.mode === 'on') {
       await setAllTitles(env, userId, true);
       await env.DB.prepare('DELETE FROM title_subscription_exclusions WHERE user_telegram_id = ?').bind(userId).run();
-      await refreshAllNotificationDemand(env);
+      await deferDemandMaintenance(
+        ctx,
+        () => refreshAllNotificationDemand(env),
+        'Global notification demand refresh failed',
+      );
       notice = 'Уведомления обо всех переводах включены.';
     } else {
       await setAllTitles(env, userId, false);
@@ -422,7 +443,11 @@ export async function handleTelegramSubscriptionUpdate(
         env.DB.prepare('DELETE FROM title_subscriptions WHERE user_telegram_id = ?').bind(userId).run(),
         env.DB.prepare('DELETE FROM title_subscription_exclusions WHERE user_telegram_id = ?').bind(userId).run(),
       ]);
-      await refreshAllNotificationDemand(env);
+      await deferDemandMaintenance(
+        ctx,
+        () => refreshAllNotificationDemand(env),
+        'Global notification demand refresh failed',
+      );
       notice = 'Все уведомления отключены.';
     }
   }
@@ -439,7 +464,7 @@ export async function handleTelegramSubscriptionUpdate(
     : all;
   const menu = buildSubscriptionMenu(visible, { page: requestedPage, subscribedIds, excludedIds, allTitles });
   await editTelegramMessage(env, callback.message.chat.id, callback.message.message_id, menu);
-  await answerCallback(env, callback.id, notice);
+  if (!earlyAck) await answerCallback(env, callback.id, notice);
   return true;
 }
 
@@ -448,12 +473,11 @@ export async function sendTelegramSubscriptionMenu(
   user: TelegramUser,
   chatId: number,
   page = 0,
+  ctx?: ExecutionContextLike,
 ): Promise<void> {
   await ensureTelegramSubscriptionSchema(env);
-  await upsertTelegramUser(env, user);
+  await deferNavigationBookkeeping(env, user, ctx);
   const userId = String(user.id);
-  await markTelegramUserReachable(env, userId);
-  await refreshAllNotificationDemand(env);
   const [titles, allTitles, subscribedIds, excludedIds] = await Promise.all([
     listSubscriptionTitles(env),
     userSubscribesToAll(env, userId),
@@ -473,12 +497,11 @@ export async function sendTelegramNotificationCenter(
   env: TelegramSubscriptionEnv,
   user: TelegramUser,
   chatId: number,
+  ctx?: ExecutionContextLike,
 ): Promise<void> {
   await ensureTelegramSubscriptionSchema(env);
-  await upsertTelegramUser(env, user);
+  await deferNavigationBookkeeping(env, user, ctx);
   const userId = String(user.id);
-  await markTelegramUserReachable(env, userId);
-  await refreshAllNotificationDemand(env);
   const center = buildNotificationCenter(await notificationCenterState(env, userId));
   await telegramCall(env, 'sendMessage', {
     chat_id: chatId,
@@ -750,6 +773,40 @@ async function answerCallback(env: TelegramSubscriptionEnv, callbackId: string, 
     callback_query_id: callbackId,
     ...(text ? { text } : {}),
   }).catch(() => undefined);
+}
+
+async function deferDemandMaintenance(
+  ctx: ExecutionContextLike | undefined,
+  task: () => Promise<unknown>,
+  label: string,
+): Promise<void> {
+  const pending = task();
+  if (ctx) {
+    ctx.waitUntil(pending.catch((error) => {
+      console.error(label, error);
+    }));
+    return;
+  }
+  await pending;
+}
+
+async function deferNavigationBookkeeping(
+  env: TelegramSubscriptionEnv,
+  user: TelegramUser,
+  ctx?: ExecutionContextLike,
+): Promise<void> {
+  const userId = String(user.id);
+  const pending = Promise.all([
+    upsertTelegramUser(env, user),
+    markTelegramUserReachable(env, userId),
+  ]).then(() => undefined).catch((error) => {
+    console.error('Telegram subscription navigation bookkeeping failed', error);
+  });
+  if (ctx) {
+    ctx.waitUntil(pending);
+    return;
+  }
+  await pending;
 }
 
 async function upsertTelegramUser(env: TelegramSubscriptionEnv, user: TelegramUser): Promise<void> {

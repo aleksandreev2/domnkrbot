@@ -37,6 +37,7 @@ import {
   type NotificationUiTitle,
   type NotificationDeliverySetting,
 } from './telegram-notification-ux.js';
+import { startCallbackAck, type ExecutionContextLike } from './telegram-fast-ack.js';
 
 type CountRow = { count: number | string | null };
 type AllTitlesRow = { all_titles: number | string | null };
@@ -47,6 +48,7 @@ export type TelegramNotificationUxEnv = TelegramSubscriptionEnv;
 export async function handleTelegramNotificationUxUpdate(
   update: TelegramSubscriptionUpdate,
   env: TelegramNotificationUxEnv,
+  ctx?: ExecutionContextLike,
 ): Promise<boolean> {
   const callback = update.callback_query;
   if (!callback?.data) return false;
@@ -59,16 +61,17 @@ export async function handleTelegramNotificationUxUpdate(
     return true;
   }
 
-  await ensureNotificationUxSchema(env);
-  await upsertTelegramUser(env, callback.from);
+  startCallbackAck(env, callback.id, ctx);
   const userId = String(callback.from.id);
-  await setProposalInputActive(env, userId, 0);
-  await clearNotificationCustomInput(env, userId);
+  await ensureNotificationUxSchema(env);
 
   if (parsed.kind === 'dashboard') {
-    await clearNotificationSearch(env, userId);
+    await Promise.all([
+      clearNotificationSearch(env, userId),
+      setProposalInputActive(env, userId, 0),
+      clearNotificationCustomInput(env, userId),
+    ]);
     await respond(env, callback, chatId, await dashboardPayload(env, userId));
-    await answerCallback(env, callback.id);
     return true;
   }
 
@@ -79,23 +82,28 @@ export async function handleTelegramNotificationUxUpdate(
       ? await listMyTitles(env, userId, parsed.page)
       : await listAllTitles(env, parsed.page);
     await respond(env, callback, chatId, buildNotificationTitleList({ kind, rows, page: parsed.page }));
-    await answerCallback(env, callback.id);
     return true;
   }
 
   if (parsed.kind === 'search-start') {
-    await beginNotificationSearch(env, userId, parsed.returnScope);
+    await Promise.all([
+      setProposalInputActive(env, userId, 0),
+      clearNotificationCustomInput(env, userId),
+      beginNotificationSearch(env, userId, parsed.returnScope),
+    ]);
     await respond(env, callback, chatId, buildNotificationSearchPrompt(parsed.returnScope));
-    await answerCallback(env, callback.id);
     return true;
   }
 
   if (parsed.kind === 'search-again') {
     const state = await getNotificationSearchState(env, userId);
     const returnScope = state?.returnScope ?? 'home';
-    await beginNotificationSearch(env, userId, returnScope);
+    await Promise.all([
+      setProposalInputActive(env, userId, 0),
+      clearNotificationCustomInput(env, userId),
+      beginNotificationSearch(env, userId, returnScope),
+    ]);
     await respond(env, callback, chatId, buildNotificationSearchPrompt(returnScope));
-    await answerCallback(env, callback.id);
     return true;
   }
 
@@ -104,7 +112,6 @@ export async function handleTelegramNotificationUxUpdate(
     if (!state?.query) {
       await beginNotificationSearch(env, userId, state?.returnScope ?? 'home');
       await respond(env, callback, chatId, buildNotificationSearchPrompt(state?.returnScope ?? 'home'));
-      await answerCallback(env, callback.id, 'Поиск устарел. Введите название ещё раз.');
       return true;
     }
     await saveNotificationSearchPage(env, userId, parsed.page);
@@ -115,54 +122,54 @@ export async function handleTelegramNotificationUxUpdate(
       page: parsed.page,
       returnScope: state.returnScope,
     }));
-    await answerCallback(env, callback.id);
     return true;
   }
 
   if (parsed.kind === 'clear-confirm') {
     await respond(env, callback, chatId, buildNotificationDisableAllConfirmation());
-    await answerCallback(env, callback.id);
     return true;
   }
 
   if (parsed.kind === 'clear-yes') {
+    await upsertTelegramUser(env, callback.from);
     await clearAllSubscriptions(env, userId);
+    const refresh = refreshAllNotificationDemand(env).catch((error) => {
+      console.error('Global notification demand refresh failed', error);
+    });
+    if (ctx) ctx.waitUntil(refresh);
+    else await refresh;
     await respond(env, callback, chatId, await dashboardPayload(env, userId));
-    await answerCallback(env, callback.id, 'Все уведомления отключены.');
     return true;
   }
 
   if (parsed.kind === 'mode-home') {
     await respond(env, callback, chatId, buildNotificationGlobalModeScreen(asUiSetting(await getGlobalDeliverySetting(env, userId))));
-    await answerCallback(env, callback.id);
     return true;
   }
 
   if (parsed.kind === 'title' || parsed.kind === 'toggle' || parsed.kind === 'title-mode') {
     const title = await titleById(env, parsed.titleId);
-    if (!title) {
-      await answerCallback(env, callback.id, 'Тайтл больше не доступен.');
-      return true;
-    }
+    if (!title) return true;
     const context: NotificationReturnContext = { origin: parsed.origin, page: parsed.page };
 
     if (parsed.kind === 'toggle') {
+      await upsertTelegramUser(env, callback.from);
       const before = await isEffectivelySubscribed(env, userId, title.book_ref);
       await setEffectiveTitleSubscription(env, userId, title.book_ref, !before);
-      await refreshTitleNotificationDemand(env, title.book_ref);
+      const refresh = refreshTitleNotificationDemand(env, title.book_ref).catch((error) => {
+        console.error('Notification title demand refresh failed', error);
+      });
+      if (ctx) ctx.waitUntil(refresh);
+      else await refresh;
     }
 
     if (parsed.kind === 'title-mode') {
       await respond(env, callback, chatId, await titleModePayload(env, userId, title, context));
-      await answerCallback(env, callback.id);
       return true;
     }
 
     const payload = await titleCardPayload(env, userId, title, context);
     await respond(env, callback, chatId, payload);
-    await answerCallback(env, callback.id, parsed.kind === 'toggle'
-      ? (payload.text.includes('✅ включены') ? 'Уведомления включены.' : 'Уведомления отключены.')
-      : undefined);
     return true;
   }
 
@@ -369,7 +376,6 @@ async function clearAllSubscriptions(env: TelegramNotificationUxEnv, userId: str
     env.DB.prepare('DELETE FROM title_subscriptions WHERE user_telegram_id = ?').bind(userId).run(),
     env.DB.prepare('DELETE FROM title_subscription_exclusions WHERE user_telegram_id = ?').bind(userId).run(),
   ]);
-  await refreshAllNotificationDemand(env);
 }
 
 async function userSubscribesToAll(env: TelegramNotificationUxEnv, userId: string): Promise<boolean> {
