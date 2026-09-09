@@ -45,7 +45,6 @@ import { renderTelegramScreen, type TelegramScreenExecutionContext } from './tel
 
 type CountRow = { count: number | string | null };
 type AllTitlesRow = { all_titles: number | string | null };
-type DeliverySettingRow = { delivery_mode?: unknown; stack_size?: unknown };
 type D1PreparedStatement = ReturnType<TelegramSubscriptionEnv['DB']['prepare']>;
 type D1BatchResult<T> = { results?: T[] };
 type D1BatchDatabase = TelegramSubscriptionEnv['DB'] & {
@@ -324,7 +323,7 @@ async function titleCardPayload(
   title: NotificationUiTitle,
   returnContext: NotificationReturnContext,
 ) {
-  const [allTitlesRow, explicitRow, excludedRow, globalSettingRow, titleSettingRow, pendingCountRow] = await batchFirstRows(env, [
+  const [allTitlesRow, explicitRow, excludedRow, globalSettingRow, titleSettingRow] = await batchFirstRows(env, [
     env.DB.prepare('SELECT all_titles FROM telegram_subscription_settings WHERE user_telegram_id = ? LIMIT 1').bind(userId),
     env.DB.prepare('SELECT 1 AS subscribed FROM title_subscriptions WHERE user_telegram_id = ? AND book_ref = ? LIMIT 1').bind(userId, title.book_ref),
     env.DB.prepare('SELECT 1 AS excluded FROM title_subscription_exclusions WHERE user_telegram_id = ? AND book_ref = ? LIMIT 1').bind(userId, title.book_ref),
@@ -337,14 +336,6 @@ async function titleCardPayload(
       SELECT delivery_mode, stack_size
       FROM telegram_title_delivery_settings
       WHERE user_telegram_id = ? AND book_ref = ?
-    `).bind(userId, title.book_ref),
-    env.DB.prepare(`
-      SELECT COALESCE(SUM(r.chapter_count), 0) AS count
-      FROM ranobelib_notification_outbox o
-      JOIN ranobelib_releases r ON r.id = o.release_id
-      WHERE o.user_telegram_id = ?
-        AND r.book_ref = ?
-        AND o.status IN ('pending','retry')
     `).bind(userId, title.book_ref),
   ]);
 
@@ -359,7 +350,9 @@ async function titleCardPayload(
   const effective = inherited
     ? globalSetting
     : normalizeDeliverySetting(titleSettingRow?.delivery_mode, titleSettingRow?.stack_size);
-  const pendingChapterCount = effective.mode === 'stack' ? countRow(pendingCountRow) : null;
+  const pendingChapterCount = effective.mode === 'stack'
+    ? await pendingStackChapterCount(env, userId, title.book_ref)
+    : null;
 
   return buildNotificationTitleCard({
     title,
