@@ -30,8 +30,12 @@ type Env = AdminUserWorkspaceEnv
   & TelegramTitleProposalAdminAlertEnv
   & TelegramSubscriptionWebhookEnv;
 
+interface ExecutionContextLike {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, _ctx?: ExecutionContextLike): Promise<Response> {
     const notificationTextInputResponse = await handleTelegramNotificationTextInputRequest(request, env);
     if (notificationTextInputResponse) return notificationTextInputResponse;
 
