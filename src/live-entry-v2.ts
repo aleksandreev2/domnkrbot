@@ -134,8 +134,14 @@ export default {
     const analytics = await handlePublishingAnalyticsV2(request, env);
     if (analytics) return analytics;
 
+    // Preserve the normal fallback path for every request except proposal creation. The latter
+    // needs one best-effort post-processing step so a successful website submission alerts admins.
+    if (request.method !== 'POST' || url.pathname !== '/api/proposals') {
+      return baseWorker.fetch(request, env as never, ctx as never);
+    }
+
     const response = await baseWorker.fetch(request, env as never, ctx as never);
-    if (request.method === 'POST' && url.pathname === '/api/proposals' && response.status === 201) {
+    if (response.status === 201) {
       const created = await response.clone().json().catch(() => null) as { id?: string } | null;
       const proposalId = created?.id;
       if (proposalId) {
