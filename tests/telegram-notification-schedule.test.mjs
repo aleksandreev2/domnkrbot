@@ -17,6 +17,13 @@ test('notification schedule gives hot scan, idle scan, discovery, fallback deliv
   assert.match(entry, /MEMBERSHIP_CRON/);
 });
 
+test('five-minute fallback cron also advances channel membership enforcement', () => {
+  assert.match(
+    entry,
+    /if \(controller\.cron === FALLBACK_DELIVERY_CRON\) \{[\s\S]*?runChannelMembershipMaintenance\(env, 40\)[\s\S]*?drainNotificationOutbox/,
+  );
+});
+
 test('membership cron repairs chat_member webhook subscription before running maintenance', () => {
   assert.match(entry, /ensureWebhookMembershipUpdates/);
   assert.match(
