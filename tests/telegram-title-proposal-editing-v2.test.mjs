@@ -180,6 +180,9 @@ async function withNetwork(fn, options = {}) {
 
 const flatButtons = (call) => call.payload.reply_markup.inline_keyboard.flat();
 const callbacks = (call) => flatButtons(call).map((button) => button.callback_data).filter(Boolean);
+const latestVisibleCall = (calls) => [...calls].reverse().find((call) => (
+  call.method === 'sendMessage' || call.method === 'editMessageText'
+));
 
 test('review exposes four field-level edit buttons instead of a generic edit action', async () => {
   const { buildProposalReview } = await loadUi();
@@ -200,8 +203,8 @@ test('external title edit reuses input step and returns directly to review', asy
     assert.equal(response?.status, 200);
     assert.equal(state.DB.session.step, 'external_title');
     assert.equal(state.DB.session.return_to_review, 1);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /название новеллы/i);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /название новеллы/i);
   });
   await withNetwork(async (calls) => {
     await handleTelegramTitleProposalV2WebhookRequest(messageRequest('Новое название'), state);
@@ -228,8 +231,8 @@ test('external source and comment edits return to review while Back from an edit
     assert.equal(state.DB.session.step, 'review');
     assert.equal(state.DB.session.return_to_review, 0);
     assert.equal(state.DB.session.source_url, 'https://novelpia.com/novel/123');
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /Проверка заявки/);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /Проверка заявки/);
   });
 
   await withNetwork(async () => {
@@ -266,16 +269,16 @@ test('RAW edit can clear the existing attachment and return to review', async ()
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:edit:raw'), state);
     assert.equal(state.DB.session.step, 'raw');
     assert.equal(state.DB.session.return_to_review, 1);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.ok(callbacks(edit).includes('prop:raw:clear'));
+    const visible = latestVisibleCall(calls);
+    assert.ok(callbacks(visible).includes('prop:raw:clear'));
   });
   await withNetwork(async (calls) => {
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:raw:clear'), state);
     assert.equal(state.DB.session.step, 'review');
     assert.equal(state.DB.session.return_to_review, 0);
     assert.equal(state.DB.session.raw_file_id, null);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /RAW: нет/);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /RAW: нет/);
   });
 });
 
@@ -302,8 +305,8 @@ test('RanobeLib title edit can reselect a title and confirm back into review', a
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:confirm'), state);
     assert.equal(state.DB.session.step, 'review');
     assert.equal(state.DB.session.return_to_review, 0);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /Проверка заявки/);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /Проверка заявки/);
   });
 });
 
@@ -320,10 +323,10 @@ test('RanobeLib detail failure renders Retry, Change query, Back and Home while 
     assert.equal(response?.status, 200);
     assert.equal(state.DB.session.ranobelib_book_ref, '777--test-title');
     assert.equal(state.DB.session.step, 'ranobelib_query');
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.ok(edit, 'network failure should replace the screen with recovery actions');
-    assert.match(edit.payload.text, /не удалось|не отвечает/i);
-    const data = callbacks(edit);
+    const visible = latestVisibleCall(calls);
+    assert.ok(visible, 'network failure should replace the screen with recovery actions');
+    assert.match(visible.payload.text, /не удалось|не отвечает/i);
+    const data = callbacks(visible);
     assert.ok(data.includes('prop:retry:ranobelib'));
     assert.ok(data.includes('prop:query:again'));
     assert.ok(data.includes('prop:back'));
@@ -337,10 +340,10 @@ test('stale proposal callback renders Start again and Home instead of falling th
   await withNetwork(async (calls) => {
     const response = await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:resume'), state);
     assert.equal(response?.status, 200);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.ok(edit);
-    assert.match(edit.payload.text, /устарел|не найден/i);
-    const data = callbacks(edit);
+    const visible = latestVisibleCall(calls);
+    assert.ok(visible);
+    assert.match(visible.payload.text, /устарел|не найден/i);
+    const data = callbacks(visible);
     assert.ok(data.includes('prop:start:again'));
     assert.ok(data.includes('prop:home'));
   });
