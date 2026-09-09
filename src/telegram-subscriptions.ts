@@ -345,13 +345,19 @@ export async function handleTelegramSubscriptionUpdate(
     return true;
   }
 
-  const earlyAck = parsed.kind === 'center' || parsed.kind === 'title' || parsed.kind === 'all';
+  const navigation = parsed.kind === 'center' || parsed.kind === 'list' || parsed.kind === 'mine';
+  const earlyAck = navigation || parsed.kind === 'title' || parsed.kind === 'all';
   if (earlyAck) startCallbackAck(env, callback.id, ctx);
 
   await ensureTelegramSubscriptionSchema(env);
-  await upsertTelegramUser(env, callback.from);
   const userId = String(callback.from.id);
-  await markTelegramUserReachable(env, userId);
+
+  if (navigation) {
+    await deferNavigationBookkeeping(env, callback.from, ctx);
+  } else {
+    await upsertTelegramUser(env, callback.from);
+    await markTelegramUserReachable(env, userId);
+  }
 
   if (parsed.kind === 'center') {
     const center = buildNotificationCenter(await notificationCenterState(env, userId));
@@ -467,12 +473,11 @@ export async function sendTelegramSubscriptionMenu(
   user: TelegramUser,
   chatId: number,
   page = 0,
+  ctx?: ExecutionContextLike,
 ): Promise<void> {
   await ensureTelegramSubscriptionSchema(env);
-  await upsertTelegramUser(env, user);
+  await deferNavigationBookkeeping(env, user, ctx);
   const userId = String(user.id);
-  await markTelegramUserReachable(env, userId);
-  await refreshAllNotificationDemand(env);
   const [titles, allTitles, subscribedIds, excludedIds] = await Promise.all([
     listSubscriptionTitles(env),
     userSubscribesToAll(env, userId),
@@ -492,12 +497,11 @@ export async function sendTelegramNotificationCenter(
   env: TelegramSubscriptionEnv,
   user: TelegramUser,
   chatId: number,
+  ctx?: ExecutionContextLike,
 ): Promise<void> {
   await ensureTelegramSubscriptionSchema(env);
-  await upsertTelegramUser(env, user);
+  await deferNavigationBookkeeping(env, user, ctx);
   const userId = String(user.id);
-  await markTelegramUserReachable(env, userId);
-  await refreshAllNotificationDemand(env);
   const center = buildNotificationCenter(await notificationCenterState(env, userId));
   await telegramCall(env, 'sendMessage', {
     chat_id: chatId,
@@ -781,6 +785,25 @@ async function deferDemandMaintenance(
     ctx.waitUntil(pending.catch((error) => {
       console.error(label, error);
     }));
+    return;
+  }
+  await pending;
+}
+
+async function deferNavigationBookkeeping(
+  env: TelegramSubscriptionEnv,
+  user: TelegramUser,
+  ctx?: ExecutionContextLike,
+): Promise<void> {
+  const userId = String(user.id);
+  const pending = Promise.all([
+    upsertTelegramUser(env, user),
+    markTelegramUserReachable(env, userId),
+  ]).then(() => undefined).catch((error) => {
+    console.error('Telegram subscription navigation bookkeeping failed', error);
+  });
+  if (ctx) {
+    ctx.waitUntil(pending);
     return;
   }
   await pending;
