@@ -3,6 +3,7 @@ import type { RanobeLibTeamBookRef } from './integrations/ranobelib/types.js';
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
 
 const DEFAULT_TEAM_REF = '11969--dom-nekromanta';
+const COMPLETED_TRANSLATION_STATUS = 2;
 
 type DiscoveryEnv = {
   DB: D1DatabaseLike;
@@ -27,12 +28,14 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
     'SELECT book_ref FROM ranobelib_titles WHERE is_active = 1',
   ).all<{ book_ref: string }>();
   const before = new Set(activeRows.map((row) => String(row.book_ref || '')).filter(Boolean));
-  const after = new Set(books.map((book) => book.ref));
-  const refsJson = JSON.stringify([...after]);
+  const discoveredRefs = new Set(books.map((book) => book.ref));
+  const activeAfter = new Set(
+    books.filter((book) => book.translationStatusId !== COMPLETED_TRANSLATION_STATUS).map((book) => book.ref),
+  );
+  const refsJson = JSON.stringify([...discoveredRefs]);
 
-  // Deactivate only titles missing from a validated non-empty discovery result. Doing this
-  // before the bulk upsert lets the upsert distinguish already-active rows from titles that
-  // are genuinely new/reactivated, so only the latter are scheduled immediately.
+  // Deactivate only titles missing from a validated non-empty discovery result. Completed
+  // translations are deactivated by the bulk upsert below, while remaining in the catalog.
   await env.DB.prepare(`
     UPDATE ranobelib_titles SET is_active = 0
     WHERE is_active = 1
@@ -44,9 +47,9 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
   await bulkUpsertTitles(env.DB, books);
 
   let activated = 0;
-  for (const ref of after) if (!before.has(ref)) activated += 1;
+  for (const ref of activeAfter) if (!before.has(ref)) activated += 1;
   let deactivated = 0;
-  for (const ref of before) if (!after.has(ref)) deactivated += 1;
+  for (const ref of before) if (!activeAfter.has(ref)) deactivated += 1;
 
   return { discovered: books.length, activated, deactivated };
 }
@@ -59,10 +62,13 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
     url: book.url,
     title: book.title ?? null,
     coverUrl: normalizeCoverUrl(book.coverUrl ?? null),
+    translationStatusId: book.translationStatusId ?? null,
+    translationStatusLabel: book.translationStatusLabel ?? null,
   })));
 
-  // Demand is folded into the same JSON upsert so discovery remains bounded to two D1 writes
-  // regardless of team size. Missing reachability rows are deliberately treated as active.
+  // Demand and translation status are folded into the same JSON upsert so discovery remains
+  // bounded to two D1 writes regardless of team size. A known completed status wins over
+  // demand: its subscription is preserved, but it is not polled until RanobeLib reopens it.
   await db.prepare(`
     WITH discovered AS (
       SELECT
@@ -71,7 +77,9 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
         CAST(json_extract(j.value, '$.slug') AS TEXT) AS slug,
         CAST(json_extract(j.value, '$.url') AS TEXT) AS url,
         json_extract(j.value, '$.title') AS title,
-        json_extract(j.value, '$.coverUrl') AS cover_url
+        json_extract(j.value, '$.coverUrl') AS cover_url,
+        CAST(json_extract(j.value, '$.translationStatusId') AS INTEGER) AS translation_status_id,
+        json_extract(j.value, '$.translationStatusLabel') AS translation_status_label
       FROM json_each(?) AS j
     ),
     discovered_with_demand AS (
@@ -107,7 +115,9 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
     )
     INSERT INTO ranobelib_titles (
       book_ref, ranobelib_id, slug, url, title, cover_url, is_active,
-      next_check_at, notification_subscriber_count, subscriber_count_updated_at
+      next_check_at, notification_subscriber_count, subscriber_count_updated_at,
+      translation_status_id, translation_status_label, translation_status_revision,
+      translation_status_changed_at
     )
     SELECT
       book_ref,
@@ -116,10 +126,14 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
       url,
       title,
       cover_url,
-      1,
+      CASE WHEN translation_status_id = ${COMPLETED_TRANSLATION_STATUS} THEN 0 ELSE 1 END,
+      CASE WHEN translation_status_id = ${COMPLETED_TRANSLATION_STATUS} THEN NULL ELSE CURRENT_TIMESTAMP END,
+      CASE WHEN translation_status_id = ${COMPLETED_TRANSLATION_STATUS} THEN 0 ELSE demand_count END,
       CURRENT_TIMESTAMP,
-      demand_count,
-      CURRENT_TIMESTAMP
+      translation_status_id,
+      translation_status_label,
+      0,
+      CASE WHEN translation_status_id IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END
     FROM discovered_with_demand
     WHERE 1
     ON CONFLICT(book_ref) DO UPDATE SET
@@ -128,7 +142,28 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
       url = excluded.url,
       title = COALESCE(excluded.title, ranobelib_titles.title),
       cover_url = COALESCE(excluded.cover_url, ranobelib_titles.cover_url),
+      translation_status_revision = CASE
+        WHEN excluded.translation_status_id IS NOT NULL
+          AND ranobelib_titles.translation_status_id IS NOT NULL
+          AND excluded.translation_status_id <> ranobelib_titles.translation_status_id
+          THEN ranobelib_titles.translation_status_revision + 1
+        ELSE ranobelib_titles.translation_status_revision
+      END,
+      translation_status_changed_at = CASE
+        WHEN excluded.translation_status_id IS NOT NULL
+          AND (ranobelib_titles.translation_status_id IS NULL
+            OR excluded.translation_status_id <> ranobelib_titles.translation_status_id)
+          THEN CURRENT_TIMESTAMP
+        ELSE ranobelib_titles.translation_status_changed_at
+      END,
+      translation_status_id = COALESCE(excluded.translation_status_id, ranobelib_titles.translation_status_id),
+      translation_status_label = COALESCE(excluded.translation_status_label, ranobelib_titles.translation_status_label),
       next_check_at = CASE
+        WHEN COALESCE(excluded.translation_status_id, ranobelib_titles.translation_status_id) = ${COMPLETED_TRANSLATION_STATUS}
+          THEN NULL
+        WHEN ranobelib_titles.translation_status_id = ${COMPLETED_TRANSLATION_STATUS}
+          AND COALESCE(excluded.translation_status_id, ranobelib_titles.translation_status_id) <> ${COMPLETED_TRANSLATION_STATUS}
+          THEN CURRENT_TIMESTAMP
         WHEN ranobelib_titles.is_active = 0 THEN CURRENT_TIMESTAMP
         WHEN ranobelib_titles.notification_subscriber_count = 0
           AND excluded.notification_subscriber_count > 0 THEN CURRENT_TIMESTAMP
@@ -138,14 +173,23 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
         ELSE ranobelib_titles.next_check_at
       END,
       scan_priority = CASE
-        WHEN ranobelib_titles.notification_subscriber_count = 0
+        WHEN COALESCE(excluded.translation_status_id, ranobelib_titles.translation_status_id) <> ${COMPLETED_TRANSLATION_STATUS}
+          AND ranobelib_titles.notification_subscriber_count = 0
           AND excluded.notification_subscriber_count > 0
           THEN ranobelib_titles.scan_priority + 10
         ELSE ranobelib_titles.scan_priority
       END,
-      notification_subscriber_count = excluded.notification_subscriber_count,
+      notification_subscriber_count = CASE
+        WHEN COALESCE(excluded.translation_status_id, ranobelib_titles.translation_status_id) = ${COMPLETED_TRANSLATION_STATUS}
+          THEN 0
+        ELSE excluded.notification_subscriber_count
+      END,
       subscriber_count_updated_at = CURRENT_TIMESTAMP,
-      is_active = 1
+      is_active = CASE
+        WHEN COALESCE(excluded.translation_status_id, ranobelib_titles.translation_status_id) = ${COMPLETED_TRANSLATION_STATUS}
+          THEN 0
+        ELSE 1
+      END
   `).bind(payload).run();
 }
 
