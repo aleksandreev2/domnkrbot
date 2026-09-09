@@ -438,7 +438,7 @@ async function batchFirstRows(
   return Promise.all(statements.map((statement) => statement.first<Record<string, unknown>>()));
 }
 
-function countRow(row: Record<string, unknown> | null): number {
+function countRow(row: Record<string, unknown> | null | undefined): number {
   const value = Number(row?.count ?? 0);
   return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
 }
