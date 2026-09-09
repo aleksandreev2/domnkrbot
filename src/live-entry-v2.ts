@@ -1,5 +1,6 @@
 import baseWorker from './live-entry.js';
 import {
+  ensureWebhookMembershipUpdates,
   runChannelMembershipMaintenance,
   type ChannelMembershipEnv,
 } from './channel-membership-access.js';
@@ -151,8 +152,14 @@ export default {
     }
 
     if (controller.cron === MEMBERSHIP_CRON) {
+      let webhookUpdated = false;
+      try {
+        webhookUpdated = await ensureWebhookMembershipUpdates(env);
+      } catch (error) {
+        console.error('Channel membership webhook self-heal failed', error);
+      }
       const membership = await runChannelMembershipMaintenance(env, 40);
-      console.log('Channel membership maintenance complete', membership);
+      console.log('Channel membership maintenance complete', { webhookUpdated, ...membership });
       return;
     }
 
