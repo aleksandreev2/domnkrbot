@@ -1,9 +1,12 @@
+import type { TelegramLatencyTiming } from './telegram-latency-timing.js';
+
 export type TelegramFastAckEnv = {
   TELEGRAM_BOT_TOKEN?: string;
 };
 
 export type ExecutionContextLike = {
   waitUntil(promise: Promise<unknown>): void;
+  telegramLatencyTiming?: Pick<TelegramLatencyTiming, 'mark'>;
 };
 
 export function startCallbackAck(
@@ -16,6 +19,7 @@ export function startCallbackAck(
   const id = String(callbackId ?? '').trim();
   if (!token || !id) return Promise.resolve();
 
+  ctx?.telegramLatencyTiming?.mark('ack_started');
   const promise = fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
