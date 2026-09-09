@@ -48,12 +48,18 @@ export async function renderTelegramScreen(
 
   if (options.strategy === 'edit') {
     if (!target.messageId) throw new Error('Telegram edit requires message id');
-    const result = await visibleTelegramCall(token, 'editMessageText', options.strategy, {
-      chat_id: target.chatId,
-      message_id: target.messageId,
-      ...payload,
-    }, options.ctx);
-    return { messageId: resultMessageId(result) ?? target.messageId };
+    try {
+      const result = await visibleTelegramCall(token, 'editMessageText', options.strategy, {
+        chat_id: target.chatId,
+        message_id: target.messageId,
+        ...payload,
+      }, options.ctx);
+      return { messageId: resultMessageId(result) ?? target.messageId };
+    } catch (error) {
+      if (!isMessageNotModified(error)) throw error;
+      options.ctx?.telegramLatencyTiming?.mark('screen_ready');
+      return { messageId: target.messageId };
+    }
   }
 
   const sent = await visibleTelegramCall(token, 'sendMessage', options.strategy, {
@@ -87,10 +93,15 @@ async function visibleTelegramCall(
   timing?.describeRender(strategy, method);
   timing?.mark('telegram_started');
   const startedAt = Date.now();
-  const response = await telegramCall(token, method, body);
-  timing?.recordTelegramApi(Math.max(0, Date.now() - startedAt));
-  timing?.mark('screen_ready');
-  return response;
+  try {
+    const response = await telegramCall(token, method, body);
+    timing?.recordTelegramApi(Math.max(0, Date.now() - startedAt));
+    timing?.mark('screen_ready');
+    return response;
+  } catch (error) {
+    timing?.recordTelegramApi(Math.max(0, Date.now() - startedAt));
+    throw error;
+  }
 }
 
 async function telegramCall(
@@ -114,6 +125,11 @@ function resultMessageId(response: TelegramApiResponse): number | undefined {
   if (!response.result || typeof response.result !== 'object') return undefined;
   const value = Number(response.result.message_id);
   return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+}
+
+function isMessageNotModified(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /message is not modified/i.test(message);
 }
 
 function compactError(error: unknown): string {
