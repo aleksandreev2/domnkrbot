@@ -8,6 +8,7 @@ export type DeliveryGroupReadinessCandidate = {
   pendingChapters: number | string;
   oldestPendingAt: string | null;
   retryBlocked: boolean | number | string;
+  translationCompleted?: boolean | number | string;
 };
 
 export type ClaimedDeliveryRowLike = {
@@ -17,6 +18,7 @@ export type ClaimedDeliveryRowLike = {
   ranobelib_id: number | string | null;
   title: string;
   url: string;
+  release_kind?: string | null;
   chapter_count: number | string;
   first_volume: string | null;
   first_number: string | null;
@@ -39,6 +41,7 @@ export type DeliveryGroup<T extends ClaimedDeliveryRowLike = ClaimedDeliveryRowL
   lastVolume: string | null;
   lastNumber: string | null;
   summary: string;
+  translationCompleted: boolean;
 };
 
 export function notificationGroupReady(
@@ -46,6 +49,7 @@ export function notificationGroupReady(
   nowMs = Date.now(),
 ): boolean {
   if (truthyFlag(candidate.retryBlocked)) return false;
+  if (truthyFlag(candidate.translationCompleted)) return true;
 
   const setting = normalizeDeliverySetting(candidate.deliveryMode, candidate.stackSize);
   if (setting.mode === 'instant') return true;
@@ -64,7 +68,8 @@ export function aggregateClaimedDeliveryRows<T extends ClaimedDeliveryRowLike>(r
     const userTelegramId = String(row.user_telegram_id);
     const bookRef = String(row.book_ref);
     const key = `${userTelegramId}\u0000${bookRef}`;
-    const chapterCount = positiveInteger(row.chapter_count, 1);
+    const isCompletion = row.release_kind === 'translation_completed';
+    const chapterCount = isCompletion ? 0 : nonNegativeInteger(row.chapter_count);
     const existing = groups.get(key);
 
     if (!existing) {
@@ -76,24 +81,31 @@ export function aggregateClaimedDeliveryRows<T extends ClaimedDeliveryRowLike>(r
         titleUrl: row.url,
         members: [row],
         chapterCount,
-        firstVolume: row.first_volume ?? null,
-        firstNumber: row.first_number ?? null,
-        lastVolume: row.last_volume ?? row.first_volume ?? null,
-        lastNumber: row.last_number ?? row.first_number ?? null,
-        summary: row.summary,
+        firstVolume: isCompletion ? null : (row.first_volume ?? null),
+        firstNumber: isCompletion ? null : (row.first_number ?? null),
+        lastVolume: isCompletion ? null : (row.last_volume ?? row.first_volume ?? null),
+        lastNumber: isCompletion ? null : (row.last_number ?? row.first_number ?? null),
+        summary: isCompletion ? '' : row.summary,
+        translationCompleted: isCompletion,
       });
       continue;
     }
 
     existing.members.push(row);
-    existing.chapterCount += chapterCount;
-    existing.lastVolume = row.last_volume ?? row.first_volume ?? existing.lastVolume;
-    existing.lastNumber = row.last_number ?? row.first_number ?? existing.lastNumber;
-    if (row.summary) existing.summary = existing.summary ? `${existing.summary}; ${row.summary}` : row.summary;
+    existing.translationCompleted ||= isCompletion;
+    if (!isCompletion) {
+      existing.chapterCount += chapterCount;
+      if (existing.firstVolume === null) existing.firstVolume = row.first_volume ?? null;
+      if (existing.firstNumber === null) existing.firstNumber = row.first_number ?? null;
+      existing.lastVolume = row.last_volume ?? row.first_volume ?? existing.lastVolume;
+      existing.lastNumber = row.last_number ?? row.first_number ?? existing.lastNumber;
+      if (row.summary) existing.summary = existing.summary ? `${existing.summary}; ${row.summary}` : row.summary;
+    }
   }
 
   for (const group of groups.values()) {
-    if (group.chapterCount > 1 && !hasSafeContiguousRange(group.members)) {
+    const chapterRows = group.members.filter((row) => row.release_kind !== 'translation_completed');
+    if (group.chapterCount > 1 && !hasSafeContiguousRange(chapterRows)) {
       group.firstVolume = null;
       group.firstNumber = null;
       group.lastVolume = null;
@@ -164,10 +176,4 @@ function nonNegativeInteger(value: unknown): number {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
   return Math.max(0, Math.trunc(number));
-}
-
-function positiveInteger(value: unknown, fallback: number): number {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return fallback;
-  return Math.max(1, Math.trunc(number));
 }

@@ -5,6 +5,7 @@ export type NotificationUiTitle = {
   book_ref: string;
   title: string;
   url: string;
+  translation_status_id?: number | null;
 };
 
 export type NotificationDeliverySetting = {
@@ -13,7 +14,7 @@ export type NotificationDeliverySetting = {
 };
 
 export type NotificationReturnContext = {
-  origin: 'm' | 'a' | 's';
+  origin: 'm' | 'a' | 's' | 'c';
   page: number;
 };
 
@@ -23,6 +24,7 @@ export type NotificationUxCallback =
   | { kind: 'dashboard' }
   | { kind: 'mine'; page: number }
   | { kind: 'all-list'; page: number }
+  | { kind: 'completed-list'; page: number }
   | { kind: 'title'; titleId: number; origin: NotificationReturnContext['origin']; page: number }
   | { kind: 'toggle'; titleId: number; origin: NotificationReturnContext['origin']; page: number }
   | { kind: 'title-mode'; titleId: number; origin: NotificationReturnContext['origin']; page: number }
@@ -42,7 +44,7 @@ export function buildNotificationDashboard(state: {
   overrideCount: number;
 }): TelegramPayload {
   const subscriptions = state.allTitles
-    ? `все переводы (${Math.max(0, Math.trunc(state.effectiveCount))})`
+    ? `все активные переводы (${Math.max(0, Math.trunc(state.effectiveCount))})`
     : `${Math.max(0, Math.trunc(state.effectiveCount))} ${pluralTitles(state.effectiveCount)}`;
   return {
     text: [
@@ -58,6 +60,7 @@ export function buildNotificationDashboard(state: {
         [{ text: '📚 Мои подписки', callback_data: 'subs:mine:0' }],
         [{ text: '🔎 Найти тайтл', callback_data: 'subs:search:h' }],
         [{ text: '📖 Все переводы', callback_data: 'subs:all:0' }],
+        [{ text: '✅ Переведённые новеллы', callback_data: 'subs:completed:0' }],
         [{ text: '⚙️ Режим доставки', callback_data: 'subs:mode:home' }],
         [mainMenuButton()],
       ],
@@ -66,41 +69,49 @@ export function buildNotificationDashboard(state: {
 }
 
 export function buildNotificationTitleList(input: {
-  kind: 'mine' | 'all';
+  kind: 'mine' | 'all' | 'completed';
   rows: NotificationUiTitle[];
   page: number;
 }): TelegramPayload {
   const page = safePage(input.page);
-  const origin = input.kind === 'mine' ? 'm' : 'a';
-  const title = input.kind === 'mine' ? 'Мои подписки' : 'Все переводы';
+  const origin = input.kind === 'mine' ? 'm' : input.kind === 'completed' ? 'c' : 'a';
+  const title = input.kind === 'mine'
+    ? 'Мои подписки'
+    : input.kind === 'completed'
+      ? 'Переведённые новеллы'
+      : 'Все переводы';
   const rows: TelegramButton[][] = input.rows.slice(0, PAGE_SIZE).map((item) => [{
-    text: `📚 ${truncate(item.title, 46)}`,
+    text: `${input.kind === 'completed' ? '✅' : '📚'} ${truncate(item.title, 46)}`,
     callback_data: `subs:title:${item.ranobelib_id}:${origin}:${page}`,
   }]);
 
   const pager: TelegramButton[] = [];
-  if (page > 0) pager.push({
-    text: '◀️',
-    callback_data: input.kind === 'mine' ? `subs:mine:${page - 1}` : `subs:all:${page - 1}`,
-  });
+  const pageCallback = (target: number) => input.kind === 'mine'
+    ? `subs:mine:${target}`
+    : input.kind === 'completed'
+      ? `subs:completed:${target}`
+      : `subs:all:${target}`;
+  if (page > 0) pager.push({ text: '◀️', callback_data: pageCallback(page - 1) });
   pager.push({ text: `${page + 1}`, callback_data: 'subs:noop' });
-  if (input.rows.length >= PAGE_SIZE) pager.push({
-    text: '▶️',
-    callback_data: input.kind === 'mine' ? `subs:mine:${page + 1}` : `subs:all:${page + 1}`,
-  });
+  if (input.rows.length >= PAGE_SIZE) pager.push({ text: '▶️', callback_data: pageCallback(page + 1) });
   if (pager.length > 1) rows.push(pager);
 
-  rows.push([{ text: '🔎 Найти тайтл', callback_data: `subs:search:${origin}` }]);
+  if (input.kind !== 'completed') {
+    rows.push([{ text: '🔎 Найти тайтл', callback_data: `subs:search:${origin}` }]);
+  }
   if (input.kind === 'mine') {
     rows.push([{ text: '🔕 Отключить все', callback_data: 'subs:all:clear:confirm' }]);
   }
   rows.push([{ text: '↩️ К уведомлениям', callback_data: 'subs:center' }]);
   rows.push([mainMenuButton()]);
 
+  const hint = input.kind === 'completed'
+    ? 'Перевод этих тайтлов завершён. Они больше не участвуют в проверке новых глав.'
+    : 'Нажмите на тайтл, чтобы открыть его настройки.';
   return {
     text: input.rows.length
-      ? `📚 <b>${title}</b>\n\nНажмите на тайтл, чтобы открыть его настройки.`
-      : `📚 <b>${title}</b>\n\nЗдесь пока ничего нет.`,
+      ? `${input.kind === 'completed' ? '✅' : '📚'} <b>${title}</b>\n\n${hint}`
+      : `${input.kind === 'completed' ? '✅' : '📚'} <b>${title}</b>\n\nЗдесь пока ничего нет.`,
     parse_mode: 'HTML',
     reply_markup: { inline_keyboard: rows },
   };
@@ -132,7 +143,7 @@ export function buildNotificationSearchResults(input: {
 }): TelegramPayload {
   const page = safePage(input.page);
   const rows: TelegramButton[][] = input.rows.slice(0, PAGE_SIZE).map((item) => [{
-    text: `📚 ${truncate(item.title, 46)}`,
+    text: `${item.translation_status_id === 2 ? '✅' : '📚'} ${truncate(item.title, 46)}`,
     callback_data: `subs:title:${item.ranobelib_id}:s:${page}`,
   }]);
 
@@ -149,7 +160,7 @@ export function buildNotificationSearchResults(input: {
   const query = escapeHtml(String(input.query ?? '').trim());
   return {
     text: input.rows.length
-      ? `🔎 <b>Результаты поиска</b>\n\nЗапрос: <b>${query}</b>\nНажмите на тайтл, чтобы открыть его настройки.`
+      ? `🔎 <b>Результаты поиска</b>\n\nЗапрос: <b>${query}</b>\n✅ — перевод завершён. Нажмите на тайтл, чтобы открыть карточку.`
       : `🔎 <b>Ничего не найдено</b>\n\nПо запросу <b>${query}</b> ничего не найдено. Попробуйте другое название.`,
     parse_mode: 'HTML',
     reply_markup: { inline_keyboard: rows },
@@ -159,12 +170,41 @@ export function buildNotificationSearchResults(input: {
 export function buildNotificationTitleCard(input: {
   title: NotificationUiTitle;
   enabled: boolean;
+  completed?: boolean;
   inherited: boolean;
   effectiveSetting: NotificationDeliverySetting;
   globalSetting: NotificationDeliverySetting;
   pendingChapterCount: number | null;
   returnContext: NotificationReturnContext;
 }): TelegramPayload {
+  const back = listCallback(input.returnContext);
+  if (input.completed || input.title.translation_status_id === 2) {
+    const buttons: TelegramButton[][] = [
+      [{ text: '📖 Открыть на RanobeLib', url: input.title.url }],
+    ];
+    if (input.enabled) {
+      buttons.push([{
+        text: '❌ Убрать из моих подписок',
+        callback_data: `subs:title:toggle:${input.title.ranobelib_id}:${input.returnContext.origin}:${safePage(input.returnContext.page)}`,
+      }]);
+    }
+    buttons.push([{ text: '↩️ Назад', callback_data: back }], [mainMenuButton()]);
+    return {
+      text: [
+        `✅ <b>${escapeHtml(input.title.title)}</b>`,
+        '',
+        'Статус: ✅ Перевод завершён',
+        'Новые главы больше не отслеживаются.',
+        '',
+        input.enabled
+          ? 'Подписка сохранена и спит. Если перевод снова станет активным, уведомления возобновятся автоматически.'
+          : 'Этот тайтл не входит в ваши сохранённые подписки.',
+      ].join('\n'),
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: buttons },
+    };
+  }
+
   const modeLines = input.inherited
     ? [
       'Режим: ↩️ Как для всех',
@@ -174,7 +214,6 @@ export function buildNotificationTitleCard(input: {
   const progress = input.effectiveSetting.mode === 'stack'
     ? [`Накоплено: ${Math.max(0, Math.trunc(input.pendingChapterCount ?? 0))} / ${input.effectiveSetting.stackSize ?? 0}`]
     : [];
-  const back = listCallback(input.returnContext);
   return {
     text: [
       `📚 <b>${escapeHtml(input.title.title)}</b>`,
@@ -307,8 +346,10 @@ export function parseNotificationUxCallback(value: string): NotificationUxCallba
   if (match?.[1]) return { kind: 'mine', page: safePage(Number(match[1])) };
   match = /^subs:all:(\d{1,4})$/.exec(value);
   if (match?.[1]) return { kind: 'all-list', page: safePage(Number(match[1])) };
+  match = /^subs:completed:(\d{1,4})$/.exec(value);
+  if (match?.[1]) return { kind: 'completed-list', page: safePage(Number(match[1])) };
 
-  match = /^subs:title:(\d+):([mas]):(\d{1,4})$/.exec(value);
+  match = /^subs:title:(\d+):([masc]):(\d{1,4})$/.exec(value);
   if (match?.[1] && match[2] && match[3]) {
     const titleId = positiveId(match[1]);
     if (!titleId) return null;
@@ -322,14 +363,14 @@ export function parseNotificationUxCallback(value: string): NotificationUxCallba
     return { kind: 'title', titleId, origin: 'a', page: safePage(Number(match[2])) };
   }
 
-  match = /^subs:title:toggle:(\d+):([mas]):(\d{1,4})$/.exec(value);
+  match = /^subs:title:toggle:(\d+):([masc]):(\d{1,4})$/.exec(value);
   if (match?.[1] && match[2] && match[3]) {
     const titleId = positiveId(match[1]);
     if (!titleId) return null;
     return { kind: 'toggle', titleId, origin: match[2] as NotificationReturnContext['origin'], page: safePage(Number(match[3])) };
   }
 
-  match = /^subs:title:mode:(\d+):([mas]):(\d{1,4})$/.exec(value);
+  match = /^subs:title:mode:(\d+):([masc]):(\d{1,4})$/.exec(value);
   if (match?.[1] && match[2] && match[3]) {
     const titleId = positiveId(match[1]);
     if (!titleId) return null;
@@ -346,6 +387,7 @@ export function formatDeliverySetting(setting: NotificationDeliverySetting): str
 function listCallback(context: NotificationReturnContext): string {
   if (context.origin === 'm') return `subs:mine:${safePage(context.page)}`;
   if (context.origin === 's') return `subs:search:page:${safePage(context.page)}`;
+  if (context.origin === 'c') return `subs:completed:${safePage(context.page)}`;
   return `subs:all:${safePage(context.page)}`;
 }
 

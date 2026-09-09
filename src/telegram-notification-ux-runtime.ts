@@ -75,12 +75,14 @@ export async function handleTelegramNotificationUxUpdate(
     return true;
   }
 
-  if (parsed.kind === 'mine' || parsed.kind === 'all-list') {
+  if (parsed.kind === 'mine' || parsed.kind === 'all-list' || parsed.kind === 'completed-list') {
     await clearNotificationSearch(env, userId);
-    const kind = parsed.kind === 'mine' ? 'mine' : 'all';
+    const kind = parsed.kind === 'mine' ? 'mine' : parsed.kind === 'completed-list' ? 'completed' : 'all';
     const rows = kind === 'mine'
       ? await listMyTitles(env, userId, parsed.page)
-      : await listAllTitles(env, parsed.page);
+      : kind === 'completed'
+        ? await listCompletedTitles(env, parsed.page)
+        : await listAllTitles(env, parsed.page);
     await respond(env, callback, chatId, buildNotificationTitleList({ kind, rows, page: parsed.page }));
     return true;
   }
@@ -150,20 +152,25 @@ export async function handleTelegramNotificationUxUpdate(
   if (parsed.kind === 'title' || parsed.kind === 'toggle' || parsed.kind === 'title-mode') {
     const title = await titleById(env, parsed.titleId);
     if (!title) return true;
+    const completed = title.translation_status_id === 2;
     const context: NotificationReturnContext = { origin: parsed.origin, page: parsed.page };
 
     if (parsed.kind === 'toggle') {
       await upsertTelegramUser(env, callback.from);
       const before = await isEffectivelySubscribed(env, userId, title.book_ref);
-      await setEffectiveTitleSubscription(env, userId, title.book_ref, !before);
-      const refresh = refreshTitleNotificationDemand(env, title.book_ref).catch((error) => {
-        console.error('Notification title demand refresh failed', error);
-      });
-      if (ctx) ctx.waitUntil(refresh);
-      else await refresh;
+      // A completed translation can only be removed. We never create a new sleeping
+      // subscription from the archive; existing subscriptions are preserved automatically.
+      if (!completed || before) {
+        await setEffectiveTitleSubscription(env, userId, title.book_ref, !before);
+        const refresh = refreshTitleNotificationDemand(env, title.book_ref).catch((error) => {
+          console.error('Notification title demand refresh failed', error);
+        });
+        if (ctx) ctx.waitUntil(refresh);
+        else await refresh;
+      }
     }
 
-    if (parsed.kind === 'title-mode') {
+    if (parsed.kind === 'title-mode' && !completed) {
       await respond(env, callback, chatId, await titleModePayload(env, userId, title, context));
       return true;
     }
@@ -224,17 +231,32 @@ async function dashboardPayload(env: TelegramNotificationUxEnv, userId: string) 
   const [allTitles, globalSetting, overrideCount] = await Promise.all([
     userSubscribesToAll(env, userId),
     getGlobalDeliverySetting(env, userId),
-    count(env.DB.prepare('SELECT COUNT(*) AS count FROM telegram_title_delivery_settings WHERE user_telegram_id = ?').bind(userId)),
+    count(env.DB.prepare(`
+      SELECT COUNT(*) AS count
+      FROM telegram_title_delivery_settings d
+      JOIN ranobelib_titles t ON t.book_ref = d.book_ref
+      WHERE d.user_telegram_id = ? AND t.is_active = 1 AND t.snapshot_ready = 1
+    `).bind(userId)),
   ]);
   let effectiveCount: number;
   if (allTitles) {
     const [activeCount, exclusionCount] = await Promise.all([
       count(env.DB.prepare('SELECT COUNT(*) AS count FROM ranobelib_titles WHERE is_active = 1 AND snapshot_ready = 1')),
-      count(env.DB.prepare('SELECT COUNT(*) AS count FROM title_subscription_exclusions WHERE user_telegram_id = ?').bind(userId)),
+      count(env.DB.prepare(`
+        SELECT COUNT(*) AS count
+        FROM title_subscription_exclusions e
+        JOIN ranobelib_titles t ON t.book_ref = e.book_ref
+        WHERE e.user_telegram_id = ? AND t.is_active = 1 AND t.snapshot_ready = 1
+      `).bind(userId)),
     ]);
     effectiveCount = Math.max(0, activeCount - exclusionCount);
   } else {
-    effectiveCount = await count(env.DB.prepare('SELECT COUNT(*) AS count FROM title_subscriptions WHERE user_telegram_id = ?').bind(userId));
+    effectiveCount = await count(env.DB.prepare(`
+      SELECT COUNT(*) AS count
+      FROM title_subscriptions s
+      JOIN ranobelib_titles t ON t.book_ref = s.book_ref
+      WHERE s.user_telegram_id = ? AND t.is_active = 1 AND t.snapshot_ready = 1
+    `).bind(userId));
   }
   return buildNotificationDashboard({
     effectiveCount,
@@ -248,7 +270,7 @@ async function listMyTitles(env: TelegramNotificationUxEnv, userId: string, page
   const offset = safePage(page) * 8;
   if (await userSubscribesToAll(env, userId)) {
     return (await env.DB.prepare(`
-      SELECT t.ranobelib_id,t.book_ref,t.title,t.url
+      SELECT t.ranobelib_id,t.book_ref,t.title,t.url,t.translation_status_id
       FROM ranobelib_titles t
       LEFT JOIN title_subscription_exclusions e
         ON e.user_telegram_id = ? AND e.book_ref = t.book_ref
@@ -258,7 +280,7 @@ async function listMyTitles(env: TelegramNotificationUxEnv, userId: string, page
     `).bind(userId, 8, offset).all<NotificationUiTitle>()).results;
   }
   return (await env.DB.prepare(`
-    SELECT t.ranobelib_id,t.book_ref,t.title,t.url
+    SELECT t.ranobelib_id,t.book_ref,t.title,t.url,t.translation_status_id
     FROM ranobelib_titles t
     JOIN title_subscriptions s ON s.book_ref = t.book_ref
     WHERE s.user_telegram_id = ? AND t.is_active = 1 AND t.snapshot_ready = 1
@@ -269,9 +291,19 @@ async function listMyTitles(env: TelegramNotificationUxEnv, userId: string, page
 
 async function listAllTitles(env: TelegramNotificationUxEnv, page: number): Promise<NotificationUiTitle[]> {
   return (await env.DB.prepare(`
-    SELECT ranobelib_id,book_ref,title,url
+    SELECT ranobelib_id,book_ref,title,url,translation_status_id
     FROM ranobelib_titles
     WHERE is_active = 1 AND snapshot_ready = 1
+    ORDER BY title COLLATE NOCASE ASC, ranobelib_id ASC
+    LIMIT ? OFFSET ?
+  `).bind(8, safePage(page) * 8).all<NotificationUiTitle>()).results;
+}
+
+async function listCompletedTitles(env: TelegramNotificationUxEnv, page: number): Promise<NotificationUiTitle[]> {
+  return (await env.DB.prepare(`
+    SELECT ranobelib_id,book_ref,title,url,translation_status_id
+    FROM ranobelib_titles
+    WHERE translation_status_id = 2 AND ranobelib_id IS NOT NULL
     ORDER BY title COLLATE NOCASE ASC, ranobelib_id ASC
     LIMIT ? OFFSET ?
   `).bind(8, safePage(page) * 8).all<NotificationUiTitle>()).results;
@@ -285,10 +317,9 @@ async function searchLocalTitles(
   const clean = String(query ?? '').trim();
   if (!clean) return [];
   return (await env.DB.prepare(`
-    SELECT ranobelib_id,book_ref,title,url
+    SELECT ranobelib_id,book_ref,title,url,translation_status_id
     FROM ranobelib_titles
-    WHERE is_active = 1
-      AND snapshot_ready = 1
+    WHERE ((is_active = 1 AND snapshot_ready = 1) OR translation_status_id = 2)
       AND title LIKE ? COLLATE NOCASE
     ORDER BY title COLLATE NOCASE ASC, ranobelib_id ASC
     LIMIT ? OFFSET ?
@@ -297,9 +328,9 @@ async function searchLocalTitles(
 
 async function titleById(env: TelegramNotificationUxEnv, titleId: number): Promise<NotificationUiTitle | null> {
   return env.DB.prepare(`
-    SELECT ranobelib_id,book_ref,title,url
+    SELECT ranobelib_id,book_ref,title,url,translation_status_id
     FROM ranobelib_titles
-    WHERE ranobelib_id = ? AND is_active = 1
+    WHERE ranobelib_id = ? AND (is_active = 1 OR translation_status_id = 2)
     LIMIT 1
   `).bind(titleId).first<NotificationUiTitle>();
 }
@@ -315,13 +346,15 @@ async function titleCardPayload(
     getGlobalDeliverySetting(env, userId),
     getTitleDeliverySetting(env, userId, title.book_ref),
   ]);
+  const completed = title.translation_status_id === 2;
   const effective = titleSetting.setting;
-  const pendingChapterCount = effective.mode === 'stack'
+  const pendingChapterCount = !completed && effective.mode === 'stack'
     ? await pendingStackChapterCount(env, userId, title.book_ref)
     : null;
   return buildNotificationTitleCard({
     title,
     enabled,
+    completed,
     inherited: titleSetting.inherited,
     effectiveSetting: asUiSetting(effective),
     globalSetting: asUiSetting(globalSetting),
@@ -357,7 +390,7 @@ async function pendingStackChapterCount(
   bookRef: string,
 ): Promise<number> {
   return count(env.DB.prepare(`
-    SELECT COALESCE(SUM(r.chapter_count), 0) AS count
+    SELECT COALESCE(SUM(CASE WHEN r.release_kind = 'chapters' THEN r.chapter_count ELSE 0 END), 0) AS count
     FROM ranobelib_notification_outbox o
     JOIN ranobelib_releases r ON r.id = o.release_id
     WHERE o.user_telegram_id = ?
