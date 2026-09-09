@@ -407,10 +407,11 @@ export async function handleChannelMembershipAdmin(request: Request, env: Channe
     return json({ summary: { blacklisted: Number(summary?.blacklisted || 0), monitored: Number(summary?.monitored || 0), policy: 'blacklist_on_leave' }, users: rows.results });
   }
   const match = /^\/api\/admin\/membership-access\/(\d+)\/unblock$/.exec(url.pathname);
-  if (request.method === 'POST' && match) {
-    const unblocked = await unblockChannelMember(env, match[1]);
+  if (request.method === 'POST' && match?.[1]) {
+    const userId = match[1];
+    const unblocked = await unblockChannelMember(env, userId);
     if (!unblocked) return json({ error: 'Не удалось снять блокировку пользователя в Telegram-канале.' }, 502);
-    return json({ ok: true, user_telegram_id: match[1], admin_user_id: admin.id });
+    return json({ ok: true, user_telegram_id: userId, admin_user_id: admin.id });
   }
   return json({ error: 'Method not allowed.' }, 405);
 }
