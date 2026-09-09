@@ -34,7 +34,9 @@ test('live-entry-v2 classifies Telegram webhooks before unrelated handler chains
 });
 
 test('outer Telegram route is fail-closed and logs only route-level timing metadata', () => {
-  assert.match(liveV2, /!expected[^\n]*\|\|[^\n]*x-telegram-bot-api-secret-token[^\n]*!== expected/);
+  assert.match(liveV2, /const expectedSecret = env\.TELEGRAM_WEBHOOK_SECRET\?\.trim\(\) \?\? ''/);
+  assert.match(liveV2, /const suppliedSecret = request\.headers\.get\('x-telegram-bot-api-secret-token'\) \?\? ''/);
+  assert.match(liveV2, /if \(!expectedSecret \|\| suppliedSecret !== expectedSecret\)/);
   assert.match(liveV2, /Forbidden/);
   assert.match(liveV2, /Telegram webhook handled/);
   assert.match(liveV2, /durationMs/);
