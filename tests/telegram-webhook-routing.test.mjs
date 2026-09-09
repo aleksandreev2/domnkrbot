@@ -74,10 +74,19 @@ test('production entry validates once and directly dispatches classified Telegra
   assert.match(source, /case 'reader-gate'[\s\S]*handlePublicationReaderDeliveryWebhook/);
   assert.match(source, /case 'membership-appeal'[\s\S]*handleChannelMembershipAppealWebhook/);
   assert.match(source, /case 'notifications'[\s\S]*handleTelegramSubscriptionWebhookRequest/);
-  assert.match(source, /case 'proposal'[\s\S]*appEntry\.fetch/);
-  assert.match(source, /case 'generic-private-text'[\s\S]*handleChannelMembershipAppealWebhook[\s\S]*appEntry\.fetch/);
+  assert.match(source, /case 'proposal'[\s\S]*appEntry\.fetch\(request, env[^\n]*ctx/);
+  assert.match(source, /case 'generic-private-text'[\s\S]*handleChannelMembershipAppealWebhook[\s\S]*appEntry\.fetch\(request, env[^\n]*ctx/);
   assert.match(source, /Telegram webhook handled/);
 
   const genericAppeal = source.indexOf('await handleChannelMembershipAppealWebhook(request', outerWebhook);
   assert.ok(genericAppeal > outerWebhook, 'generic appeal fallback must come after the outer Telegram dispatcher');
+});
+
+test('interactive Telegram execution context is preserved through the compatibility worker', async () => {
+  const [entry, liveEntry] = await Promise.all([
+    readFile(new URL('../src/entry.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/live-entry.ts', import.meta.url), 'utf8'),
+  ]);
+  assert.match(entry, /async fetch\(request: Request, env: Env, ctx\??:/);
+  assert.match(liveEntry, /return appEntry\.fetch\(request, env, ctx\);/);
 });
