@@ -70,6 +70,17 @@ async function withTelegram(fn){
   try{return await fn(calls);}finally{globalThis.fetch=original;}
 }
 
+test('appeal webhook fails closed when Telegram secret is missing',async()=>{
+  const db=new DB();db.access.set('42',blacklisted());
+  const env=environment(db);delete env.TELEGRAM_WEBHOOK_SECRET;
+  await withTelegram(async(calls)=>{
+    const response=await handleChannelMembershipAppealWebhook(callback('membership:appeal'),env,{waitUntil(){}});
+    assert.equal(response,null);
+    assert.equal(calls.length,0);
+    assert.equal(db.runs.length,0);
+  });
+});
+
 test('blacklisted download message offers an appeal action before reader delivery',async()=>{
   const db=new DB();db.access.set('42',blacklisted());
   await withTelegram(async(calls)=>{
