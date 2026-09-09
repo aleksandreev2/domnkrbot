@@ -38,17 +38,23 @@ import {
   type NotificationDeliverySetting,
 } from './telegram-notification-ux.js';
 import { startCallbackAck, type ExecutionContextLike } from './telegram-fast-ack.js';
+import type { TelegramLatencyTiming } from './telegram-latency-timing.js';
+import { notificationRenderStrategy } from './telegram-notification-render-strategy.js';
+import { renderTelegramScreen } from './telegram-screen-renderer.js';
 
 type CountRow = { count: number | string | null };
 type AllTitlesRow = { all_titles: number | string | null };
 type D1PreparedStatement = ReturnType<TelegramSubscriptionEnv['DB']['prepare']>;
+type NotificationExecutionContext = ExecutionContextLike & {
+  telegramLatencyTiming?: TelegramLatencyTiming;
+};
 
 export type TelegramNotificationUxEnv = TelegramSubscriptionEnv;
 
 export async function handleTelegramNotificationUxUpdate(
   update: TelegramSubscriptionUpdate,
   env: TelegramNotificationUxEnv,
-  ctx?: ExecutionContextLike,
+  ctx?: NotificationExecutionContext,
 ): Promise<boolean> {
   const callback = update.callback_query;
   if (!callback?.data) return false;
@@ -71,7 +77,7 @@ export async function handleTelegramNotificationUxUpdate(
       setProposalInputActive(env, userId, 0),
       clearNotificationCustomInput(env, userId),
     ]);
-    await respond(env, callback, chatId, await dashboardPayload(env, userId));
+    await respond(env, callback, chatId, await dashboardPayload(env, userId), ctx);
     return true;
   }
 
@@ -81,7 +87,7 @@ export async function handleTelegramNotificationUxUpdate(
     const rows = kind === 'mine'
       ? await listMyTitles(env, userId, parsed.page)
       : await listAllTitles(env, parsed.page);
-    await respond(env, callback, chatId, buildNotificationTitleList({ kind, rows, page: parsed.page }));
+    await respond(env, callback, chatId, buildNotificationTitleList({ kind, rows, page: parsed.page }), ctx);
     return true;
   }
 
@@ -91,7 +97,7 @@ export async function handleTelegramNotificationUxUpdate(
       clearNotificationCustomInput(env, userId),
       beginNotificationSearch(env, userId, parsed.returnScope),
     ]);
-    await respond(env, callback, chatId, buildNotificationSearchPrompt(parsed.returnScope));
+    await respond(env, callback, chatId, buildNotificationSearchPrompt(parsed.returnScope), ctx);
     return true;
   }
 
@@ -103,7 +109,7 @@ export async function handleTelegramNotificationUxUpdate(
       clearNotificationCustomInput(env, userId),
       beginNotificationSearch(env, userId, returnScope),
     ]);
-    await respond(env, callback, chatId, buildNotificationSearchPrompt(returnScope));
+    await respond(env, callback, chatId, buildNotificationSearchPrompt(returnScope), ctx);
     return true;
   }
 
@@ -111,7 +117,7 @@ export async function handleTelegramNotificationUxUpdate(
     const state = await getNotificationSearchState(env, userId);
     if (!state?.query) {
       await beginNotificationSearch(env, userId, state?.returnScope ?? 'home');
-      await respond(env, callback, chatId, buildNotificationSearchPrompt(state?.returnScope ?? 'home'));
+      await respond(env, callback, chatId, buildNotificationSearchPrompt(state?.returnScope ?? 'home'), ctx);
       return true;
     }
     await saveNotificationSearchPage(env, userId, parsed.page);
@@ -121,12 +127,12 @@ export async function handleTelegramNotificationUxUpdate(
       rows,
       page: parsed.page,
       returnScope: state.returnScope,
-    }));
+    }), ctx);
     return true;
   }
 
   if (parsed.kind === 'clear-confirm') {
-    await respond(env, callback, chatId, buildNotificationDisableAllConfirmation());
+    await respond(env, callback, chatId, buildNotificationDisableAllConfirmation(), ctx);
     return true;
   }
 
@@ -138,12 +144,12 @@ export async function handleTelegramNotificationUxUpdate(
     });
     if (ctx) ctx.waitUntil(refresh);
     else await refresh;
-    await respond(env, callback, chatId, await dashboardPayload(env, userId));
+    await respond(env, callback, chatId, await dashboardPayload(env, userId), ctx);
     return true;
   }
 
   if (parsed.kind === 'mode-home') {
-    await respond(env, callback, chatId, buildNotificationGlobalModeScreen(asUiSetting(await getGlobalDeliverySetting(env, userId))));
+    await respond(env, callback, chatId, buildNotificationGlobalModeScreen(asUiSetting(await getGlobalDeliverySetting(env, userId))), ctx);
     return true;
   }
 
@@ -164,12 +170,12 @@ export async function handleTelegramNotificationUxUpdate(
     }
 
     if (parsed.kind === 'title-mode') {
-      await respond(env, callback, chatId, await titleModePayload(env, userId, title, context));
+      await respond(env, callback, chatId, await titleModePayload(env, userId, title, context), ctx);
       return true;
     }
 
     const payload = await titleCardPayload(env, userId, title, context);
-    await respond(env, callback, chatId, payload);
+    await respond(env, callback, chatId, payload, ctx);
     return true;
   }
 
@@ -421,17 +427,29 @@ async function respond(
   env: TelegramNotificationUxEnv,
   callback: NonNullable<TelegramSubscriptionUpdate['callback_query']>,
   chatId: number,
-  payload: { text: string; parse_mode?: 'HTML'; reply_markup: unknown },
+  payload: { text: string; parse_mode?: 'HTML'; reply_markup: { inline_keyboard: unknown[][] } },
+  ctx?: NotificationExecutionContext,
 ): Promise<void> {
-  if (callback.id && callback.message?.message_id) {
-    await telegramCall(env, 'editMessageText', {
-      chat_id: chatId,
-      message_id: callback.message.message_id,
-      ...payload,
+  const messageId = callback.message?.message_id;
+  if (!messageId) {
+    await renderTelegramScreen(env, {
+      strategy: 'send',
+      chatId,
+      payload,
+      ctx,
+      timing: ctx?.telegramLatencyTiming,
     });
     return;
   }
-  await telegramCall(env, 'sendMessage', { chat_id: chatId, ...payload });
+
+  await renderTelegramScreen(env, {
+    strategy: notificationRenderStrategy(callback.data ?? '', callback.message?.text ?? ''),
+    chatId,
+    messageId,
+    payload,
+    ctx,
+    timing: ctx?.telegramLatencyTiming,
+  });
 }
 
 async function answerCallback(env: TelegramNotificationUxEnv, callbackId: string, text?: string): Promise<void> {
