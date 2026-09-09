@@ -247,7 +247,7 @@ export default {
       }
     }
 
-    return appEntry.fetch(request, env);
+    return appEntry.fetch(request, env, ctx);
   },
 
   async scheduled(controller: ScheduledControllerLike, env: Env, _ctx: ExecutionContextLike): Promise<void> {
@@ -258,29 +258,19 @@ export default {
     }
 
     try {
-      const webhookUpdated = await ensureWebhookMembershipUpdates(env as ChannelMembershipEnv);
-      const membership = await runChannelMembershipMaintenance(env as ChannelMembershipEnv);
-      console.log('Channel membership maintenance complete', { webhookUpdated, ...membership });
+      const result = await runChannelMembershipMaintenance(env as ChannelMembershipEnv);
+      if (result.checked > 0 || result.blacklisted > 0) console.log('Channel membership maintenance complete', result);
     } catch (error) {
       console.error('Channel membership maintenance failed', error);
     }
 
+    if (!controller.cron.includes(' ')) return;
+
     try {
-      await ensureRanobeLibSchema(env);
-      const result = await syncRanobeLib(env);
-      console.log('RanobeLib cron sync complete', {
-        cron: controller.cron,
-        scheduledTime: controller.scheduledTime,
-        discovered: result.discovered,
-        processed: result.processed,
-        succeeded: result.succeeded,
-        failed: result.failed,
-        newReleases: result.newReleases,
-        nextCursor: result.nextCursor,
-      });
+      const webhookChanged = await ensureWebhookMembershipUpdates(env as ChannelMembershipEnv);
+      if (webhookChanged) console.log('Telegram webhook allowed_updates repaired');
     } catch (error) {
-      console.error('RanobeLib cron sync failed', error);
-      throw error;
+      console.error('Telegram webhook self-heal failed', error);
     }
   },
 };
