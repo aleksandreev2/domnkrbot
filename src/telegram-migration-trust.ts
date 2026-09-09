@@ -7,12 +7,10 @@ type D1LikeStatement = {
 
 type D1LikeDatabase = {
   prepare(query: string): D1LikeStatement;
-  [key: string]: unknown;
 };
 
 type EnvWithDb = {
   DB: D1LikeDatabase;
-  [key: string]: unknown;
 };
 
 const trustedDbByBinding = new WeakMap<object, D1LikeDatabase>();
