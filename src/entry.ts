@@ -1,5 +1,10 @@
 import { handleAdminUserWorkspace, type AdminUserWorkspaceEnv } from './admin-user-workspace.js';
 import {
+  captureTitleProposalSubmission,
+  notifyAdminsForCreatedTitleProposal,
+  type TelegramTitleProposalAdminAlertEnv,
+} from './telegram-title-proposal-admin-alert.js';
+import {
   handleTelegramTitleProposalCabinetWebhookRequest,
   type TelegramTitleProposalCabinetEnv,
 } from './telegram-title-proposal-cabinet.js';
@@ -22,6 +27,7 @@ type Env = AdminUserWorkspaceEnv
   & TelegramTitleProposalV2Env
   & TelegramTitleProposalCabinetEnv
   & TelegramTitleProposalEnv
+  & TelegramTitleProposalAdminAlertEnv
   & TelegramSubscriptionWebhookEnv;
 
 export default {
@@ -35,8 +41,19 @@ export default {
     const proposalCabinetResponse = await handleTelegramTitleProposalCabinetWebhookRequest(request, env);
     if (proposalCabinetResponse) return proposalCabinetResponse;
 
+    const proposalAlertContext = await captureTitleProposalSubmission(request, env).catch((error) => {
+      console.error('Proposal admin alert preflight failed', error);
+      return null;
+    });
     const proposalResponse = await handleTelegramTitleProposalWebhookRequest(request, env);
-    if (proposalResponse) return proposalResponse;
+    if (proposalResponse) {
+      if (proposalAlertContext) {
+        await notifyAdminsForCreatedTitleProposal(env, proposalAlertContext).catch((error) => {
+          console.error('Proposal admin alert failed', error);
+        });
+      }
+      return proposalResponse;
+    }
 
     const subscriptionResponse = await handleTelegramSubscriptionWebhookRequest(request, env);
     if (subscriptionResponse) return subscriptionResponse;

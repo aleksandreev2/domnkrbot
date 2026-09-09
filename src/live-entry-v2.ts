@@ -1,5 +1,9 @@
 import baseWorker from './live-entry.js';
 import {
+  handleChannelMembershipAppealAdmin,
+  handleChannelMembershipAppealWebhook,
+} from './channel-membership-appeals.js';
+import {
   ensureWebhookMembershipUpdates,
   runChannelMembershipMaintenance,
   type ChannelMembershipEnv,
@@ -31,6 +35,7 @@ import {
   scanIdleRanobeLibTitles,
 } from './ranobelib-fast-scanner.js';
 import { getRanobeLibHome } from './ranobelib-runtime.js';
+import { notifyAdminsForProposalId } from './telegram-title-proposal-admin-alert.js';
 import {
   DELIVERY_BATCH_LIMIT,
   drainNotificationOutbox,
@@ -103,6 +108,14 @@ export default {
       return json(await getRanobeLibHome(env));
     }
 
+    // Appeals must run before private reader delivery: an already-blacklisted user must see the
+    // appeal action instead of reaching a download handler first.
+    const membershipAppealWebhook = await handleChannelMembershipAppealWebhook(request, env, ctx);
+    if (membershipAppealWebhook) return membershipAppealWebhook;
+
+    const membershipAppealAdmin = await handleChannelMembershipAppealAdmin(request, env);
+    if (membershipAppealAdmin) return membershipAppealAdmin;
+
     const readerDelivery = await handlePublicationReaderDeliveryWebhook(request, env, ctx);
     if (readerDelivery) return readerDelivery;
 
@@ -120,6 +133,22 @@ export default {
 
     const analytics = await handlePublishingAnalyticsV2(request, env);
     if (analytics) return analytics;
+
+    // Website proposals are created by the base worker. Alert admins only after a confirmed 201;
+    // alert delivery is best-effort and never changes the proposal response itself.
+    if (request.method === 'POST' && url.pathname === '/api/proposals') {
+      const response = await baseWorker.fetch(request, env as never, ctx as never);
+      if (response.status === 201) {
+        const created = await response.clone().json().catch(() => null) as { id?: string } | null;
+        const proposalId = created?.id;
+        if (proposalId) {
+          await notifyAdminsForProposalId(env, proposalId).catch((error) => {
+            console.error('Web proposal admin alert failed', { proposalId, error });
+          });
+        }
+      }
+      return response;
+    }
 
     return baseWorker.fetch(request, env as never, ctx as never);
   },

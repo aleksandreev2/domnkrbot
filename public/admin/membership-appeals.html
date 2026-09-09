@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#f5f5f2" />
+  <title>Апелляции · Дом Некроманта</title>
+  <link rel="stylesheet" href="/admin/admin.css?v=20260819-admin1" />
+  <link rel="stylesheet" href="/admin/admin-polish.css?v=20260819-admin2" />
+  <link rel="stylesheet" href="/admin/membership-appeals.css?v=20260909-appeals1" />
+  <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
+  <script defer src="/ui-icons.js?v=20260820-icons3"></script>
+  <script defer src="/admin/membership-appeals.js?v=20260909-appeals1"></script>
+</head>
+<body>
+  <main class="appeals-page">
+    <header class="appeals-head">
+      <div>
+        <a class="appeals-back" href="/admin/">← Админка</a>
+        <span class="admin-kicker">ДОМ НЕКРОМАНТА · МОДЕРАЦИЯ</span>
+        <h1>Апелляции на блокировки</h1>
+        <p>Проверяйте обращения пользователей перед снятием ограничения. Одобрение сначала снимает реальный Telegram-бан и только после этого очищает внутренний ЧС.</p>
+      </div>
+      <button id="membershipAppealsRefresh" type="button">Обновить</button>
+    </header>
+
+    <section class="appeals-toolbar" aria-label="Фильтр апелляций">
+      <button class="active" data-appeal-filter="pending" type="button">На рассмотрении <b id="appealPendingCount">0</b></button>
+      <button data-appeal-filter="all" type="button">Все</button>
+      <button data-appeal-filter="approved" type="button">Одобрено</button>
+      <button data-appeal-filter="rejected" type="button">Отклонено</button>
+    </section>
+
+    <section id="membershipAppealsNotice" class="appeals-notice hidden" role="status"></section>
+    <section id="membershipAppealsList" class="appeals-list">
+      <div class="appeals-loading">Загрузка апелляций…</div>
+    </section>
+  </main>
+</body>
+</html>
