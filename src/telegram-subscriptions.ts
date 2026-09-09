@@ -160,7 +160,6 @@ export function parseSubscriptionCallback(value: string): SubscriptionCallback |
     const titleId = Number(match[2]);
     if (!Number.isSafeInteger(titleId) || titleId <= 0) return null;
     if (match[1] === 'toggle') return { kind: 'notify-toggle', titleId };
-    if (match[1] === 'notify-settings') return { kind: 'notify-settings', titleId };
     if (match[1] === 'settings') return { kind: 'notify-settings', titleId };
     return { kind: 'notify-panel-toggle', titleId };
   }
@@ -346,7 +345,8 @@ export async function handleTelegramSubscriptionUpdate(
     return true;
   }
 
-  if (parsed.kind === 'center') startCallbackAck(env, callback.id, ctx);
+  const earlyAck = parsed.kind === 'center' || parsed.kind === 'title' || parsed.kind === 'all';
+  if (earlyAck) startCallbackAck(env, callback.id, ctx);
 
   await ensureTelegramSubscriptionSchema(env);
   await upsertTelegramUser(env, callback.from);
@@ -458,7 +458,7 @@ export async function handleTelegramSubscriptionUpdate(
     : all;
   const menu = buildSubscriptionMenu(visible, { page: requestedPage, subscribedIds, excludedIds, allTitles });
   await editTelegramMessage(env, callback.message.chat.id, callback.message.message_id, menu);
-  await answerCallback(env, callback.id, notice);
+  if (!earlyAck) await answerCallback(env, callback.id, notice);
   return true;
 }
 
