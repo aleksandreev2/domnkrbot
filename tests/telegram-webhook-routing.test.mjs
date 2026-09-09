@@ -76,7 +76,8 @@ test('production entry validates once and directly dispatches classified Telegra
   assert.match(source, /case 'notifications'[\s\S]*handleTelegramSubscriptionWebhookRequest/);
   assert.match(source, /case 'proposal'[\s\S]*appEntry\.fetch\(request, env[^\n]*ctx/);
   assert.match(source, /case 'generic-private-text'[\s\S]*handleChannelMembershipAppealWebhook[\s\S]*appEntry\.fetch\(request, env[^\n]*ctx/);
-  assert.match(source, /Telegram webhook handled/);
+  assert.match(source, /Telegram webhook latency v2/);
+  assert.doesNotMatch(source, /Telegram webhook handled/);
 
   const genericAppeal = source.indexOf('await handleChannelMembershipAppealWebhook(request', outerWebhook);
   assert.ok(genericAppeal > outerWebhook, 'generic appeal fallback must come after the outer Telegram dispatcher');
