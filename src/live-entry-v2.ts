@@ -37,6 +37,7 @@ import {
   scanIdleRanobeLibTitles,
 } from './ranobelib-fast-scanner.js';
 import { getRanobeLibHome } from './ranobelib-runtime.js';
+import { createTelegramLatencyTiming, type TelegramLatencyTiming } from './telegram-latency-timing.js';
 import { notifyAdminsForProposalId } from './telegram-title-proposal-admin-alert.js';
 import {
   DELIVERY_BATCH_LIMIT,
@@ -57,6 +58,9 @@ type QueueProducerLike = { send(message: NotificationWakeup): Promise<void> };
 type QueueMessageLike = { body: unknown };
 type QueueBatchLike = { messages: QueueMessageLike[] };
 type TelegramWebhookUpdate = Parameters<typeof classifyTelegramWebhookUpdate>[0];
+type TimedTelegramExecutionContext = CommentGateExecutionContext & {
+  telegramLatencyTiming: TelegramLatencyTiming;
+};
 
 const FAST_SCAN_CRON = '* * * * *';
 const IDLE_SCAN_CRON = '17 */3 * * *';
@@ -106,6 +110,25 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
+function telegramWebhookKind(update: TelegramWebhookUpdate): string {
+  if (update.callback_query) return 'callback-query';
+  if (update.chat_member) return 'chat-member';
+  if (update.message) return 'message';
+  return 'other';
+}
+
+function timedTelegramContext(
+  ctx: CommentGateExecutionContext,
+  timing: TelegramLatencyTiming,
+): TimedTelegramExecutionContext {
+  return {
+    waitUntil(promise) {
+      ctx.waitUntil(promise);
+    },
+    telegramLatencyTiming: timing,
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -117,14 +140,18 @@ export default {
         return new Response('Forbidden', { status: 403 });
       }
 
-      const startedAt = Date.now();
+      const timing = createTelegramLatencyTiming();
       const update = await request.clone().json().catch(() => null) as TelegramWebhookUpdate | null;
       if (!update) return new Response('Bad Request', { status: 400 });
 
       const route = classifyTelegramWebhookUpdate(update);
-      const response = await dispatchTelegramWebhook(route, request, env, ctx);
-      console.log('Telegram webhook handled', { route, durationMs: Date.now() - startedAt });
-      return response;
+      const kind = telegramWebhookKind(update);
+      try {
+        return await dispatchTelegramWebhook(route, request, env, ctx, timing);
+      } finally {
+        timing.mark('telegram_done');
+        console.log('Telegram webhook latency v2', timing.snapshot(route, kind));
+      }
     }
 
     // Catalog reads must never start upstream crawling. HOT/IDLE scheduled jobs are the sole
@@ -244,6 +271,7 @@ async function dispatchTelegramWebhook(
   request: Request,
   env: Env,
   ctx: CommentGateExecutionContext,
+  timing: TelegramLatencyTiming,
 ): Promise<Response> {
   switch (route) {
     case 'chat-member':
@@ -263,15 +291,19 @@ async function dispatchTelegramWebhook(
       return (await handleChannelMembershipAppealWebhook(request, env, ctx)) ?? new Response('ok');
 
     case 'notifications':
-      return (await handleTelegramSubscriptionWebhookRequest(request, env as never, ctx)) ?? new Response('ok');
+      return (await handleTelegramSubscriptionWebhookRequest(
+        request,
+        env as never,
+        timedTelegramContext(ctx, timing),
+      )) ?? new Response('ok');
 
     case 'proposal':
-      return appEntry.fetch(request, env as never, ctx);
+      return appEntry.fetch(request, env as never, timedTelegramContext(ctx, timing));
 
     case 'generic-private-text': {
       const appeal = await handleChannelMembershipAppealWebhook(request, env, ctx);
       if (appeal) return appeal;
-      return appEntry.fetch(request, env as never, ctx);
+      return appEntry.fetch(request, env as never, timedTelegramContext(ctx, timing));
     }
 
     case 'compat':
