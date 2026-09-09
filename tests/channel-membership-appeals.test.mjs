@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-  checkDownloadMembership,
-  handleChannelMembershipWebhook,
-} from '../dist-runtime/channel-membership-access.js';
+import { handleChannelMembershipAppealWebhook } from '../dist-runtime/channel-membership-appeals.js';
 
 const ORIGIN='https://domnkr.test';
 const now=()=>new Date().toISOString();
@@ -73,11 +70,11 @@ async function withTelegram(fn){
   try{return await fn(calls);}finally{globalThis.fetch=original;}
 }
 
-test('blacklisted download message offers an appeal action',async()=>{
+test('blacklisted download message offers an appeal action before reader delivery',async()=>{
   const db=new DB();db.access.set('42',blacklisted());
   await withTelegram(async(calls)=>{
-    const allowed=await checkDownloadMembership(environment(db),{id:42,first_name:'Reader',username:'reader42'},7);
-    assert.equal(allowed,false);
+    const response=await handleChannelMembershipAppealWebhook(message('/start dl_7'),environment(db),{waitUntil(){}});
+    assert.equal(response?.status,200);
     const sent=calls.find((call)=>call.method==='sendMessage'&&call.payload.chat_id===42);
     assert.ok(sent);
     const buttons=sent.payload.reply_markup?.inline_keyboard?.flat()||[];
@@ -88,12 +85,12 @@ test('blacklisted download message offers an appeal action',async()=>{
 test('blacklisted user submits an appeal comment and configured admin is notified',async()=>{
   const db=new DB();db.access.set('42',blacklisted());
   await withTelegram(async(calls)=>{
-    const started=await handleChannelMembershipWebhook(callback('membership:appeal'),environment(db),{waitUntil(){}});
+    const started=await handleChannelMembershipAppealWebhook(callback('membership:appeal'),environment(db),{waitUntil(){}});
     assert.equal(started?.status,200);
     const draft=[...db.appeals.values()][0];
     assert.ok(draft);assert.equal(draft.status,'draft');
 
-    const submitted=await handleChannelMembershipWebhook(message('Я не выходил специально, проверьте пожалуйста.'),environment(db),{waitUntil(){}});
+    const submitted=await handleChannelMembershipAppealWebhook(message('Я не выходил специально, проверьте пожалуйста.'),environment(db),{waitUntil(){}});
     assert.equal(submitted?.status,200);
     assert.equal(db.appeals.get(draft.id)?.status,'pending');
     assert.match(db.appeals.get(draft.id)?.user_comment||'',/не выходил/);
@@ -110,7 +107,7 @@ test('admin approval unbans user, clears internal blacklist and notifies the app
   const db=new DB();db.access.set('42',blacklisted());db.bans.set('42',{user_telegram_id:'42',banned_at:now(),last_attempt_at:now(),last_error:null});
   db.appeals.set('appeal-1',{id:'appeal-1',user_telegram_id:'42',status:'pending',user_comment:'Ошибка',admin_comment:null,created_at:now(),submitted_at:now(),resolved_at:null,resolved_by:null});
   await withTelegram(async(calls)=>{
-    const response=await handleChannelMembershipWebhook(callback('membership:appeal:approve:appeal-1',777),environment(db),{waitUntil(){}});
+    const response=await handleChannelMembershipAppealWebhook(callback('membership:appeal:approve:appeal-1',777),environment(db),{waitUntil(){}});
     assert.equal(response?.status,200);
     assert.equal(db.appeals.get('appeal-1')?.status,'approved');
     assert.equal(db.access.get('42')?.blacklisted_at,null);
