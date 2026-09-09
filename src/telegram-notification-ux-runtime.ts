@@ -133,6 +133,11 @@ export async function handleTelegramNotificationUxUpdate(
   if (parsed.kind === 'clear-yes') {
     await upsertTelegramUser(env, callback.from);
     await clearAllSubscriptions(env, userId);
+    const refresh = refreshAllNotificationDemand(env).catch((error) => {
+      console.error('Global notification demand refresh failed', error);
+    });
+    if (ctx) ctx.waitUntil(refresh);
+    else await refresh;
     await respond(env, callback, chatId, await dashboardPayload(env, userId));
     return true;
   }
@@ -371,7 +376,6 @@ async function clearAllSubscriptions(env: TelegramNotificationUxEnv, userId: str
     env.DB.prepare('DELETE FROM title_subscriptions WHERE user_telegram_id = ?').bind(userId).run(),
     env.DB.prepare('DELETE FROM title_subscription_exclusions WHERE user_telegram_id = ?').bind(userId).run(),
   ]);
-  await refreshAllNotificationDemand(env);
 }
 
 async function userSubscribesToAll(env: TelegramNotificationUxEnv, userId: string): Promise<boolean> {
