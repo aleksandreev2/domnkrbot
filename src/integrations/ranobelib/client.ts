@@ -38,7 +38,7 @@ export class RanobeLibClient {
 
     for (;;) {
       const response = await this.getJson<ApiEnvelope<unknown[]>>(
-        `${this.apiBaseUrl}/manga?site_id[]=3&target_id=${teamId}&target_model=team&page=${page}`,
+        `${this.apiBaseUrl}/manga?site_id[]=3&target_id=${teamId}&target_model=team&fields[]=status_id&page=${page}`,
       );
 
       for (const raw of Array.isArray(response.data) ? response.data : []) {
@@ -134,6 +134,9 @@ function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBook
   const title = extractTitle(raw);
   const cover = isRecord(raw.cover) ? raw.cover : {};
   const coverUrl = stringOrNull(cover.default) ?? stringOrNull(cover.thumbnail);
+  const scanlateStatus = isRecord(raw.scanlateStatus) ? raw.scanlateStatus : {};
+  const translationStatusId = numberOrNull(scanlateStatus.id);
+  const translationStatusLabel = stringOrNull(scanlateStatus.label);
 
   return {
     id,
@@ -142,6 +145,8 @@ function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBook
     url: `${siteBaseUrl}/ru/book/${ref}`,
     ...(title ? { title } : {}),
     ...(coverUrl ? { coverUrl } : {}),
+    ...(translationStatusId !== null ? { translationStatusId } : {}),
+    ...(translationStatusLabel ? { translationStatusLabel } : {}),
   };
 }
 
