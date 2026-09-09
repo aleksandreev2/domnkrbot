@@ -29,13 +29,26 @@ test('legacy subscription navigation and mutation handlers do not run subscripti
   assert.match(source, /export async function ensureTelegramSubscriptionSchema/, 'repair helper remains for explicit maintenance/tests');
 });
 
-test('notification UX callbacks and dashboard command never run aggregate schema repair', async () => {
+test('notification UX callbacks, text input and dashboard never run aggregate schema repair', async () => {
   const source = await read('src/telegram-notification-ux-runtime.ts');
   const callbackHandler = section(source, 'export async function handleTelegramNotificationUxUpdate', 'export async function handleNotificationSearchInput');
+  const searchHandler = section(source, 'export async function handleNotificationSearchInput', 'export async function sendTelegramNotificationDashboard');
   const dashboardHandler = section(source, 'export async function sendTelegramNotificationDashboard', 'async function dashboardPayload');
   assert.doesNotMatch(callbackHandler, /await ensureNotificationUxSchema\(env\)/);
+  assert.doesNotMatch(searchHandler, /await ensureTelegramTextBotUxSchema\(env\)/);
   assert.doesNotMatch(dashboardHandler, /await ensureNotificationUxSchema\(env\)/);
   assert.match(source, /async function ensureNotificationUxSchema/, 'repair helper may remain outside interactive handlers');
+});
+
+test('notification delivery-mode callbacks, command and custom input never run mode schema repair', async () => {
+  const source = await read('src/telegram-notification-mode-runtime.ts');
+  const callbackHandler = section(source, 'export async function handleTelegramNotificationModeUpdate', 'export async function sendTelegramDeliveryModeCenter');
+  const commandHandler = section(source, 'export async function sendTelegramDeliveryModeCenter', 'export async function handleNotificationCustomInput');
+  const inputHandler = section(source, 'export async function handleNotificationCustomInput', 'async function notificationCenterPayload');
+  for (const body of [callbackHandler, commandHandler, inputHandler]) {
+    assert.doesNotMatch(body, /await ensureModeSchema\(env\)/);
+  }
+  assert.match(source, /async function ensureModeSchema/, 'repair helper remains available outside interactive handlers');
 });
 
 test('production migrations own the schemas that interactive handlers now assume exist', async () => {
