@@ -103,6 +103,32 @@ test('edit uses one editMessageText request and returns the existing message id'
   }
 });
 
+test('edit treats Telegram message-is-not-modified as an idempotent success', async () => {
+  const { renderTelegramScreen } = await import('../dist-runtime/telegram-screen-renderer.js');
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ method: String(url).split('/').at(-1), body: JSON.parse(init.body) });
+    return new Response(JSON.stringify({
+      ok: false,
+      error_code: 400,
+      description: 'Bad Request: message is not modified: specified new message content and reply markup are exactly the same as a current content and reply markup of the message',
+    }), { status: 400 });
+  };
+  try {
+    const result = await renderTelegramScreen(
+      { TELEGRAM_BOT_TOKEN: 'token' },
+      { chatId: 10, messageId: 20 },
+      payload,
+      { strategy: 'edit' },
+    );
+    assert.equal(result.messageId, 20);
+    assert.deepEqual(calls.map((call) => call.method), ['editMessageText']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('background delete failure is non-fatal after a successful replacement', async () => {
   const { renderTelegramScreen } = await import('../dist-runtime/telegram-screen-renderer.js');
   const scheduled = [];
