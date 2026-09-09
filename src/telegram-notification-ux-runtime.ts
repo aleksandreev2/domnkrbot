@@ -38,23 +38,19 @@ import {
   type NotificationDeliverySetting,
 } from './telegram-notification-ux.js';
 import { startCallbackAck, type ExecutionContextLike } from './telegram-fast-ack.js';
-import type { TelegramLatencyTiming } from './telegram-latency-timing.js';
 import { notificationRenderStrategy } from './telegram-notification-render-strategy.js';
-import { renderTelegramScreen } from './telegram-screen-renderer.js';
+import { renderTelegramScreen, type TelegramScreenExecutionContext } from './telegram-screen-renderer.js';
 
 type CountRow = { count: number | string | null };
 type AllTitlesRow = { all_titles: number | string | null };
 type D1PreparedStatement = ReturnType<TelegramSubscriptionEnv['DB']['prepare']>;
-type NotificationExecutionContext = ExecutionContextLike & {
-  telegramLatencyTiming?: TelegramLatencyTiming;
-};
 
 export type TelegramNotificationUxEnv = TelegramSubscriptionEnv;
 
 export async function handleTelegramNotificationUxUpdate(
   update: TelegramSubscriptionUpdate,
   env: TelegramNotificationUxEnv,
-  ctx?: NotificationExecutionContext,
+  ctx?: ExecutionContextLike,
 ): Promise<boolean> {
   const callback = update.callback_query;
   if (!callback?.data) return false;
@@ -427,29 +423,50 @@ async function respond(
   env: TelegramNotificationUxEnv,
   callback: NonNullable<TelegramSubscriptionUpdate['callback_query']>,
   chatId: number,
-  payload: { text: string; parse_mode?: 'HTML'; reply_markup: { inline_keyboard: unknown[][] } },
-  ctx?: NotificationExecutionContext,
+  payload: { text: string; parse_mode?: 'HTML'; reply_markup: unknown },
+  ctx?: ExecutionContextLike,
 ): Promise<void> {
+  const renderCtx = notificationRendererContext(ctx);
   const messageId = callback.message?.message_id;
   if (!messageId) {
-    await renderTelegramScreen(env, {
-      strategy: 'send',
-      chatId,
+    await renderTelegramScreen(
+      env,
+      { chatId },
       payload,
-      ctx,
-      timing: ctx?.telegramLatencyTiming,
-    });
+      { strategy: 'send', ctx: renderCtx },
+    );
     return;
   }
 
-  await renderTelegramScreen(env, {
-    strategy: notificationRenderStrategy(callback.data ?? '', callback.message?.text ?? ''),
-    chatId,
-    messageId,
+  await renderTelegramScreen(
+    env,
+    { chatId, messageId },
     payload,
-    ctx,
-    timing: ctx?.telegramLatencyTiming,
-  });
+    {
+      strategy: notificationRenderStrategy(callback.data ?? '', callback.message?.text ?? ''),
+      ctx: renderCtx,
+    },
+  );
+}
+
+function notificationRendererContext(ctx?: ExecutionContextLike): TelegramScreenExecutionContext | undefined {
+  if (!ctx) return undefined;
+  const timing = ctx.telegramLatencyTiming;
+  return {
+    waitUntil(promise) {
+      ctx.waitUntil(promise);
+    },
+    ...(hasRendererTiming(timing) ? { telegramLatencyTiming: timing } : {}),
+  };
+}
+
+function hasRendererTiming(
+  timing: ExecutionContextLike['telegramLatencyTiming'],
+): timing is NonNullable<TelegramScreenExecutionContext['telegramLatencyTiming']> {
+  const candidate = timing as Partial<NonNullable<TelegramScreenExecutionContext['telegramLatencyTiming']>> | undefined;
+  return typeof candidate?.mark === 'function'
+    && typeof candidate.describeRender === 'function'
+    && typeof candidate.recordTelegramApi === 'function';
 }
 
 async function answerCallback(env: TelegramNotificationUxEnv, callbackId: string, text?: string): Promise<void> {
