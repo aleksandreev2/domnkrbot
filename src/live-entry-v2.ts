@@ -134,23 +134,23 @@ export default {
     const analytics = await handlePublishingAnalyticsV2(request, env);
     if (analytics) return analytics;
 
-    // Preserve the normal fallback path for every request except proposal creation. The latter
-    // needs one best-effort post-processing step so a successful website submission alerts admins.
-    if (request.method !== 'POST' || url.pathname !== '/api/proposals') {
-      return baseWorker.fetch(request, env as never, ctx as never);
+    // Website proposals are created by the base worker. Alert admins only after a confirmed 201;
+    // alert delivery is best-effort and never changes the proposal response itself.
+    if (request.method === 'POST' && url.pathname === '/api/proposals') {
+      const response = await baseWorker.fetch(request, env as never, ctx as never);
+      if (response.status === 201) {
+        const created = await response.clone().json().catch(() => null) as { id?: string } | null;
+        const proposalId = created?.id;
+        if (proposalId) {
+          await notifyAdminsForProposalId(env, proposalId).catch((error) => {
+            console.error('Web proposal admin alert failed', { proposalId, error });
+          });
+        }
+      }
+      return response;
     }
 
-    const response = await baseWorker.fetch(request, env as never, ctx as never);
-    if (response.status === 201) {
-      const created = await response.clone().json().catch(() => null) as { id?: string } | null;
-      const proposalId = created?.id;
-      if (proposalId) {
-        await notifyAdminsForProposalId(env, proposalId).catch((error) => {
-          console.error('Web proposal admin alert failed', { proposalId, error });
-        });
-      }
-    }
-    return response;
+    return baseWorker.fetch(request, env as never, ctx as never);
   },
 
   async scheduled(controller: ScheduledControllerLike, env: Env, _ctx: CommentGateExecutionContext): Promise<void> {
