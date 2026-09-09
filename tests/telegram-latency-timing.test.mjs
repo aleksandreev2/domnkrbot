@@ -35,6 +35,42 @@ test('latency timing reports monotonic coarse stage deltas and normalized metada
   }
 });
 
+test('latency timing records the actual visible Telegram screen method and API duration', async () => {
+  const { createTelegramLatencyTiming } = await import('../dist-runtime/telegram-latency-timing.js');
+  const realNow = Date.now;
+  let now = 3_000;
+  Date.now = () => now;
+  try {
+    const timing = createTelegramLatencyTiming();
+    now = 3_006;
+    timing.mark('db_started');
+    now = 3_018;
+    timing.mark('db_done');
+    now = 3_020;
+    timing.describeRender(' Replace!! ', ' sendMessage ');
+    timing.mark('telegram_started');
+    now = 3_071;
+    timing.recordTelegramApi(51);
+    timing.mark('screen_ready');
+    now = 3_075;
+
+    assert.deepEqual(timing.snapshot(' Proposal ', ' Callback Query '), {
+      route: 'proposal',
+      kind: 'callback-query',
+      db_started_ms: 6,
+      db_ms: 18,
+      telegram_started_ms: 20,
+      screen_ready_ms: 71,
+      render_strategy: 'replace',
+      telegram_method: 'sendmessage',
+      telegram_api_ms: 51,
+      total_ms: 75,
+    });
+  } finally {
+    Date.now = realNow;
+  }
+});
+
 test('latency timing omits stages that were never observed', async () => {
   const { createTelegramLatencyTiming } = await import('../dist-runtime/telegram-latency-timing.js');
   const realNow = Date.now;
