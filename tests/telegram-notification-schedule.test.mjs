@@ -18,9 +18,14 @@ test('notification schedule gives hot scan, idle scan, discovery, fallback deliv
 });
 
 test('five-minute fallback cron also advances channel membership enforcement', () => {
-  assert.match(
-    entry,
-    /if \(controller\.cron === FALLBACK_DELIVERY_CRON\) \{[\s\S]*?runChannelMembershipMaintenance\(env, 40\)[\s\S]*?drainNotificationOutbox/,
+  const fallbackStart = entry.indexOf('if (controller.cron === FALLBACK_DELIVERY_CRON)');
+  const membershipStart = entry.indexOf('if (controller.cron === MEMBERSHIP_CRON)', fallbackStart);
+  assert.ok(fallbackStart >= 0 && membershipStart > fallbackStart);
+  const fallbackBody = entry.slice(fallbackStart, membershipStart);
+  assert.match(fallbackBody, /runChannelMembershipMaintenance\(env, 40\)/);
+  assert.ok(
+    fallbackBody.indexOf('runChannelMembershipMaintenance(env, 40)') < fallbackBody.indexOf('drainNotificationOutbox'),
+    'membership enforcement should run before notification fallback delivery',
   );
 });
 
