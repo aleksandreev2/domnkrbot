@@ -41,6 +41,7 @@
     "src/telegram-title-proposals.ts",
     "src/telegram-title-proposal-admin-alert.ts",
     "src/telegram-subscription-webhook.ts",
+    "src/telegram-webhook-routing.ts",
     "src/ranobelib-fast-scanner.ts",
     "src/ranobelib-discovery-scheduler.ts",
     "src/telegram-notification-delivery-groups.ts",

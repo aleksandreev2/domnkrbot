@@ -26,7 +26,9 @@ type NotificationSearchStateRow = {
   return_scope: string | null;
 };
 
-export async function ensureTelegramTextBotUxSchema(env: TelegramTextBotUxSchemaEnv): Promise<void> {
+const textBotUxSchemaPromises = new WeakMap<object, Promise<void>>();
+
+async function initializeTelegramTextBotUxSchema(env: TelegramTextBotUxSchemaEnv): Promise<void> {
   try {
     await env.DB.prepare(`
       ALTER TABLE telegram_proposal_sessions
@@ -64,6 +66,19 @@ export async function ensureTelegramTextBotUxSchema(env: TelegramTextBotUxSchema
     CREATE INDEX IF NOT EXISTS idx_telegram_notification_search_expiry
     ON telegram_notification_search_state(expires_at)
   `).run();
+}
+
+export async function ensureTelegramTextBotUxSchema(env: TelegramTextBotUxSchemaEnv): Promise<void> {
+  const key = env.DB as object;
+  const existing = textBotUxSchemaPromises.get(key);
+  if (existing) return existing;
+
+  const promise = initializeTelegramTextBotUxSchema(env).catch((error) => {
+    textBotUxSchemaPromises.delete(key);
+    throw error;
+  });
+  textBotUxSchemaPromises.set(key, promise);
+  return promise;
 }
 
 export async function beginNotificationSearch(

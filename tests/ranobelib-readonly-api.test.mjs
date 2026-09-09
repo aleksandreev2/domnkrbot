@@ -9,9 +9,10 @@ const wrangler = readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'ut
 
 test('production RanobeLib API is intercepted as a pure D1 read before the legacy base worker', () => {
   const start = productionEntry.indexOf("url.pathname === '/api/ranobelib'");
+  const routeEnd = productionEntry.indexOf('\n    }', start);
   const base = productionEntry.indexOf('return baseWorker.fetch');
-  assert.ok(start >= 0 && base > start, 'production entry must intercept RanobeLib API before base worker');
-  const route = productionEntry.slice(start, base);
+  assert.ok(start >= 0 && routeEnd > start && base > routeEnd, 'production entry must intercept RanobeLib API before base worker');
+  const route = productionEntry.slice(start, routeEnd);
 
   assert.doesNotMatch(route, /syncRanobeLib/);
   assert.doesNotMatch(route, /ctx\.waitUntil/);

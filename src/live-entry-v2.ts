@@ -1,3 +1,4 @@
+import appEntry from './entry.js';
 import baseWorker from './live-entry.js';
 import {
   handleChannelMembershipAppealAdmin,
@@ -5,6 +6,7 @@ import {
 } from './channel-membership-appeals.js';
 import {
   ensureWebhookMembershipUpdates,
+  handleChannelMembershipWebhook,
   runChannelMembershipMaintenance,
   type ChannelMembershipEnv,
 } from './channel-membership-access.js';
@@ -41,7 +43,12 @@ import {
   drainNotificationOutbox,
   type NotificationDeliveryEnv,
 } from './telegram-notification-delivery.js';
+import { handleTelegramSubscriptionWebhookRequest } from './telegram-subscription-webhook.js';
 import { type TelegramSubscriptionEnv } from './telegram-subscriptions.js';
+import {
+  classifyTelegramWebhookUpdate,
+  type TelegramWebhookRoute,
+} from './telegram-webhook-routing.js';
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
@@ -49,6 +56,7 @@ type NotificationWakeup = { kind: 'drain' };
 type QueueProducerLike = { send(message: NotificationWakeup): Promise<void> };
 type QueueMessageLike = { body: unknown };
 type QueueBatchLike = { messages: QueueMessageLike[] };
+type TelegramWebhookUpdate = Parameters<typeof classifyTelegramWebhookUpdate>[0];
 
 const FAST_SCAN_CRON = '* * * * *';
 const IDLE_SCAN_CRON = '17 */3 * * *';
@@ -102,6 +110,23 @@ export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
+    if (request.method === 'POST' && url.pathname === '/telegram/webhook') {
+      const expectedSecret = env.TELEGRAM_WEBHOOK_SECRET?.trim() ?? '';
+      const suppliedSecret = request.headers.get('x-telegram-bot-api-secret-token') ?? '';
+      if (!expectedSecret || suppliedSecret !== expectedSecret) {
+        return new Response('Forbidden', { status: 403 });
+      }
+
+      const startedAt = Date.now();
+      const update = await request.clone().json().catch(() => null) as TelegramWebhookUpdate | null;
+      if (!update) return new Response('Bad Request', { status: 400 });
+
+      const route = classifyTelegramWebhookUpdate(update);
+      const response = await dispatchTelegramWebhook(route, request, env, ctx);
+      console.log('Telegram webhook handled', { route, durationMs: Date.now() - startedAt });
+      return response;
+    }
+
     // Catalog reads must never start upstream crawling. HOT/IDLE scheduled jobs are the sole
     // automatic chapter-polling owners; this route only exposes the latest D1 snapshot.
     if (request.method === 'GET' && url.pathname === '/api/ranobelib') {
@@ -142,9 +167,9 @@ export default {
         const created = await response.clone().json().catch(() => null) as { id?: string } | null;
         const proposalId = created?.id;
         if (proposalId) {
-          await notifyAdminsForProposalId(env, proposalId).catch((error) => {
+          ctx.waitUntil(notifyAdminsForProposalId(env, proposalId).catch((error) => {
             console.error('Web proposal admin alert failed', { proposalId, error });
-          });
+          }));
         }
       }
       return response;
@@ -213,3 +238,44 @@ export default {
     }
   },
 };
+
+async function dispatchTelegramWebhook(
+  route: TelegramWebhookRoute,
+  request: Request,
+  env: Env,
+  ctx: CommentGateExecutionContext,
+): Promise<Response> {
+  switch (route) {
+    case 'chat-member':
+      return (await handleChannelMembershipWebhook(request, env, ctx)) ?? new Response('ok');
+
+    case 'download-start': {
+      const appeal = await handleChannelMembershipAppealWebhook(request, env, ctx);
+      if (appeal) return appeal;
+      return (await handlePublicationReaderDeliveryWebhook(request, env, ctx)) ?? new Response('ok');
+    }
+
+    case 'reader-gate':
+    case 'reader-forward':
+      return (await handlePublicationReaderDeliveryWebhook(request, env, ctx)) ?? new Response('ok');
+
+    case 'membership-appeal':
+      return (await handleChannelMembershipAppealWebhook(request, env, ctx)) ?? new Response('ok');
+
+    case 'notifications':
+      return (await handleTelegramSubscriptionWebhookRequest(request, env as never)) ?? new Response('ok');
+
+    case 'proposal':
+      return appEntry.fetch(request, env as never, ctx);
+
+    case 'generic-private-text': {
+      const appeal = await handleChannelMembershipAppealWebhook(request, env, ctx);
+      if (appeal) return appeal;
+      return appEntry.fetch(request, env as never, ctx);
+    }
+
+    case 'compat':
+    default:
+      return baseWorker.fetch(request, env as never, ctx as never);
+  }
+}

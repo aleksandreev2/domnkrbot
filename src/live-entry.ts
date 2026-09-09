@@ -247,7 +247,7 @@ export default {
       }
     }
 
-    return appEntry.fetch(request, env);
+    return appEntry.fetch(request, env, ctx);
   },
 
   async scheduled(controller: ScheduledControllerLike, env: Env, _ctx: ExecutionContextLike): Promise<void> {

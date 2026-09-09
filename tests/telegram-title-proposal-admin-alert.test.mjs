@@ -69,17 +69,19 @@ test('web-created proposal can notify admins by the exact created proposal id',a
   });
 });
 
-test('entry captures Telegram proposal state before legacy submit and alerts only after it returns',()=>{
+test('entry captures Telegram proposal state before submit and defers the best-effort admin alert',()=>{
   const entry=fs.readFileSync(new URL('../src/entry.ts',import.meta.url),'utf8');
   const capture=entry.indexOf('const proposalAlertContext = await captureTitleProposalSubmission');
   const submit=entry.indexOf('const proposalResponse = await handleTelegramTitleProposalWebhookRequest');
-  const notify=entry.indexOf('await notifyAdminsForCreatedTitleProposal(env, proposalAlertContext)');
-  assert.ok(capture>=0&&submit>capture&&notify>submit);
+  const notify=entry.indexOf('const alert = notifyAdminsForCreatedTitleProposal(env, proposalAlertContext)',submit);
+  const defer=entry.indexOf('if (ctx) ctx.waitUntil(alert)',notify);
+  const fallback=entry.indexOf('else await alert',defer);
+  assert.ok(capture>=0&&submit>capture&&notify>submit&&defer>notify&&fallback>defer);
 });
 
 test('live entry alerts after a successful web proposal response',()=>{
   const entry=fs.readFileSync(new URL('../src/live-entry-v2.ts',import.meta.url),'utf8');
   assert.match(entry,/url\.pathname === '\/api\/proposals'/);
   assert.match(entry,/response\.status === 201/);
-  assert.match(entry,/notifyAdminsForProposalId/);
+  assert.match(entry,/ctx\.waitUntil\(notifyAdminsForProposalId/);
 });
