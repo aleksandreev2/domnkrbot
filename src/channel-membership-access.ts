@@ -34,6 +34,20 @@ type AccessRow = {
   blacklist_reason: string | null;
 };
 type MonitoredRow = AccessRow;
+type TelegramBanRow = {
+  user_telegram_id: string;
+  banned_at: string | null;
+  last_attempt_at: string | null;
+  last_error: string | null;
+};
+
+type MembershipMaintenanceResult = {
+  checked: number;
+  blacklisted: number;
+  members: number;
+  telegramBanned: number;
+  banFailures: number;
+};
 
 const REQUIRED_UPDATES = ['message', 'callback_query', 'chat_member'] as const;
 const BLACKLIST_REASON = 'left_channel';
@@ -71,6 +85,9 @@ function isMember(member: ChatMember): boolean {
 function storedStatusWasMember(status: string | null | undefined): boolean {
   return status === 'creator' || status === 'administrator' || status === 'member' || status === 'restricted';
 }
+function errorText(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 1000);
+}
 async function telegramCall<T>(env: ChannelMembershipEnv, method: string, payload: Record<string, unknown>): Promise<T> {
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
@@ -98,6 +115,14 @@ export async function ensureChannelMembershipSchema(env: ChannelMembershipEnv): 
       )`,
       'CREATE INDEX IF NOT EXISTS idx_channel_access_blacklisted ON channel_access_state(blacklisted_at DESC)',
       'CREATE INDEX IF NOT EXISTS idx_channel_access_left ON channel_access_state(left_at, blacklisted_at)',
+      `CREATE TABLE IF NOT EXISTS channel_telegram_bans (
+        user_telegram_id TEXT PRIMARY KEY,
+        banned_at TEXT,
+        last_attempt_at TEXT,
+        last_error TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`,
+      'CREATE INDEX IF NOT EXISTS idx_channel_telegram_bans_pending ON channel_telegram_bans(banned_at, last_attempt_at)',
     ];
     for (const statement of statements) await env.DB.prepare(statement).run();
   })().catch((error) => { schemaPromise = null; throw error; });
@@ -108,6 +133,11 @@ async function accessRow(env: ChannelMembershipEnv, userId: number | string): Pr
   await ensureChannelMembershipSchema(env);
   return env.DB.prepare(`SELECT user_telegram_id,last_status,last_checked_at,left_at,rejoined_at,blacklisted_at,blacklist_reason
     FROM channel_access_state WHERE user_telegram_id=?`).bind(String(userId)).first<AccessRow>();
+}
+async function telegramBanRow(env: ChannelMembershipEnv, userId: number | string): Promise<TelegramBanRow | null> {
+  await ensureChannelMembershipSchema(env);
+  return env.DB.prepare(`SELECT user_telegram_id,banned_at,last_attempt_at,last_error
+    FROM channel_telegram_bans WHERE user_telegram_id=?`).bind(String(userId)).first<TelegramBanRow>();
 }
 async function rememberStatus(env: ChannelMembershipEnv, userId: number | string, status: string, options: { left?: boolean; rejoined?: boolean } = {}): Promise<void> {
   const now = new Date().toISOString();
@@ -136,6 +166,57 @@ async function blacklist(env: ChannelMembershipEnv, userId: number | string, sta
         blacklist_reason=COALESCE(channel_access_state.blacklist_reason,excluded.blacklist_reason),updated_at=CURRENT_TIMESTAMP`)
     .bind(String(userId), status, BLACKLIST_REASON).run();
 }
+async function recordTelegramBanSuccess(env: ChannelMembershipEnv, userId: number | string): Promise<void> {
+  await env.DB.prepare(`INSERT INTO channel_telegram_bans
+      (user_telegram_id,banned_at,last_attempt_at,last_error,updated_at)
+      VALUES (?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,CURRENT_TIMESTAMP)
+      ON CONFLICT(user_telegram_id) DO UPDATE SET
+        banned_at=COALESCE(channel_telegram_bans.banned_at,CURRENT_TIMESTAMP),last_attempt_at=CURRENT_TIMESTAMP,
+        last_error=NULL,updated_at=CURRENT_TIMESTAMP`).bind(String(userId)).run();
+}
+async function recordTelegramBanFailure(env: ChannelMembershipEnv, userId: number | string, error: unknown): Promise<void> {
+  await env.DB.prepare(`INSERT INTO channel_telegram_bans
+      (user_telegram_id,banned_at,last_attempt_at,last_error,updated_at)
+      VALUES (?,NULL,CURRENT_TIMESTAMP,?,CURRENT_TIMESTAMP)
+      ON CONFLICT(user_telegram_id) DO UPDATE SET
+        last_attempt_at=CURRENT_TIMESTAMP,last_error=excluded.last_error,updated_at=CURRENT_TIMESTAMP`)
+    .bind(String(userId), errorText(error)).run();
+}
+async function enforceTelegramBan(env: ChannelMembershipEnv, userId: number | string, target?: string): Promise<boolean> {
+  const existing = await telegramBanRow(env, userId);
+  if (existing?.banned_at) return true;
+  const chatId = target || await targetChat(env);
+  if (!chatId) return false;
+  try {
+    await telegramCall<boolean>(env, 'banChatMember', { chat_id: chatId, user_id: Number(userId) });
+    await recordTelegramBanSuccess(env, userId);
+    return true;
+  } catch (error) {
+    await recordTelegramBanFailure(env, userId, error).catch(() => undefined);
+    return false;
+  }
+}
+
+export async function unblockChannelMember(env: ChannelMembershipEnv, userId: number | string): Promise<boolean> {
+  await ensureChannelMembershipSchema(env);
+  const target = await targetChat(env);
+  if (!target) return false;
+  try {
+    await telegramCall<boolean>(env, 'unbanChatMember', {
+      chat_id: target,
+      user_id: Number(userId),
+      only_if_banned: true,
+    });
+  } catch {
+    return false;
+  }
+  await env.DB.prepare('DELETE FROM channel_telegram_bans WHERE user_telegram_id=?').bind(String(userId)).run();
+  await env.DB.prepare(`UPDATE channel_access_state SET blacklisted_at=NULL,blacklist_reason=NULL,left_at=NULL,
+      last_status='manual_unblock',last_checked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE user_telegram_id=?`)
+    .bind(String(userId)).run();
+  return true;
+}
+
 async function sendSubscriptionRequired(env: ChannelMembershipEnv, userId: number, publicationId: number, target: string): Promise<void> {
   const row: Array<{ text: string; url: string }> = [];
   const join = joinUrl(env, target);
@@ -157,6 +238,8 @@ async function sendBlacklisted(env: ChannelMembershipEnv, userId: number): Promi
 export async function checkDownloadMembership(env: ChannelMembershipEnv, user: TelegramUser, publicationId: number): Promise<boolean> {
   const existing = await accessRow(env, user.id);
   if (existing?.blacklisted_at) {
+    const target = await targetChat(env);
+    if (target) await enforceTelegramBan(env, user.id, target);
     await sendBlacklisted(env, user.id);
     return false;
   }
@@ -173,6 +256,7 @@ export async function checkDownloadMembership(env: ChannelMembershipEnv, user: T
     }
     if (storedStatusWasMember(existing?.last_status)) {
       await blacklist(env, user.id, member.status);
+      await enforceTelegramBan(env, user.id, target);
       await sendBlacklisted(env, user.id);
       return false;
     }
@@ -205,6 +289,8 @@ async function handleChatMemberUpdate(env: ChannelMembershipEnv, update: ChatMem
   const memberNow = isMember(update.new_chat_member);
   const existing = await accessRow(env, userId);
   if (existing?.blacklisted_at) {
+    const target = await targetChat(env);
+    if (target) await enforceTelegramBan(env, userId, target);
     await rememberStatus(env, userId, update.new_chat_member.status);
     return;
   }
@@ -214,6 +300,8 @@ async function handleChatMemberUpdate(env: ChannelMembershipEnv, update: ChatMem
   }
   if (memberBefore) {
     await blacklist(env, userId, update.new_chat_member.status);
+    const target = await targetChat(env);
+    if (target) await enforceTelegramBan(env, userId, target);
     return;
   }
   await rememberStatus(env, userId, update.new_chat_member.status, { left: true });
@@ -242,14 +330,25 @@ export async function handleChannelMembershipWebhook(request: Request, env: Chan
   return null;
 }
 
-export async function runChannelMembershipMaintenance(env: ChannelMembershipEnv, limit = 40): Promise<{ checked: number; blacklisted: number; members: number }> {
+export async function runChannelMembershipMaintenance(env: ChannelMembershipEnv, limit = 40): Promise<MembershipMaintenanceResult> {
   await ensureChannelMembershipSchema(env);
+  const target = await targetChat(env);
+  if (!target) return { checked: 0, blacklisted: 0, members: 0, telegramBanned: 0, banFailures: 0 };
+
+  const pendingBans = await env.DB.prepare(`SELECT a.user_telegram_id,a.last_status,a.last_checked_at,a.left_at,a.rejoined_at,a.blacklisted_at,a.blacklist_reason
+    FROM channel_access_state a LEFT JOIN channel_telegram_bans b ON b.user_telegram_id=a.user_telegram_id
+    WHERE a.blacklisted_at IS NOT NULL AND b.banned_at IS NULL
+    ORDER BY a.blacklisted_at ASC LIMIT ?`).bind(limit).all<AccessRow>();
+  let telegramBanned = 0, banFailures = 0;
+  for (const row of pendingBans.results) {
+    if (await enforceTelegramBan(env, row.user_telegram_id, target)) telegramBanned += 1;
+    else banFailures += 1;
+  }
+
   const monitored = await env.DB.prepare(`SELECT user_telegram_id,last_status,last_checked_at,left_at,rejoined_at,blacklisted_at,blacklist_reason
     FROM channel_access_state
     WHERE blacklisted_at IS NULL AND last_status IN ('creator','administrator','member','restricted')
     ORDER BY COALESCE(last_checked_at,'') ASC LIMIT ?`).bind(limit).all<MonitoredRow>();
-  const target = await targetChat(env);
-  if (!target) return { checked: 0, blacklisted: 0, members: 0 };
   let checked = 0, blacklisted = 0, members = 0;
   for (const row of monitored.results) {
     checked += 1;
@@ -262,11 +361,13 @@ export async function runChannelMembershipMaintenance(env: ChannelMembershipEnv,
       }
       await blacklist(env, row.user_telegram_id, member.status);
       blacklisted += 1;
+      if (await enforceTelegramBan(env, row.user_telegram_id, target)) telegramBanned += 1;
+      else banFailures += 1;
     } catch {
-      // Fail open for punishment: Telegram/API failure must never cause a blacklist.
+      // Fail open for punishment: Telegram/API verification failure must never cause a blacklist.
     }
   }
-  return { checked, blacklisted, members };
+  return { checked, blacklisted, members, telegramBanned, banFailures };
 }
 
 export async function ensureWebhookMembershipUpdates(env: ChannelMembershipEnv): Promise<boolean> {
@@ -306,10 +407,11 @@ export async function handleChannelMembershipAdmin(request: Request, env: Channe
     return json({ summary: { blacklisted: Number(summary?.blacklisted || 0), monitored: Number(summary?.monitored || 0), policy: 'blacklist_on_leave' }, users: rows.results });
   }
   const match = /^\/api\/admin\/membership-access\/(\d+)\/unblock$/.exec(url.pathname);
-  if (request.method === 'POST' && match) {
-    await env.DB.prepare(`UPDATE channel_access_state SET blacklisted_at=NULL,blacklist_reason=NULL,left_at=NULL,
-      last_status='manual_unblock',last_checked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE user_telegram_id=?`).bind(match[1]).run();
-    return json({ ok: true, user_telegram_id: match[1], admin_user_id: admin.id });
+  if (request.method === 'POST' && match?.[1]) {
+    const userId = match[1];
+    const unblocked = await unblockChannelMember(env, userId);
+    if (!unblocked) return json({ error: 'Не удалось снять блокировку пользователя в Telegram-канале.' }, 502);
+    return json({ ok: true, user_telegram_id: userId, admin_user_id: admin.id });
   }
   return json({ error: 'Method not allowed.' }, 405);
 }

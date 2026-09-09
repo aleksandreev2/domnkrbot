@@ -4,6 +4,7 @@ import {
   checkDownloadMembership,
   handleChannelMembershipWebhook,
   runChannelMembershipMaintenance,
+  unblockChannelMember,
 } from '../dist-runtime/channel-membership-access.js';
 
 const ORIGIN='https://domnkr.test';
@@ -15,9 +16,17 @@ class MockStatement{
   async first(){
     if(this.query.includes('SELECT value FROM app_settings'))return this.values[0]==='publish_channel_id'?{value:'@domnekromanta'}:null;
     if(this.query.includes('FROM channel_access_state WHERE user_telegram_id=?'))return this.db.access.get(String(this.values[0]))||null;
+    if(this.query.includes('FROM channel_telegram_bans WHERE user_telegram_id=?'))return this.db.bans.get(String(this.values[0]))||null;
     return null;
   }
   async all(){
+    if(this.query.includes('FROM channel_access_state a')&&this.query.includes('channel_telegram_bans')){
+      const limit=Number(this.values.at(-1)||40);
+      return{results:[...this.db.access.values()]
+        .filter((row)=>row.blacklisted_at&&!this.db.bans.get(String(row.user_telegram_id))?.banned_at)
+        .sort((a,b)=>String(a.blacklisted_at||'').localeCompare(String(b.blacklisted_at||'')))
+        .slice(0,limit)};
+    }
     if(this.query.includes('FROM channel_access_state')&&this.query.includes("last_status IN ('creator','administrator','member','restricted')")){
       const limit=Number(this.values[0]||40);
       const rows=[...this.db.access.values()]
@@ -40,11 +49,25 @@ class MockStatement{
       this.db.access.set(String(id),{user_telegram_id:String(id),last_status:String(status),last_checked_at:lastChecked,left_at:leftAt,rejoined_at:rejoinedAt,blacklisted_at:previous.blacklisted_at||blacklistedAt||null,blacklist_reason:previous.blacklist_reason||reason||null});
       return{};
     }
+    if(this.query.startsWith('INSERT INTO channel_telegram_bans')){
+      const [id]=this.values;const previous=this.db.bans.get(String(id))||{};
+      this.db.bans.set(String(id),{...previous,user_telegram_id:String(id),banned_at:previous.banned_at||now(),last_attempt_at:now(),last_error:null});
+      return{};
+    }
+    if(this.query.startsWith('UPDATE channel_access_state SET blacklisted_at=NULL')){
+      const id=String(this.values[0]);const previous=this.db.access.get(id)||{};
+      this.db.access.set(id,{...previous,blacklisted_at:null,blacklist_reason:null,left_at:null,last_status:'manual_unblock',last_checked_at:now()});
+      return{};
+    }
+    if(this.query.startsWith('DELETE FROM channel_telegram_bans')){
+      this.db.bans.delete(String(this.values[0]));
+      return{};
+    }
     return{};
   }
 }
 class MockDB{
-  constructor(){this.access=new Map();this.operations=[];}
+  constructor(){this.access=new Map();this.bans=new Map();this.operations=[];}
   prepare(query){return new MockStatement(this,query);}
 }
 
@@ -58,7 +81,7 @@ async function withTelegramStatus(status,fn){
     calls.push({url:String(url),options});const method=String(url).split('/').pop();
     if(method==='getChatMember')return new Response(JSON.stringify({ok:true,result:{status,user:{id:42}}}),{headers:{'content-type':'application/json'}});
     if(method==='getChat')return new Response(JSON.stringify({ok:true,result:{id:-100123,username:'domnekromanta',type:'channel'}}),{headers:{'content-type':'application/json'}});
-    return new Response(JSON.stringify({ok:true,result:{message_id:1}}),{headers:{'content-type':'application/json'}});
+    return new Response(JSON.stringify({ok:true,result:true}),{headers:{'content-type':'application/json'}});
   };
   try{return await fn(calls);}finally{globalThis.fetch=original;}
 }
@@ -98,6 +121,19 @@ test('chat_member member-to-left transition blacklists immediately without a dow
   assert.equal(db.access.get('42')?.blacklist_reason,'left_channel');
 });
 
+test('chat_member member-to-left transition also bans the user in the Telegram channel',async()=>{
+  const db=new MockDB();
+  await withTelegramStatus('left',async(calls)=>{
+    const response=await handleChannelMembershipWebhook(memberUpdate('member','left'),env(db),{waitUntil(){}});
+    assert.ok(response);assert.equal(response.status,200);
+    const ban=calls.find((call)=>call.url.endsWith('/banChatMember'));
+    assert.ok(ban,'expected banChatMember after a confirmed leave');
+    const payload=JSON.parse(String(ban.options.body));
+    assert.equal(payload.chat_id,'@domnekromanta');
+    assert.equal(payload.user_id,42);
+  });
+});
+
 test('nonmember status churn does not blacklist someone who was never confirmed as a member',async()=>{
   const db=new MockDB();
   await withTelegramStatus('left',async()=>{
@@ -116,6 +152,36 @@ test('maintenance catches a missed leave for any known member without requiring 
   });
   assert.ok(db.access.get('42')?.blacklisted_at);
   assert.equal(db.access.get('42')?.blacklist_reason,'left_channel');
+});
+
+test('maintenance retroactively bans users already in the internal blacklist',async()=>{
+  const db=new MockDB();db.access.set('42',access('left',{left_at:now(),blacklisted_at:now(),blacklist_reason:'left_channel'}));
+  await withTelegramStatus('left',async(calls)=>{
+    await runChannelMembershipMaintenance(env(db));
+    const ban=calls.find((call)=>call.url.endsWith('/banChatMember'));
+    assert.ok(ban,'expected maintenance to backfill Telegram bans for the existing blacklist');
+    const payload=JSON.parse(String(ban.options.body));
+    assert.equal(payload.chat_id,'@domnekromanta');
+    assert.equal(payload.user_id,42);
+  });
+});
+
+test('manual unblock removes the Telegram ban before clearing the internal blacklist',async()=>{
+  const db=new MockDB();
+  db.access.set('42',access('left',{left_at:now(),blacklisted_at:now(),blacklist_reason:'left_channel'}));
+  db.bans.set('42',{user_telegram_id:'42',banned_at:now(),last_attempt_at:now(),last_error:null});
+  await withTelegramStatus('kicked',async(calls)=>{
+    const result=await unblockChannelMember(env(db),'42');
+    assert.equal(result,true);
+    const unban=calls.find((call)=>call.url.endsWith('/unbanChatMember'));
+    assert.ok(unban,'expected unbanChatMember before clearing the internal blacklist');
+    const payload=JSON.parse(String(unban.options.body));
+    assert.equal(payload.chat_id,'@domnekromanta');
+    assert.equal(payload.user_id,42);
+    assert.equal(payload.only_if_banned,true);
+  });
+  assert.equal(db.access.get('42')?.blacklisted_at,null);
+  assert.equal(db.bans.has('42'),false);
 });
 
 test('Telegram verification failure never blacklists a known member',async()=>{
