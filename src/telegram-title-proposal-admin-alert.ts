@@ -23,6 +23,12 @@ type ProposalRow = {
   ranobelib_book_ref: string | null;
   created_at: string | null;
 };
+type ProposalAdminRow = ProposalRow & {
+  user_telegram_id: string;
+  username?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+};
 type TelegramResponse<T> = { ok?: boolean; result?: T; description?: string };
 
 export type ProposalSubmissionAlertContext = {
@@ -61,6 +67,13 @@ async function latestProposal(env: TelegramTitleProposalAdminAlertEnv, userId: n
     .bind(String(userId)).first<ProposalRow>();
 }
 
+async function proposalById(env: TelegramTitleProposalAdminAlertEnv, proposalId: string): Promise<ProposalAdminRow | null> {
+  return env.DB.prepare(`SELECT p.id,p.user_telegram_id,p.title,p.source_url,p.comment,p.source_kind,p.ranobelib_book_ref,p.created_at,
+      u.username,u.first_name,u.last_name
+    FROM chapter_proposals p LEFT JOIN users u ON u.telegram_id=p.user_telegram_id
+    WHERE p.id=?`).bind(proposalId).first<ProposalAdminRow>();
+}
+
 export async function captureTitleProposalSubmission(
   request: Request,
   env: TelegramTitleProposalAdminAlertEnv,
@@ -87,22 +100,18 @@ function sourceLabel(row: ProposalRow): string {
   return row.source_url?.trim() || 'не указан';
 }
 
-export async function notifyAdminsForCreatedTitleProposal(
+async function sendProposalAlert(
   env: TelegramTitleProposalAdminAlertEnv,
-  context: ProposalSubmissionAlertContext,
+  row: ProposalRow,
+  user: TelegramUser,
 ): Promise<boolean> {
-  const row = await latestProposal(env, context.user.id).catch((error) => {
-    console.error('Proposal admin alert lookup failed', errorText(error));
-    return null;
-  });
-  if (!row || row.id === context.previousProposalId) return false;
   const admins = adminTelegramIds(env);
   if (!admins.length) return false;
   const text = [
     '📚 Новая заявка на перевод',
     '',
     `Название: ${row.title}`,
-    `От: ${userLabel(context.user)} (${context.user.id})`,
+    `От: ${userLabel(user)} (${user.id})`,
     `Источник: ${sourceLabel(row)}`,
     '',
     'Комментарий:',
@@ -117,4 +126,35 @@ export async function notifyAdminsForCreatedTitleProposal(
     });
   }
   return true;
+}
+
+export async function notifyAdminsForCreatedTitleProposal(
+  env: TelegramTitleProposalAdminAlertEnv,
+  context: ProposalSubmissionAlertContext,
+): Promise<boolean> {
+  const row = await latestProposal(env, context.user.id).catch((error) => {
+    console.error('Proposal admin alert lookup failed', errorText(error));
+    return null;
+  });
+  if (!row || row.id === context.previousProposalId) return false;
+  return sendProposalAlert(env, row, context.user);
+}
+
+export async function notifyAdminsForProposalId(
+  env: TelegramTitleProposalAdminAlertEnv,
+  proposalId: string,
+): Promise<boolean> {
+  const row = await proposalById(env, proposalId).catch((error) => {
+    console.error('Proposal admin alert exact lookup failed', { proposalId, error: errorText(error) });
+    return null;
+  });
+  if (!row) return false;
+  const userId = Number(row.user_telegram_id);
+  if (!Number.isSafeInteger(userId) || userId <= 0) return false;
+  return sendProposalAlert(env, row, {
+    id: userId,
+    username: row.username || undefined,
+    first_name: row.first_name || undefined,
+    last_name: row.last_name || undefined,
+  });
 }
