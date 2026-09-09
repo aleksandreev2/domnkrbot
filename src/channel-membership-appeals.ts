@@ -375,7 +375,7 @@ export async function handleChannelMembershipAppealWebhook(
   const url = new URL(request.url);
   if (url.pathname !== '/telegram/webhook' || request.method !== 'POST') return null;
   const expected = env.TELEGRAM_WEBHOOK_SECRET?.trim();
-  if (expected && request.headers.get('x-telegram-bot-api-secret-token') !== expected) return null;
+  if (!expected || request.headers.get('x-telegram-bot-api-secret-token') !== expected) return null;
   const update = await request.clone().json().catch(() => null) as TelegramUpdate | null;
   if (!update) return null;
   if (update.callback_query) {
