@@ -32,6 +32,12 @@ test('stack groups become ready at threshold and send threshold overflow as one 
   assert.equal(delivery.notificationGroupReady(candidate({ pendingChapters: 13 }), NOW), true);
 });
 
+test('translation completion flushes a partial stack immediately unless the group is retry-blocked', async () => {
+  const delivery = await loadDelivery();
+  assert.equal(delivery.notificationGroupReady(candidate({ pendingChapters: 2, translationCompleted: true }), NOW), true);
+  assert.equal(delivery.notificationGroupReady(candidate({ pendingChapters: 2, translationCompleted: true, retryBlocked: true }), NOW), false);
+});
+
 test('partial stack flushes seven days after the oldest pending member and later chapters do not move that anchor', async () => {
   const delivery = await loadDelivery();
   assert.equal(delivery.notificationGroupReady(candidate({
@@ -109,7 +115,8 @@ test('delivery claim SQL limits ready user-title groups instead of individual ou
   const source = readFileSync(new URL('../src/telegram-notification-delivery.ts', import.meta.url), 'utf8');
   assert.match(source, /WITH\s+ready_groups\s+AS\s*\(/i);
   assert.match(source, /GROUP BY\s+o\.user_telegram_id\s*,\s*r\.book_ref/i);
-  assert.match(source, /SUM\s*\(\s*r\.chapter_count\s*\)/i);
+  assert.match(source, /SUM\s*\(\s*CASE\s+WHEN\s+r\.release_kind\s*=\s*'chapters'\s+THEN\s+r\.chapter_count\s+ELSE\s+0\s+END\s*\)/i);
+  assert.match(source, /translation_completed/i);
   assert.match(source, /telegram_title_delivery_settings/i);
   assert.match(source, /datetime\s*\(\s*'now'\s*,\s*'-7 days'\s*\)/i);
   assert.match(source, /LIMIT\s+\?/i);
