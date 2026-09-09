@@ -167,9 +167,9 @@ export default {
         const created = await response.clone().json().catch(() => null) as { id?: string } | null;
         const proposalId = created?.id;
         if (proposalId) {
-          await notifyAdminsForProposalId(env, proposalId).catch((error) => {
+          ctx.waitUntil(notifyAdminsForProposalId(env, proposalId).catch((error) => {
             console.error('Web proposal admin alert failed', { proposalId, error });
-          });
+          }));
         }
       }
       return response;
