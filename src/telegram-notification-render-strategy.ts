@@ -21,6 +21,9 @@ export function notificationRenderStrategy(
   if (/^subs:all:\d+$/.test(data)) {
     return isAllTitlesScreen(text) ? 'edit' : 'replace';
   }
+  if (/^subs:completed:\d+$/.test(data)) {
+    return isCompletedTitlesScreen(text) ? 'edit' : 'replace';
+  }
 
   return 'replace';
 }
@@ -31,4 +34,8 @@ function isMyTitlesScreen(text: string): boolean {
 
 function isAllTitlesScreen(text: string): boolean {
   return /(?:^|\n)📚\s*Все переводы(?=\s|$)/i.test(text);
+}
+
+function isCompletedTitlesScreen(text: string): boolean {
+  return /(?:^|\n)✅\s*Переведённые новеллы(?=\s|$)/i.test(text);
 }
