@@ -43,6 +43,7 @@
     "src/telegram-subscription-webhook.ts",
     "src/telegram-webhook-routing.ts",
     "src/telegram-fast-ack.ts",
+    "src/telegram-screen-renderer.ts",
     "src/telegram-latency-timing.ts",
     "src/ranobelib-fast-scanner.ts",
     "src/ranobelib-discovery-scheduler.ts",
