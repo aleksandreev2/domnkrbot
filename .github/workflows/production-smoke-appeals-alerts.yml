@@ -1,0 +1,16 @@
+name: Production Smoke - Appeals Alerts
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify appeals and proposal alerts build reached production
+        run: EXPECTED_MARKER=domnkr-build-20260909-appeals-alerts1 node scripts/check-production.mjs
