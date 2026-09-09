@@ -35,7 +35,7 @@ interface ExecutionContextLike {
 }
 
 export default {
-  async fetch(request: Request, env: Env, _ctx?: ExecutionContextLike): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: ExecutionContextLike): Promise<Response> {
     const notificationTextInputResponse = await handleTelegramNotificationTextInputRequest(request, env);
     if (notificationTextInputResponse) return notificationTextInputResponse;
 
@@ -52,9 +52,11 @@ export default {
     const proposalResponse = await handleTelegramTitleProposalWebhookRequest(request, env);
     if (proposalResponse) {
       if (proposalAlertContext) {
-        await notifyAdminsForCreatedTitleProposal(env, proposalAlertContext).catch((error) => {
+        const alert = notifyAdminsForCreatedTitleProposal(env, proposalAlertContext).catch((error) => {
           console.error('Proposal admin alert failed', error);
         });
+        if (ctx) ctx.waitUntil(alert);
+        else await alert;
       }
       return proposalResponse;
     }
