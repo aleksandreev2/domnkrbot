@@ -1,3 +1,5 @@
+import type { TelegramLatencyTiming } from './telegram-latency-timing.js';
+
 export type TelegramRenderStrategy = 'edit' | 'replace' | 'send';
 
 export type TelegramScreenEnv = {
@@ -17,6 +19,7 @@ export type TelegramScreenPayload = {
 
 export type TelegramScreenExecutionContext = {
   waitUntil(promise: Promise<unknown>): void;
+  telegramLatencyTiming?: Pick<TelegramLatencyTiming, 'mark' | 'describeRender' | 'recordTelegramApi'>;
 };
 
 export type TelegramScreenRenderOptions = {
@@ -45,18 +48,18 @@ export async function renderTelegramScreen(
 
   if (options.strategy === 'edit') {
     if (!target.messageId) throw new Error('Telegram edit requires message id');
-    const result = await telegramCall(token, 'editMessageText', {
+    const result = await visibleTelegramCall(token, 'editMessageText', options.strategy, {
       chat_id: target.chatId,
       message_id: target.messageId,
       ...payload,
-    });
+    }, options.ctx);
     return { messageId: resultMessageId(result) ?? target.messageId };
   }
 
-  const sent = await telegramCall(token, 'sendMessage', {
+  const sent = await visibleTelegramCall(token, 'sendMessage', options.strategy, {
     chat_id: target.chatId,
     ...payload,
-  });
+  }, options.ctx);
   const messageId = resultMessageId(sent);
 
   if (options.strategy === 'replace' && target.messageId) {
@@ -71,6 +74,23 @@ export async function renderTelegramScreen(
   }
 
   return { messageId };
+}
+
+async function visibleTelegramCall(
+  token: string,
+  method: string,
+  strategy: TelegramRenderStrategy,
+  body: Record<string, unknown>,
+  ctx?: TelegramScreenExecutionContext,
+): Promise<TelegramApiResponse> {
+  const timing = ctx?.telegramLatencyTiming;
+  timing?.describeRender(strategy, method);
+  timing?.mark('telegram_started');
+  const startedAt = Date.now();
+  const response = await telegramCall(token, method, body);
+  timing?.recordTelegramApi(Math.max(0, Date.now() - startedAt));
+  timing?.mark('screen_ready');
+  return response;
 }
 
 async function telegramCall(
