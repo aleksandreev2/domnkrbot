@@ -5,6 +5,8 @@ export interface RanobeLibTeamBookRef {
   url: string;
   title?: string | null;
   coverUrl?: string | null;
+  translationStatusId?: number | null;
+  translationStatusLabel?: string | null;
 }
 
 export interface RanobeLibTitle {
