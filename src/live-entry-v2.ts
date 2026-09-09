@@ -146,6 +146,12 @@ export default {
     }
 
     if (controller.cron === FALLBACK_DELIVERY_CRON) {
+      try {
+        const membership = await runChannelMembershipMaintenance(env, 40);
+        console.log('Channel membership fast backfill complete', membership);
+      } catch (error) {
+        console.error('Channel membership fast backfill failed', error);
+      }
       const delivery = await drainNotificationOutbox(env, { limit: DELIVERY_BATCH_LIMIT });
       console.log('Telegram notification fallback delivery complete', delivery);
       return;
