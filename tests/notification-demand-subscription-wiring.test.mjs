@@ -11,14 +11,28 @@ test('subscription runtime imports demand refresh and reachability helpers', () 
   assert.match(source, /refreshAllNotificationDemand/);
 });
 
-test('private subscription interactions reactivate a previously blocked Telegram user', () => {
+test('private subscription interactions reactivate a previously blocked Telegram user without blocking navigation', () => {
   const callbackStart = source.indexOf('export async function handleTelegramSubscriptionUpdate');
   const callbackEnd = source.indexOf('export async function sendTelegramSubscriptionMenu', callbackStart);
   const callbackBody = source.slice(callbackStart, callbackEnd > callbackStart ? callbackEnd : undefined);
-  assert.match(callbackBody, /const userId = String\(callback\.from\.id\);[\s\S]{0,300}await markTelegramUserReachable\(env, userId\)/);
 
-  const reachableCalls = (source.match(/await markTelegramUserReachable\(env, /g) || []).length;
-  assert.ok(reachableCalls >= 3, 'callback, subscriptions menu, and notification center should all reactivate reachability');
+  assert.match(
+    callbackBody,
+    /if \(navigation\) \{[\s\S]{0,160}deferNavigationBookkeeping\(env, callback\.from, ctx\)[\s\S]{0,160}\} else \{[\s\S]{0,160}await upsertTelegramUser\(env, callback\.from\);[\s\S]{0,160}await markTelegramUserReachable\(env, userId\);/,
+    'navigation should defer reachability bookkeeping while mutation routes keep it authoritative',
+  );
+
+  const helperStart = source.indexOf('async function deferNavigationBookkeeping');
+  const helperEnd = source.indexOf('async function upsertTelegramUser', helperStart);
+  const helperBody = source.slice(helperStart, helperEnd > helperStart ? helperEnd : undefined);
+  assert.match(helperBody, /markTelegramUserReachable\(env, userId\)/, 'deferred navigation bookkeeping must still reactivate reachability');
+  assert.match(helperBody, /ctx\.waitUntil\(pending\)/, 'navigation bookkeeping should leave the user-visible critical path when an execution context exists');
+
+  const menuStart = source.indexOf('export async function sendTelegramSubscriptionMenu');
+  const centerStart = source.indexOf('export async function sendTelegramNotificationCenter', menuStart);
+  const centerEnd = source.indexOf('export async function isEffectivelySubscribed', centerStart);
+  assert.match(source.slice(menuStart, centerStart), /deferNavigationBookkeeping\(env, user, ctx\)/);
+  assert.match(source.slice(centerStart, centerEnd), /deferNavigationBookkeeping\(env, user, ctx\)/);
 });
 
 test('single-title subscription mutations persist first and defer only that title demand refresh', () => {
