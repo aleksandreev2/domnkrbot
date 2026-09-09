@@ -132,7 +132,14 @@ export async function handleTelegramTitleProposalV2WebhookRequest(
       await setProposalInputActive(env, String(message.from.id), 0);
       await clearTransientNotificationInput(env, message.from.id);
     })();
-    await Promise.all([menuPromise, housekeepingPromise]);
+    if (ctx) {
+      ctx.waitUntil(housekeepingPromise.catch((error) => {
+        console.error('Telegram /start housekeeping failed', error);
+      }));
+      await menuPromise;
+    } else {
+      await Promise.all([menuPromise, housekeepingPromise]);
+    }
     return json({ ok: true });
   }
 
