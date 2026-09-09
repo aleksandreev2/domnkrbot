@@ -124,10 +124,13 @@ export async function handleTelegramTitleProposalV2WebhookRequest(
   const text = message?.text?.trim() ?? '';
   if (message?.chat?.type === 'private' && message.from && isPlainCommand(text, 'start')) {
     await ensureUxSchema(env);
-    await upsertTelegramUser(env, message.from);
-    await setProposalInputActive(env, String(message.from.id), 0);
-    await clearTransientNotificationInput(env, message.from.id);
-    await sendMessage(env, message.chat.id, buildMainMenu(origin));
+    const menuPromise = sendMessage(env, message.chat.id, buildMainMenu(origin));
+    const housekeepingPromise = (async () => {
+      await upsertTelegramUser(env, message.from);
+      await setProposalInputActive(env, String(message.from.id), 0);
+      await clearTransientNotificationInput(env, message.from.id);
+    })();
+    await Promise.all([menuPromise, housekeepingPromise]);
     return json({ ok: true });
   }
 
