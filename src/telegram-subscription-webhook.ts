@@ -9,10 +9,6 @@ import {
   handleTelegramNotificationModeUpdate,
 } from './telegram-notification-mode-runtime.js';
 import {
-  clearNotificationCustomInput,
-  ensureTelegramNotificationSettingsSchema,
-} from './telegram-notification-settings.js';
-import {
   handleNotificationSearchInput,
   handleTelegramNotificationUxUpdate,
   sendTelegramNotificationDashboard,
@@ -22,11 +18,6 @@ import {
   withTelegramSubscriptionCatalogDb,
 } from './telegram-subscription-catalog.js';
 import type { RanobeLibRuntimeEnv } from './ranobelib-runtime.js';
-import {
-  clearNotificationSearch,
-  ensureTelegramTextBotUxSchema,
-  setProposalInputActive,
-} from './telegram-text-bot-ux-schema.js';
 
 export type TelegramSubscriptionWebhookEnv = TelegramSubscriptionEnv & RanobeLibRuntimeEnv & {
   TELEGRAM_WEBHOOK_SECRET?: string;
@@ -88,15 +79,7 @@ export async function handleTelegramNotificationTextInputRequest(
   const text = (message?.text ?? '').trim();
   if (!message?.from || !message.chat?.id || message.chat.type !== 'private' || !text) return null;
 
-  if (text.startsWith('/')) {
-    await ensureTelegramNotificationSettingsSchema(env);
-    await ensureTelegramTextBotUxSchema(env);
-    const userId = String(message.from.id);
-    await setProposalInputActive(env, userId, 0);
-    await clearNotificationSearch(env, userId);
-    await clearNotificationCustomInput(env, userId);
-    return null;
-  }
+  if (text.startsWith('/')) return null;
 
   const subscriptionEnv = withTelegramSubscriptionCatalogDb(env);
   if (await handleNotificationCustomInput(update, subscriptionEnv)) return json({ ok: true });
