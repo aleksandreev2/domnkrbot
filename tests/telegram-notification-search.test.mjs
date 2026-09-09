@@ -298,16 +298,18 @@ test('completed search results are navigation state, not a continuing free-text 
   });
 });
 
-test('slash navigation exits every pending text capture before later handlers run', async () => {
+test('slash commands bypass notification text-capture prework and leave cleanup to the command owner', async () => {
   const db = new DB();
   db.searchState = { query: '', page: 0, returnScope: 'home', active: true };
   db.customInput = { scope: 'global', bookRef: null };
+  const beforeQueries = db.queries.length;
   await withTelegram(async (calls) => {
     const response = await handleTelegramNotificationTextInputRequest(messageRequest('/help'), env(db));
     assert.equal(response, null);
-    assert.equal(db.searchState, null);
-    assert.equal(db.customInput, null);
-    assert.equal(db.proposalInputActive, 0);
+    assert.deepEqual(db.searchState, { query: '', page: 0, returnScope: 'home', active: true });
+    assert.deepEqual(db.customInput, { scope: 'global', bookRef: null });
+    assert.equal(db.proposalInputActive, 1);
+    assert.equal(db.queries.length, beforeQueries);
     assert.equal(calls.length, 0);
   });
 });
