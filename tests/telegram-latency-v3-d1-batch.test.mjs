@@ -137,7 +137,7 @@ test('notification dashboard batches independent D1 reads into one network opera
   assert.match(queries, /COUNT\(\*\) AS count FROM title_subscriptions/);
 });
 
-test('notification title card batches subscription, delivery and pending-stack reads', async () => {
+test('notification title card batches subscription and delivery reads before conditional stack progress', async () => {
   const db = new DB();
   await withTelegram(async (calls) => {
     const handled = await handleTelegramNotificationUxUpdate(
@@ -151,11 +151,12 @@ test('notification title card batches subscription, delivery and pending-stack r
   });
 
   assert.equal(db.batchCalls, 1);
-  assert.equal(db.directFirstQueries.length, 1, 'only title lookup may remain outside the payload batch');
+  assert.equal(db.directFirstQueries.length, 2, 'title lookup and stack-only progress may remain outside the payload batch');
   assert.match(db.directFirstQueries[0], /FROM ranobelib_titles/);
+  assert.match(db.directFirstQueries[1], /SUM\(r.chapter_count\)/);
   const queries = db.batchQueries.flat().join('\n');
   assert.match(queries, /SELECT 1 AS subscribed FROM title_subscriptions/);
   assert.match(queries, /SELECT delivery_mode, stack_size FROM telegram_subscription_settings/);
   assert.match(queries, /FROM telegram_title_delivery_settings/);
-  assert.match(queries, /SUM\(r.chapter_count\)/);
+  assert.doesNotMatch(queries, /SUM\(r.chapter_count\)/);
 });
