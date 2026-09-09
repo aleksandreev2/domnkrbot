@@ -77,7 +77,7 @@ class DB {
     if (query.includes('COUNT(*) AS count FROM title_subscriptions')) return { count: 3 };
     if (query.includes('SELECT 1 AS subscribed FROM title_subscriptions')) return { subscribed: 1 };
     if (query.includes('SELECT 1 AS excluded FROM title_subscription_exclusions')) return null;
-    if (query.includes('SUM(r.chapter_count)')) return { count: 4 };
+    if (query.includes("release_kind = 'chapters'") && query.includes('r.chapter_count')) return { count: 4 };
     return null;
   }
 }
@@ -153,10 +153,10 @@ test('notification title card batches subscription and delivery reads before con
   assert.equal(db.batchCalls, 1);
   assert.equal(db.directFirstQueries.length, 2, 'title lookup and stack-only progress may remain outside the payload batch');
   assert.match(db.directFirstQueries[0], /FROM ranobelib_titles/);
-  assert.match(db.directFirstQueries[1], /SUM\(r.chapter_count\)/);
+  assert.match(db.directFirstQueries[1], /release_kind = 'chapters'/);
   const queries = db.batchQueries.flat().join('\n');
   assert.match(queries, /SELECT 1 AS subscribed FROM title_subscriptions/);
   assert.match(queries, /SELECT delivery_mode, stack_size FROM telegram_subscription_settings/);
   assert.match(queries, /FROM telegram_title_delivery_settings/);
-  assert.doesNotMatch(queries, /SUM\(r.chapter_count\)/);
+  assert.doesNotMatch(queries, /release_kind = 'chapters'/);
 });
