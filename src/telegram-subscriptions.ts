@@ -3,6 +3,7 @@ import {
   refreshAllNotificationDemand,
   refreshTitleNotificationDemand,
 } from './notification-demand.js';
+import { startCallbackAck, type ExecutionContextLike } from './telegram-fast-ack.js';
 
 export type TelegramInlineKeyboardButton = {
   text: string;
@@ -327,6 +328,7 @@ async function ensureDeliveryModeColumn(env: TelegramSubscriptionEnv): Promise<v
 export async function handleTelegramSubscriptionUpdate(
   update: TelegramSubscriptionUpdate,
   env: TelegramSubscriptionEnv,
+  ctx?: ExecutionContextLike,
 ): Promise<boolean> {
   const callback = update.callback_query;
   if (!callback?.data?.startsWith('subs:')) return false;
@@ -343,16 +345,16 @@ export async function handleTelegramSubscriptionUpdate(
     return true;
   }
 
+  if (parsed.kind === 'center') startCallbackAck(env, callback.id, ctx);
+
   await ensureTelegramSubscriptionSchema(env);
   await upsertTelegramUser(env, callback.from);
   const userId = String(callback.from.id);
   await markTelegramUserReachable(env, userId);
-  await refreshAllNotificationDemand(env);
 
   if (parsed.kind === 'center') {
     const center = buildNotificationCenter(await notificationCenterState(env, userId));
     await editTelegramMessage(env, callback.message.chat.id, callback.message.message_id, center);
-    await answerCallback(env, callback.id);
     return true;
   }
 
