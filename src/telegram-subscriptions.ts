@@ -160,6 +160,7 @@ export function parseSubscriptionCallback(value: string): SubscriptionCallback |
     const titleId = Number(match[2]);
     if (!Number.isSafeInteger(titleId) || titleId <= 0) return null;
     if (match[1] === 'toggle') return { kind: 'notify-toggle', titleId };
+    if (match[1] === 'notify-settings') return { kind: 'notify-settings', titleId };
     if (match[1] === 'settings') return { kind: 'notify-settings', titleId };
     return { kind: 'notify-panel-toggle', titleId };
   }
@@ -382,7 +383,11 @@ export async function handleTelegramSubscriptionUpdate(
     const before = await isEffectivelySubscribed(env, userId, title.book_ref);
     const enabled = !before;
     await setEffectiveTitleSubscription(env, userId, title.book_ref, enabled);
-    await refreshTitleNotificationDemand(env, title.book_ref);
+    await deferDemandMaintenance(
+      ctx,
+      () => refreshTitleNotificationDemand(env, title.book_ref),
+      'Targeted notification demand refresh failed',
+    );
 
     if (parsed.kind === 'notify-toggle') {
       await telegramCall(env, 'editMessageReplyMarkup', {
@@ -409,14 +414,22 @@ export async function handleTelegramSubscriptionUpdate(
     } else {
       const before = await isEffectivelySubscribed(env, userId, title.book_ref);
       await setEffectiveTitleSubscription(env, userId, title.book_ref, !before);
-      await refreshTitleNotificationDemand(env, title.book_ref);
+      await deferDemandMaintenance(
+        ctx,
+        () => refreshTitleNotificationDemand(env, title.book_ref),
+        'Targeted notification demand refresh failed',
+      );
       notice = before ? 'Уведомления для тайтла отключены.' : 'Уведомления для тайтла включены.';
     }
   } else if (parsed.kind === 'all') {
     if (parsed.mode === 'on') {
       await setAllTitles(env, userId, true);
       await env.DB.prepare('DELETE FROM title_subscription_exclusions WHERE user_telegram_id = ?').bind(userId).run();
-      await refreshAllNotificationDemand(env);
+      await deferDemandMaintenance(
+        ctx,
+        () => refreshAllNotificationDemand(env),
+        'Global notification demand refresh failed',
+      );
       notice = 'Уведомления обо всех переводах включены.';
     } else {
       await setAllTitles(env, userId, false);
@@ -424,7 +437,11 @@ export async function handleTelegramSubscriptionUpdate(
         env.DB.prepare('DELETE FROM title_subscriptions WHERE user_telegram_id = ?').bind(userId).run(),
         env.DB.prepare('DELETE FROM title_subscription_exclusions WHERE user_telegram_id = ?').bind(userId).run(),
       ]);
-      await refreshAllNotificationDemand(env);
+      await deferDemandMaintenance(
+        ctx,
+        () => refreshAllNotificationDemand(env),
+        'Global notification demand refresh failed',
+      );
       notice = 'Все уведомления отключены.';
     }
   }
@@ -752,6 +769,21 @@ async function answerCallback(env: TelegramSubscriptionEnv, callbackId: string, 
     callback_query_id: callbackId,
     ...(text ? { text } : {}),
   }).catch(() => undefined);
+}
+
+async function deferDemandMaintenance(
+  ctx: ExecutionContextLike | undefined,
+  task: () => Promise<unknown>,
+  label: string,
+): Promise<void> {
+  const pending = task();
+  if (ctx) {
+    ctx.waitUntil(pending.catch((error) => {
+      console.error(label, error);
+    }));
+    return;
+  }
+  await pending;
 }
 
 async function upsertTelegramUser(env: TelegramSubscriptionEnv, user: TelegramUser): Promise<void> {
