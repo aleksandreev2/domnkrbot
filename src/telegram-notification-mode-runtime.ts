@@ -27,6 +27,7 @@ import {
   ensureTelegramTextBotUxSchema,
   setProposalInputActive,
 } from './telegram-text-bot-ux-schema.js';
+import { startCallbackAck, type ExecutionContextLike } from './telegram-fast-ack.js';
 
 type NotificationQueueProducerLike = {
   send(message: { kind: 'drain' }): Promise<unknown> | unknown;
@@ -90,6 +91,7 @@ async function ensureModeSchema(env: TelegramNotificationModeEnv): Promise<void>
 export async function handleTelegramNotificationModeUpdate(
   update: TelegramUpdate,
   env: TelegramNotificationModeEnv,
+  ctx?: ExecutionContextLike,
 ): Promise<boolean> {
   const callback = update.callback_query;
   if (!callback?.data) return false;
@@ -99,6 +101,9 @@ export async function handleTelegramNotificationModeUpdate(
   const parsed = parseNotificationModeCallback(data);
   const titleSettingsMatch = /^subs:notify:settings:(\d+)$/.exec(data);
   if (data !== 'subs:center' && !parsed && !titleSettingsMatch) return false;
+
+  const customCallback = parsed?.action === 'custom';
+  if (customCallback) startCallbackAck(env, callback.id, ctx);
 
   await ensureModeSchema(env);
   await upsertTelegramUser(env, callback.from);
@@ -130,10 +135,10 @@ export async function handleTelegramNotificationModeUpdate(
 
   if (parsed.scope === 'global') {
     if (parsed.action === 'custom') {
+      if (!await claimCustomPromptCallback(env, callback.id)) return true;
       await clearNotificationSearch(env, userId);
       await beginNotificationCustomInput(env, userId, { scope: 'global' });
       await sendTelegramMessage(env, chatId, customPrompt());
-      await answerCallback(env, callback.id);
       return true;
     }
 
@@ -152,15 +157,15 @@ export async function handleTelegramNotificationModeUpdate(
 
   const title = await titleDetailsById(env, parsed.titleId);
   if (!title) {
-    await answerCallback(env, callback.id, 'Тайтл больше не доступен.');
+    if (!customCallback) await answerCallback(env, callback.id, 'Тайтл больше не доступен.');
     return true;
   }
 
   if (parsed.action === 'custom') {
+    if (!await claimCustomPromptCallback(env, callback.id)) return true;
     await clearNotificationSearch(env, userId);
     await beginNotificationCustomInput(env, userId, { scope: 'title', bookRef: title.book_ref });
     await sendTelegramMessage(env, chatId, customPrompt());
-    await answerCallback(env, callback.id);
     return true;
   }
 
@@ -232,6 +237,16 @@ export async function handleNotificationCustomInput(
     reply_markup: { inline_keyboard: [] },
   });
   return true;
+}
+
+async function claimCustomPromptCallback(env: TelegramNotificationModeEnv, callbackId: string): Promise<boolean> {
+  const id = String(callbackId ?? '').trim();
+  if (!id) return false;
+  const result = await env.DB.prepare(`
+    INSERT OR IGNORE INTO telegram_notification_callback_dedup (callback_query_id, created_at)
+    VALUES (?, CURRENT_TIMESTAMP)
+  `).bind(id).run();
+  return runChanges(result) > 0;
 }
 
 async function notificationCenterPayload(env: TelegramNotificationModeEnv, userId: string) {
@@ -407,4 +422,11 @@ async function telegramCall<T>(env: TelegramNotificationModeEnv, method: string,
 function positiveCount(value: unknown): number {
   const count = Number(value);
   return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+function runChanges(result: unknown): number {
+  if (!result || typeof result !== 'object') return 0;
+  const meta = (result as { meta?: { changes?: unknown } }).meta;
+  const changes = Number(meta?.changes ?? 0);
+  return Number.isFinite(changes) && changes > 0 ? Math.floor(changes) : 0;
 }

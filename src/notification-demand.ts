@@ -50,6 +50,7 @@ export async function refreshTitleNotificationDemand(
     UPDATE ranobelib_titles
     SET
       next_check_at = CASE
+        WHEN is_active = 0 OR translation_status_id = 2 THEN NULL
         WHEN notification_subscriber_count = 0
           AND (SELECT demand_count FROM demand) > 0
           THEN CURRENT_TIMESTAMP
@@ -59,12 +60,17 @@ export async function refreshTitleNotificationDemand(
         ELSE next_check_at
       END,
       scan_priority = CASE
-        WHEN notification_subscriber_count = 0
+        WHEN is_active = 1
+          AND COALESCE(translation_status_id, 0) <> 2
+          AND notification_subscriber_count = 0
           AND (SELECT demand_count FROM demand) > 0
           THEN scan_priority + 10
         ELSE scan_priority
       END,
-      notification_subscriber_count = (SELECT demand_count FROM demand),
+      notification_subscriber_count = CASE
+        WHEN is_active = 0 OR translation_status_id = 2 THEN 0
+        ELSE (SELECT demand_count FROM demand)
+      END,
       subscriber_count_updated_at = CURRENT_TIMESTAMP
     WHERE book_ref = ?
     RETURNING notification_subscriber_count

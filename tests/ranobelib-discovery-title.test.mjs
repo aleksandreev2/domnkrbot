@@ -3,7 +3,7 @@ import test from 'node:test';
 import { RanobeLibClient } from '../dist/index.js';
 import { ensureTelegramSubscriptionCatalog } from '../dist-runtime/telegram-subscription-catalog.js';
 
-const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&page=1';
+const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&fields[]=status_id&page=1';
 
 function catalogResponse() {
   return new Response(JSON.stringify({
@@ -13,6 +13,7 @@ function catalogResponse() {
       slug_url: '62387--pokemon-master-of-tactics',
       rus_name: 'Покемон: Мастер тактики',
       name: 'Pokemon: Master of Tactics',
+      scanlateStatus: { id: 1, label: 'Продолжается' },
       cover: {
         default: 'https://cover.cdnlibs.org/uploads/cover/pokemon-master-of-tactics/cover/default.jpg',
         thumbnail: 'https://cover.cdnlibs.org/uploads/cover/pokemon-master-of-tactics/cover/thumb.jpg',
@@ -22,7 +23,7 @@ function catalogResponse() {
   }), { headers: { 'content-type': 'application/json' } });
 }
 
-test('team discovery preserves title and cover metadata needed by one-request-per-title sync', async () => {
+test('team discovery preserves title, cover, and translation status metadata', async () => {
   const client = new RanobeLibClient({
     fetchImpl: async (url) => String(url) === teamCatalogUrl
       ? catalogResponse()
@@ -36,6 +37,8 @@ test('team discovery preserves title and cover metadata needed by one-request-pe
     books[0].coverUrl,
     'https://cover.cdnlibs.org/uploads/cover/pokemon-master-of-tactics/cover/default.jpg',
   );
+  assert.equal(books[0].translationStatusId, 1);
+  assert.equal(books[0].translationStatusLabel, 'Продолжается');
 });
 
 class Statement {
@@ -95,6 +98,7 @@ test('Telegram catalog bootstrap stores the discovered title before chapter snap
     assert.equal(count, 1);
     assert.equal(db.titleInserts.length, 1);
     assert.match(db.titleInserts[0].query, /\btitle\b/);
+    assert.match(db.titleInserts[0].query, /translation_status_id/);
     assert.ok(db.titleInserts[0].values.includes('Покемон: Мастер тактики'));
   });
 });

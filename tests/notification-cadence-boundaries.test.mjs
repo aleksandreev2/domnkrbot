@@ -22,3 +22,5 @@ test('adaptive HOT cadence uses the frozen one-hour and six-hour activity window
   assert.equal(delay('2026-09-07T02:59:00.000Z', 1), 10, '6h01 old falls back to stale 10-minute cadence');
   assert.equal(delay('2026-09-07T02:59:00.000Z', 3), 30, 'stable stale title uses 30-minute cadence');
 });
+
+await import('./completed-translations-lifecycle.test.mjs');

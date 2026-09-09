@@ -10,6 +10,7 @@ import {
   type DeliveryGroup,
 } from './telegram-notification-delivery-groups.js';
 import { formatReleaseNotification } from './telegram-subscriptions.js';
+import { formatTranslationCompletionNotification } from './telegram-translation-completion.js';
 
 export {
   aggregateClaimedDeliveryRows,
@@ -168,8 +169,9 @@ async function selectReadyDeliveryGroups(
         SELECT
           o.user_telegram_id,
           r.book_ref,
-          SUM(r.chapter_count) AS pending_chapters,
+          SUM(CASE WHEN r.release_kind = 'chapters' THEN r.chapter_count ELSE 0 END) AS pending_chapters,
           MIN(o.created_at) AS oldest_pending_at,
+          MAX(CASE WHEN r.release_kind = 'translation_completed' THEN 1 ELSE 0 END) AS translation_completed,
           MAX(CASE
             WHEN o.status = 'retry' AND o.available_at > CURRENT_TIMESTAMP THEN 1
             ELSE 0
@@ -221,6 +223,7 @@ async function selectReadyDeliveryGroups(
         AND grouped.retry_blocked = 0
         AND (
           grouped.eligible = 0
+          OR grouped.translation_completed = 1
           OR grouped.delivery_mode <> 'stack'
           OR grouped.stack_size IS NULL
           OR grouped.stack_size < 2
@@ -285,7 +288,7 @@ async function loadClaimedDeliveryRows(
     SELECT o.release_id, o.user_telegram_id, o.status, o.attempts,
            r.book_ref, t.ranobelib_id,
            COALESCE(t.title, r.title_snapshot) AS title, t.url,
-           r.chapter_count, r.first_volume, r.first_number, r.last_volume, r.last_number, r.summary,
+           r.release_kind, r.chapter_count, r.first_volume, r.first_number, r.last_volume, r.last_number, r.summary,
            CASE WHEN (
              (
                EXISTS (
@@ -338,16 +341,24 @@ async function deliverGroup(
   group: DeliveryGroup<DeliveryRow>,
 ): Promise<DeliveryOutcome> {
   const titleId = Number(group.titleId);
-  const firstRow = group.members[0]!;
-  const payload = formatReleaseNotification({
-    ...(Number.isSafeInteger(titleId) && titleId > 0 ? { titleId, subscribed: true } : {}),
-    title: group.title,
-    url: group.chapterCount === 1 ? releaseReadUrl(firstRow) : group.titleUrl,
-    chapterCount: group.chapterCount || 1,
-    firstNumber: group.firstNumber,
-    lastNumber: group.lastNumber,
-    summary: group.summary,
-  });
+  const firstChapterRow = group.members.find((row) => row.release_kind !== 'translation_completed') ?? group.members[0]!;
+  const payload = group.translationCompleted
+    ? formatTranslationCompletionNotification({
+      title: group.title,
+      url: group.titleUrl,
+      chapterCount: group.chapterCount,
+      firstNumber: group.firstNumber,
+      lastNumber: group.lastNumber,
+    })
+    : formatReleaseNotification({
+      ...(Number.isSafeInteger(titleId) && titleId > 0 ? { titleId, subscribed: true } : {}),
+      title: group.title,
+      url: group.chapterCount === 1 ? releaseReadUrl(firstChapterRow) : group.titleUrl,
+      chapterCount: group.chapterCount || 1,
+      firstNumber: group.firstNumber,
+      lastNumber: group.lastNumber,
+      summary: group.summary,
+    });
 
   try {
     await telegramCall(env, 'sendMessage', {

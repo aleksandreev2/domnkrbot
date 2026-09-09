@@ -162,7 +162,7 @@ test('delivery uses grouped readiness plus claimed-row eligibility without per-u
   const claimedRowsQuery = db.deliverySelects.find((item) => /r\.first_volume/i.test(item.query))?.query;
   assert.ok(readinessQuery, 'delivery must select bounded ready user-title groups first');
   assert.ok(claimedRowsQuery, 'delivery must load claimed release metadata after group claim');
-  assert.match(readinessQuery, /SUM\s*\(\s*r\.chapter_count\s*\)/i);
+  assert.match(readinessQuery, /SUM\s*\(\s*CASE\s+WHEN\s+r\.release_kind\s*=\s*'chapters'\s+THEN\s+r\.chapter_count\s+ELSE\s+0\s+END\s*\)/i);
   assert.match(readinessQuery, /telegram_title_delivery_settings/i);
   assert.match(readinessQuery, /title_subscription_exclusions/i);
   assert.match(readinessQuery, /title_subscriptions/i);
