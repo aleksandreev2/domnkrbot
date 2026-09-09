@@ -133,10 +133,10 @@ async function openAppeal(env: ChannelMembershipAppealEnv, userId: number | stri
     ORDER BY created_at DESC LIMIT 1`).bind(String(userId)).first<AppealRow>();
 }
 
-async function appealById(env: ChannelMembershipAppealEnv, appealId: string): Promise<AppealRow | null> {
+async function appealById(env: ChannelMembershipAppealEnv, appealIdValue: string): Promise<AppealRow | null> {
   await ensureAppealSchema(env);
   return env.DB.prepare(`SELECT id,user_telegram_id,status,user_comment,admin_comment,submitted_at,resolved_at,resolved_by,created_at
-    FROM channel_membership_appeals WHERE id=?`).bind(appealId).first<AppealRow>();
+    FROM channel_membership_appeals WHERE id=?`).bind(appealIdValue).first<AppealRow>();
 }
 
 function appealId(): string {
@@ -343,17 +343,20 @@ async function handleAppealCallback(env: ChannelMembershipAppealEnv, callback: T
   }
   const decision = /^membership:appeal:(approve|reject):(ap-[a-z0-9]+|[A-Za-z0-9_-]+)$/.exec(data);
   if (!decision) return null;
+  const action = decision[1];
+  const targetAppealId = decision[2];
+  if (!action || !targetAppealId) return null;
   if (!isAdminUser(env, callback.from)) {
     await answerCallback(env, callback.id, 'Недостаточно прав.');
     return new Response('ok');
   }
-  const row = await appealById(env, decision[2]);
+  const row = await appealById(env, targetAppealId);
   if (!row) {
     await answerCallback(env, callback.id, 'Апелляция не найдена.');
     return new Response('ok');
   }
-  const result = await resolveAppeal(env, row, decision[1] === 'approve' ? 'approved' : 'rejected', callback.from.id);
-  await answerCallback(env, callback.id, result.ok ? (decision[1] === 'approve' ? 'Блокировка снята.' : 'Апелляция отклонена.') : result.error || 'Не удалось обработать.');
+  const result = await resolveAppeal(env, row, action === 'approve' ? 'approved' : 'rejected', callback.from.id);
+  await answerCallback(env, callback.id, result.ok ? (action === 'approve' ? 'Блокировка снята.' : 'Апелляция отклонена.') : result.error || 'Не удалось обработать.');
   if (result.ok && callback.message?.chat?.id && callback.message.message_id) {
     await telegramCall(env, 'editMessageReplyMarkup', {
       chat_id: callback.message.chat.id,
