@@ -125,7 +125,7 @@ test('completion makes a partial stack ready and does not count the synthetic ev
 });
 
 test('completion notification combines pending chapters with the final status', async () => {
-  const { formatTranslationCompletionNotification } = await import('../dist-runtime/telegram-subscriptions.js');
+  const { formatTranslationCompletionNotification } = await import('../dist-runtime/telegram-translation-completion.js');
   const payload = formatTranslationCompletionNotification({
     title: 'Книга 1',
     url: 'https://ranobelib.me/ru/book/1000--one',
