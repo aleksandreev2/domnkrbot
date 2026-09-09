@@ -4,54 +4,50 @@ import test from 'node:test';
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 
-function section(source, startMarker, endMarker) {
-  const start = source.indexOf(startMarker);
-  assert.notEqual(start, -1, `missing start marker: ${startMarker}`);
-  const end = endMarker ? source.indexOf(endMarker, start + startMarker.length) : source.length;
-  return source.slice(start, end === -1 ? source.length : end);
-}
+test('trusted Telegram DB absorbs migration DDL before it reaches the real D1 binding', async () => {
+  const { withTrustedTelegramMigrations } = await import('../dist-runtime/telegram-migration-trust.js');
+  const queries = [];
+  const realDb = {
+    prepare(query) {
+      queries.push(query);
+      return {
+        bind() { return this; },
+        async run() { return { success: true }; },
+        async first() { return null; },
+        async all() { return { results: [] }; },
+      };
+    },
+  };
+  const env = { DB: realDb, value: 7 };
+  const trusted = withTrustedTelegramMigrations(env);
 
-test('proposal webhook interactions never run runtime schema repair before Telegram output', async () => {
-  const source = await read('src/telegram-title-proposals-v2.ts');
-  const interactive = section(source, 'export async function handleTelegramTitleProposalV2WebhookRequest', 'async function ensureUxSchema');
-  assert.doesNotMatch(interactive, /await ensureUxSchema\(env\)/);
-  assert.match(source, /async function ensureUxSchema/, 'explicit repair helper may remain available outside the hot path');
+  await trusted.DB.prepare('CREATE TABLE IF NOT EXISTS x (id INTEGER)').run();
+  await trusted.DB.prepare('CREATE INDEX IF NOT EXISTS idx_x ON x(id)').run();
+  await trusted.DB.prepare('ALTER TABLE x ADD COLUMN name TEXT').run();
+  await trusted.DB.prepare('SELECT 1').first();
+
+  assert.deepEqual(queries, ['SELECT 1']);
+  assert.equal(trusted.value, 7);
+  assert.equal(trusted.DB === realDb, false);
 });
 
-test('legacy subscription navigation and mutation handlers do not run subscription DDL', async () => {
-  const source = await read('src/telegram-subscriptions.ts');
-  const updateHandler = section(source, 'export async function handleTelegramSubscriptionUpdate', 'export async function sendTelegramSubscriptionMenu');
-  const menuHandler = section(source, 'export async function sendTelegramSubscriptionMenu', 'export async function sendTelegramNotificationCenter');
-  const centerHandler = section(source, 'export async function sendTelegramNotificationCenter', 'export async function');
-  for (const body of [updateHandler, menuHandler, centerHandler]) {
-    assert.doesNotMatch(body, /await ensureTelegramSubscriptionSchema\(env\)/);
-  }
-  assert.match(source, /export async function ensureTelegramSubscriptionSchema/, 'repair helper remains for explicit maintenance/tests');
+test('trusted Telegram DB proxy is stable per real D1 binding so existing schema caches stay warm', async () => {
+  const { withTrustedTelegramMigrations } = await import('../dist-runtime/telegram-migration-trust.js');
+  const db = { prepare() { throw new Error('unused'); } };
+  const first = withTrustedTelegramMigrations({ DB: db });
+  const second = withTrustedTelegramMigrations({ DB: db });
+  assert.equal(first.DB, second.DB);
 });
 
-test('notification UX callbacks, text input and dashboard never run aggregate schema repair', async () => {
-  const source = await read('src/telegram-notification-ux-runtime.ts');
-  const callbackHandler = section(source, 'export async function handleTelegramNotificationUxUpdate', 'export async function handleNotificationSearchInput');
-  const searchHandler = section(source, 'export async function handleNotificationSearchInput', 'export async function sendTelegramNotificationDashboard');
-  const dashboardHandler = section(source, 'export async function sendTelegramNotificationDashboard', 'async function dashboardPayload');
-  assert.doesNotMatch(callbackHandler, /await ensureNotificationUxSchema\(env\)/);
-  assert.doesNotMatch(searchHandler, /await ensureTelegramTextBotUxSchema\(env\)/);
-  assert.doesNotMatch(dashboardHandler, /await ensureNotificationUxSchema\(env\)/);
-  assert.match(source, /async function ensureNotificationUxSchema/, 'repair helper may remain outside interactive handlers');
+test('production Telegram dispatcher passes migration-trusted env only to interactive app routes', async () => {
+  const source = await read('src/live-entry-v2.ts');
+  assert.match(source, /withTrustedTelegramMigrations/);
+  assert.match(source, /case 'notifications':[\s\S]*?withTrustedTelegramMigrations\(env\)/);
+  assert.match(source, /case 'proposal':[\s\S]*?withTrustedTelegramMigrations\(env\)/);
+  assert.match(source, /case 'generic-private-text':[\s\S]*?withTrustedTelegramMigrations\(env\)/);
 });
 
-test('notification delivery-mode callbacks, command and custom input never run mode schema repair', async () => {
-  const source = await read('src/telegram-notification-mode-runtime.ts');
-  const callbackHandler = section(source, 'export async function handleTelegramNotificationModeUpdate', 'export async function sendTelegramDeliveryModeCenter');
-  const commandHandler = section(source, 'export async function sendTelegramDeliveryModeCenter', 'export async function handleNotificationCustomInput');
-  const inputHandler = section(source, 'export async function handleNotificationCustomInput', 'async function notificationCenterPayload');
-  for (const body of [callbackHandler, commandHandler, inputHandler]) {
-    assert.doesNotMatch(body, /await ensureModeSchema\(env\)/);
-  }
-  assert.match(source, /async function ensureModeSchema/, 'repair helper remains available outside interactive handlers');
-});
-
-test('production migrations own the schemas that interactive handlers now assume exist', async () => {
+test('production migrations own the schemas that trusted interactive handlers assume exist', async () => {
   const migrations = await Promise.all([
     'migrations/0011_ranobelib_telegram_subscriptions.sql',
     'migrations/0012_telegram_notifications_v2.sql',
