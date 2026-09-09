@@ -136,6 +136,9 @@ async function withTelegramCalls(fn) {
 }
 
 const flatButtons = (call) => call.payload.reply_markup.inline_keyboard.flat();
+const latestVisibleCall = (calls) => [...calls].reverse().find((call) => (
+  call.method === 'sendMessage' || call.method === 'editMessageText'
+));
 
 test('v2 /start renders the neutral root menu without a skull', async () => {
   const { handleTelegramTitleProposalV2WebhookRequest } = await loadRuntime();
@@ -174,9 +177,9 @@ test('prop:new offers to resume a meaningful draft instead of resetting it and p
     assert.equal(response?.status, 200);
     assert.equal(state.DB.runs.some((run) => run.query.includes('INSERT INTO telegram_proposal_sessions')), false);
     assert.equal(state.DB.session.input_active, 0);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /незавершённая заявка/i);
-    const callbacks = flatButtons(edit).map((button) => button.callback_data);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /незавершённая заявка/i);
+    const callbacks = flatButtons(visible).map((button) => button.callback_data);
     assert.ok(callbacks.includes('prop:resume'));
     assert.ok(callbacks.includes('prop:cancel'));
     assert.ok(callbacks.includes('prop:home'));
@@ -197,8 +200,8 @@ test('Home pauses the current draft so later free text cannot mutate it', async 
     assert.equal(state.DB.runs.some((run) => run.query.includes('DELETE FROM telegram_proposal_sessions')), false);
     assert.equal(state.DB.session, originalSession);
     assert.equal(state.DB.session.input_active, 0);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /Дом Некроманта/);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /Дом Некроманта/);
   });
 
   await withTelegramCalls(async (calls) => {
@@ -222,8 +225,8 @@ test('Resume reactivates a paused draft and the next valid input advances it', a
     const response = await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:resume'), state);
     assert.equal(response?.status, 200);
     assert.equal(state.DB.session.input_active, 1);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /Шаг 2 из 5/);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /Шаг 2 из 5/);
   });
 
   await withTelegramCalls(async (calls) => {
@@ -241,7 +244,7 @@ test('Resume renders the stored phase and Back moves one logical step without de
   const state = env(original);
   await withTelegramCalls(async (calls) => {
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:resume'), state);
-    const resume = calls.find((call) => call.method === 'editMessageText');
+    const resume = latestVisibleCall(calls);
     assert.match(resume.payload.text, /Шаг 4 из 5/);
     assert.match(resume.payload.text, /Комментарий/);
   });
@@ -251,9 +254,9 @@ test('Resume renders the stored phase and Back moves one logical step without de
     assert.equal(state.DB.session.title, 'Сохранённый тайтл');
     assert.equal(state.DB.session.comment, 'Черновик');
     assert.equal(state.DB.runs.some((run) => run.query.includes('DELETE FROM telegram_proposal_sessions')), false);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /Шаг 3 из 5/);
-    assert.match(edit.payload.text, /RAW/);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /Шаг 3 из 5/);
+    assert.match(visible.payload.text, /RAW/);
   });
 });
 
@@ -265,16 +268,16 @@ test('meaningful draft cancellation pauses input, requires confirmation and only
     assert.ok(state.DB.session);
     assert.equal(state.DB.session.input_active, 0);
     assert.equal(state.DB.runs.some((run) => run.query.includes('DELETE FROM telegram_proposal_sessions')), false);
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /Удалить черновик заявки/);
-    const callbacks = flatButtons(edit).map((button) => button.callback_data);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /Удалить черновик заявки/);
+    const callbacks = flatButtons(visible).map((button) => button.callback_data);
     assert.ok(callbacks.includes('prop:cancel:confirm'));
     assert.ok(callbacks.includes('prop:cancel:keep'));
   });
   await withTelegramCalls(async (calls) => {
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:cancel:keep'), state);
     assert.equal(state.DB.session.input_active, 1);
-    assert.ok(calls.some((call) => call.method === 'editMessageText'));
+    assert.ok(latestVisibleCall(calls));
   });
   await withTelegramCalls(async () => {
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:cancel'), state);
@@ -290,10 +293,10 @@ test('source choice uses visible phase 2 and safe navigation buttons', async () 
   await withTelegramCalls(async (calls) => {
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:source:external'), state);
     assert.equal(state.DB.session.step, 'external_title');
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /Шаг 2 из 5/);
-    assert.match(edit.payload.text, /название новеллы/i);
-    const callbacks = flatButtons(edit).map((button) => button.callback_data);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /Шаг 2 из 5/);
+    assert.match(visible.payload.text, /название новеллы/i);
+    const callbacks = flatButtons(visible).map((button) => button.callback_data);
     assert.ok(callbacks.includes('prop:back'));
     assert.ok(callbacks.includes('prop:home'));
     assert.ok(callbacks.includes('prop:cancel'));
@@ -331,8 +334,8 @@ test('skipping comment enters visible review phase 5', async () => {
   await withTelegramCalls(async (calls) => {
     await handleTelegramTitleProposalV2WebhookRequest(callbackRequest('prop:comment:skip'), state);
     assert.equal(state.DB.session.step, 'review');
-    const edit = calls.find((call) => call.method === 'editMessageText');
-    assert.match(edit.payload.text, /Шаг 5 из 5/);
-    assert.match(edit.payload.text, /Проверка заявки/);
+    const visible = latestVisibleCall(calls);
+    assert.match(visible.payload.text, /Шаг 5 из 5/);
+    assert.match(visible.payload.text, /Проверка заявки/);
   });
 });
