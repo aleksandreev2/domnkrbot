@@ -106,7 +106,7 @@ export async function handleTelegramTeamNotification(
   if (titleModeSet) {
     const teamId = positiveInt(titleModeSet[1]);
     const titleId = positiveInt(titleModeSet[2]);
-    const choice = titleModeSet[3];
+    const choice = titleModeSet[3] ?? 'i';
     const origin = titleModeSet[4] as TeamNotificationOrigin;
     const page = safePage(titleModeSet[5]);
     const translation = await getTranslation(env, userId, teamId, titleId);
