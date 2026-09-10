@@ -14,6 +14,14 @@ async function discovery() {
   return import('../dist-runtime/ranobelib-multi-team-discovery.js');
 }
 
+async function teamCopy() {
+  return import('../dist-runtime/telegram-notification-team-copy.js');
+}
+
+async function completion() {
+  return import('../dist-runtime/telegram-translation-completion.js');
+}
+
 test('team-title subscription precedence is exclusion > team > explicit > none', async () => {
   const { resolveTeamTitleSubscription } = await subscriptions();
 
@@ -82,4 +90,31 @@ test('team-aware demand unions eligible users and preserves delivered history du
   assert.match(source, /INSERT OR IGNORE INTO ranobelib_notification_outbox/i);
   assert.match(source, /status IN \('pending',\s*'retry'\)/i);
   assert.doesNotMatch(source, /DELETE FROM ranobelib_notification_outbox[\s\S]*status\s*=\s*'sent'/i);
+});
+
+test('translator copy deduplicates teams, keeps primary first and escapes names through caller', async () => {
+  const { normalizeNotificationTeamNames, notificationTranslatorLine } = await teamCopy();
+  const names = normalizeNotificationTeamNames(['Team X', 'дом некроманта', 'Team X', '  <Y>  ']);
+  assert.deepEqual(names, ['дом некроманта', '<Y>', 'Team X']);
+  const line = notificationTranslatorLine(names, (value) => value.replaceAll('<', '&lt;').replaceAll('>', '&gt;'));
+  assert.match(line, /^Перевод команд:/);
+  assert.match(line, /«дом некроманта»/);
+  assert.match(line, /«&lt;Y&gt;»/);
+  assert.equal((line.match(/Team X/g) ?? []).length, 1);
+});
+
+test('completion notification supports joint translators and legacy primary-team fallback', async () => {
+  const { formatTranslationCompletionNotification } = await completion();
+  const joint = formatTranslationCompletionNotification({
+    title: 'Книга', url: 'https://example.com', chapterCount: 1,
+    firstNumber: '10', lastNumber: '10', teamNames: ['Дом Некроманта', 'Team <X>'],
+  });
+  assert.match(joint.text, /Дом Некроманта/);
+  assert.match(joint.text, /Team &lt;X&gt;/);
+
+  const legacy = formatTranslationCompletionNotification({
+    title: 'Книга', url: 'https://example.com', chapterCount: 0,
+    firstNumber: null, lastNumber: null,
+  });
+  assert.match(legacy.text, /Перевод команды «Дом Некроманта»/);
 });
