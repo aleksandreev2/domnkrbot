@@ -4,7 +4,8 @@ import test from 'node:test';
 
 import { aggregateClaimedDeliveryRows } from '../dist-runtime/telegram-notification-delivery-groups.js';
 
-const deliverySource = readFileSync(new URL('../src/telegram-notification-delivery.ts', import.meta.url), 'utf8');
+const deliverySource = readFileSync(new URL('../src/telegram-multi-team-delivery.ts', import.meta.url), 'utf8');
+const entrySource = readFileSync(new URL('../src/live-entry-v3.ts', import.meta.url), 'utf8');
 const scannerSource = readFileSync(new URL('../src/ranobelib-multi-team-scanner.ts', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../migrations/0026_multi_team_delivery_scope.sql', import.meta.url), 'utf8');
 
@@ -44,13 +45,21 @@ test('successive releases from one branch can stack while joint translator names
   assert.equal(groups[0].chapterCount, 2);
 });
 
-test('live delivery derives eligibility and delivery mode from release teams plus team-title overrides', () => {
-  assert.match(deliverySource, /getMultiTeamRollout/);
+test('live multi-team drain derives eligibility and delivery mode from release teams plus team-title overrides', () => {
   assert.match(deliverySource, /ranobelib_release_teams/);
   assert.match(deliverySource, /telegram_team_title_delivery_settings/);
   assert.match(deliverySource, /telegram_team_title_exclusions/);
   assert.match(deliverySource, /delivery_scope_key/);
   assert.match(deliverySource, /teamNames/);
+});
+
+test('v3 entry switches queue and fallback cron to the multi-team drain only when delivery rollout is enabled', () => {
+  assert.match(entrySource, /getMultiTeamRollout/);
+  assert.match(entrySource, /drainMultiTeamNotificationOutbox/);
+  assert.match(entrySource, /ranobelib_multi_team_delivery|rollout\.delivery/);
+  assert.match(entrySource, /\*\/5 \* \* \* \*/);
+  assert.match(entrySource, /previous\.queue/);
+  assert.match(entrySource, /previous\.scheduled/);
 });
 
 test('stable branch release identity feeds additive delivery-scope migration', () => {
