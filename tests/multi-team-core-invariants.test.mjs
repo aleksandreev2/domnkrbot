@@ -22,6 +22,14 @@ async function completion() {
   return import('../dist-runtime/telegram-translation-completion.js');
 }
 
+async function renderer() {
+  return import('../dist-runtime/multi-team-notification-render.js');
+}
+
+async function catalog() {
+  return import('../dist-runtime/telegram-team-catalog.js');
+}
+
 test('team-title subscription precedence is exclusion > team > explicit > none', async () => {
   const { resolveTeamTitleSubscription } = await subscriptions();
 
@@ -117,4 +125,30 @@ test('completion notification supports joint translators and legacy primary-team
     firstNumber: null, lastNumber: null,
   });
   assert.match(legacy.text, /Перевод команды «Дом Некроманта»/);
+});
+
+test('team-aware chapter renderer emits translator line exactly once', async () => {
+  const { formatTeamAwareReleaseNotification } = await renderer();
+  const payload = formatTeamAwareReleaseNotification({
+    title: 'Книга', url: 'https://example.com', chapterCount: 1,
+    firstNumber: '7', lastNumber: '7', summary: 'Chapter 7',
+    teamNames: ['Дом Некроманта', 'Team X'],
+  });
+  assert.equal((payload.text.match(/Перевод команд:/g) ?? []).length, 1);
+  assert.equal((payload.text.match(/Дом Некроманта/g) ?? []).length, 1);
+  assert.equal((payload.text.match(/Team X/g) ?? []).length, 1);
+});
+
+test('search grouping keeps one work with multiple independent team translations', async () => {
+  const { groupTeamTranslationSearch } = await catalog();
+  const base = {
+    ranobelibId: 10, bookRef: '10--book', title: 'Книга', url: 'https://example.com',
+    semanticStatus: 'active', enabled: true, enabledReason: 'explicit',
+  };
+  const groups = groupTeamTranslationSearch([
+    { ...base, teamId: 1, teamName: 'Дом Некроманта', teamIsPrimary: true },
+    { ...base, teamId: 2, teamName: 'Team X', teamIsPrimary: false },
+  ]);
+  assert.equal(groups.length, 1);
+  assert.deepEqual(groups[0].translations.map((row) => row.teamId), [1, 2]);
 });
