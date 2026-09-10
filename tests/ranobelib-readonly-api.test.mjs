@@ -30,10 +30,15 @@ test('public RanobeLib feed and release count exclude lifecycle-only completion 
   const homeEnd = runtime.indexOf('\n/**', homeStart);
   assert.ok(homeStart >= 0 && homeEnd > homeStart, 'getRanobeLibHome must remain inspectable');
   const home = runtime.slice(homeStart, homeEnd);
-  const chapterOnlyFilters = home.match(/release_kind\s*=\s*'chapters'/g) ?? [];
 
-  assert.ok(chapterOnlyFilters.length >= 2, 'both the public release feed and release count must be chapter-only');
-  assert.doesNotMatch(home, /\(SELECT COUNT\(\*\) FROM ranobelib_releases\) AS releases/);
+  const countsStart = runtime.indexOf('async function getCounts');
+  const countsEnd = runtime.indexOf('\nasync function getSchedulerState', countsStart);
+  assert.ok(countsStart >= 0 && countsEnd > countsStart, 'getCounts must remain inspectable');
+  const counts = runtime.slice(countsStart, countsEnd);
+
+  assert.match(home, /r\.release_kind\s*=\s*'chapters'/, 'public release cards must be chapter-only');
+  assert.match(counts, /FROM ranobelib_releases WHERE release_kind\s*=\s*'chapters'/, 'public release count must be chapter-only');
+  assert.doesNotMatch(counts, /\(SELECT COUNT\(\*\) FROM ranobelib_releases\) AS releases/);
 });
 
 test('legacy circular crawler is removed from RanobeLib runtime', () => {
