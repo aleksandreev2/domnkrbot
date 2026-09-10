@@ -56,8 +56,17 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
     books.filter((book) => inferTranslationCompleted(book) !== true).map((book) => book.ref),
   );
 
+  // A title missing from the authoritative team catalog becomes a dormant archive row. Keep
+  // history and user subscriptions intact so discovery can reactivate it later, but clear stale
+  // scanner state: it is no longer an actionable sync failure while it is outside the team.
   await env.DB.prepare(`
-    UPDATE ranobelib_titles SET is_active = 0
+    UPDATE ranobelib_titles SET
+      is_active = 0,
+      next_check_at = NULL,
+      notification_subscriber_count = 0,
+      subscriber_count_updated_at = CURRENT_TIMESTAMP,
+      consecutive_failures = 0,
+      sync_error = NULL
     WHERE is_active = 1
       AND book_ref NOT IN (
         SELECT CAST(value AS TEXT) FROM json_each(?)
