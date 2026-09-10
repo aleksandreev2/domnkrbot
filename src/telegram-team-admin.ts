@@ -197,8 +197,20 @@ export async function handleTelegramTeamAdmin(
     if (!team) return true;
     if (action === 'publish' && !team.isPrimary) await setRanobeLibTeamLifecycle(env, teamId, 'published');
     if (action === 'pause' && !team.isPrimary) await setRanobeLibTeamLifecycle(env, teamId, 'paused');
-    if (action === 'resume' && !team.isPrimary) await setRanobeLibTeamLifecycle(env, teamId, 'hidden');
-    if (action === 'sync' || action === 'resume') {
+    if (action === 'resume' && !team.isPrimary && team.lifecycleState === 'paused') {
+      await setRanobeLibTeamLifecycle(env, teamId, 'hidden');
+      const runnable = await getRanobeLibTeamById(env, teamId);
+      if (runnable) {
+        try {
+          await discoverOneRegisteredTeam(env, runnable);
+          await setRanobeLibTeamLifecycle(env, teamId, 'published');
+        } catch (error) {
+          await env.DB.prepare(`UPDATE ranobelib_teams SET lifecycle_state='error', last_sync_error=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`)
+            .bind(compactError(error), teamId).run();
+        }
+      }
+    }
+    if (action === 'sync') {
       const runnable = await getRanobeLibTeamById(env, teamId);
       if (runnable) {
         try {
