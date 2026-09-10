@@ -351,9 +351,15 @@ The existing `channel-membership-access` behavior for Дом Некромант�
 
 ## Delivery modes
 
-Preserve the current user-wide default delivery mode and per-title override concept, but per-title overrides must become team-title scoped so two translations of the same work can be configured independently.
+Approved rule: there is no team-wide delivery-mode override.
 
-A per-team delivery-mode override is **not yet approved** and should not be added unless the UX discussion explicitly decides it is needed.
+The hierarchy stays intentionally simple:
+
+1. the user's global delivery mode is the default for every followed team and title;
+2. a specific `(team, work)` translation may override that global mode;
+3. there is no intermediate per-team delivery mode.
+
+Per-title overrides must therefore become team-title scoped so two translations of the same work can still be configured independently. Following an entire team changes subscription scope only; it does not introduce another delivery-settings layer.
 
 ## Historical data and migration safety
 
@@ -401,6 +407,7 @@ Implementation should use TDD and add focused tests for at least:
 - publication-channel isolation and prohibition of writes to external recommendation channels;
 - existing publication/download membership behavior remaining unchanged;
 - delivery-mode migration and team-title scoping;
+- global delivery mode applying to team subscriptions while team-title overrides take precedence;
 - notification outbox deduplication/idempotency.
 
 ## Approved decisions summary
@@ -422,13 +429,13 @@ Implementation should use TDD and add focused tests for at least:
 - External team channels are completely isolated from publication/channel-write infrastructure.
 - New onboarding is shown to new users and existing users with no notification subscriptions; existing subscribed users skip it.
 - Onboarding completes only after choosing at least one team or explicitly selecting `Не сейчас`; abandoned flows are retried on the next normal `/start`.
+- Delivery mode has only two levels: global user default and optional team-title override; there is no team-wide override.
 
 ## Open decisions before the final implementation plan
 
-1. Whether a whole-team subscription should allow a team-wide delivery-mode override, or only global default + team-title override.
-2. Exact admin flow for attaching/verifying an optional Telegram recommendation channel (`@username`, numeric chat ID, forwarded channel message, or supported combination).
-3. Exact status semantics for a team translation when RanobeLib's title-level `scanlateStatus` is not team-specific; completion must not be falsely attributed to every team without evidence.
-4. Stable RanobeLib branch identity: use a native branch ID if reliably exposed; otherwise define and test a stable fingerprint.
-5. How completed translations appear in the multi-team user catalog and whether completed titles are shown by default inside a team's page.
-6. Whether hidden-but-synced teams are visible to admins only in `/stats` and team management, and what summary metrics are desired.
-7. Rollout/deployment sequencing for the schema migration, silent baseline, scanner switch, and notification UX switch.
+1. Exact admin flow for attaching/verifying an optional Telegram recommendation channel (`@username`, numeric chat ID, forwarded channel message, or supported combination).
+2. Exact status semantics for a team translation when RanobeLib's title-level `scanlateStatus` is not team-specific; completion must not be falsely attributed to every team without evidence.
+3. Stable RanobeLib branch identity: use a native branch ID if reliably exposed; otherwise define and test a stable fingerprint.
+4. How completed translations appear in the multi-team user catalog and whether completed titles are shown by default inside a team's page.
+5. Whether hidden-but-synced teams are visible to admins only in `/stats` and team management, and what summary metrics are desired.
+6. Rollout/deployment sequencing for the schema migration, silent baseline, scanner switch, and notification UX switch.
