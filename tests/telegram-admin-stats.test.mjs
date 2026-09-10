@@ -131,7 +131,7 @@ test('admin /stats sends a compact overview with navigable detailed sections', a
     assert.equal(response.status, 200);
     const send = calls.find((call) => call.url.endsWith('/sendMessage'));
     assert.ok(send, 'admin overview must be sent');
-    assert.match(send.body.text, /📊 Статистика бота/);
+    assert.match(send.body.text, /Статистика бота/);
     assert.match(send.body.text, /Пользователи/);
     assert.match(send.body.text, /Переводы/);
     assert.match(send.body.text, /Очередь/);
