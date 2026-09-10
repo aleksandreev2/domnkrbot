@@ -67,9 +67,15 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
       subscriber_count_updated_at = CURRENT_TIMESTAMP,
       consecutive_failures = 0,
       sync_error = NULL
-    WHERE is_active = 1
-      AND book_ref NOT IN (
+    WHERE book_ref NOT IN (
         SELECT CAST(value AS TEXT) FROM json_each(?)
+      )
+      AND (
+        is_active = 1
+        OR next_check_at IS NOT NULL
+        OR COALESCE(notification_subscriber_count, 0) <> 0
+        OR COALESCE(consecutive_failures, 0) <> 0
+        OR (sync_error IS NOT NULL AND TRIM(sync_error) <> '')
       )
   `).bind(refsJson).run();
 
