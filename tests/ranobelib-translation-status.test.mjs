@@ -64,6 +64,30 @@ test('team catalog resolves scalar status_id through scanlateStatus constants', 
   });
 });
 
+test('nested status object from fields[]=status_id is treated as translation status', async () => {
+  await withFetch((url) => {
+    if (url === constantsUrl) return json({ data: { scanlateStatus: [] } });
+    if (url === teamCatalogUrl) {
+      return json({
+        data: [{
+          id: 70003,
+          slug: 'finished-status-object',
+          slug_url: '70003--finished-status-object',
+          rus_name: 'Завершённая книга из status',
+          status: { id: 2, label: 'Завершен' },
+        }],
+        meta: { has_next_page: false },
+      });
+    }
+    return new Response('unexpected', { status: 500 });
+  }, async () => {
+    const books = await new RanobeLibClient().discoverTeamBooks('11969--dom-nekromanta');
+    assert.equal(books.length, 1);
+    assert.equal(books[0].translationStatusId, 2);
+    assert.equal(books[0].translationStatusLabel, 'Завершен');
+  });
+});
+
 test('nested scanlateStatus remains authoritative when catalog already returns it', async () => {
   await withFetch((url) => {
     if (url === constantsUrl) return json({ data: { scanlateStatus: [] } });
@@ -75,6 +99,7 @@ test('nested scanlateStatus remains authoritative when catalog already returns i
           slug_url: '70002--active-book',
           rus_name: 'Активная книга',
           status_id: 99,
+          status: { id: 2, label: 'Завершен' },
           scanlateStatus: { id: 1, label: 'Продолжается' },
         }],
         meta: { has_next_page: false },
