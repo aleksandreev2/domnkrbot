@@ -13,6 +13,9 @@
   "placement": {
     "mode": "smart"
   },
+  "limits": {
+    "subrequests": 10000
+  },
   "vars": {
     "BOT_USERNAME": "domnekromanta_bot",
     "PUBLISH_CHANNEL_ID": "@domnekromanta",
