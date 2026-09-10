@@ -25,6 +25,22 @@ test('production RanobeLib API is intercepted as a pure D1 read before the legac
   assert.doesNotMatch(home, /ensureRanobeLibSchema/);
 });
 
+test('public RanobeLib feed and release count exclude lifecycle-only completion events', () => {
+  const homeStart = runtime.indexOf('export async function getRanobeLibHome');
+  const homeEnd = runtime.indexOf('\n/**', homeStart);
+  assert.ok(homeStart >= 0 && homeEnd > homeStart, 'getRanobeLibHome must remain inspectable');
+  const home = runtime.slice(homeStart, homeEnd);
+
+  const countsStart = runtime.indexOf('async function getCounts');
+  const countsEnd = runtime.indexOf('\nasync function getSchedulerState', countsStart);
+  assert.ok(countsStart >= 0 && countsEnd > countsStart, 'getCounts must remain inspectable');
+  const counts = runtime.slice(countsStart, countsEnd);
+
+  assert.match(home, /r\.release_kind\s*=\s*'chapters'/, 'public release cards must be chapter-only');
+  assert.match(counts, /FROM ranobelib_releases WHERE release_kind\s*=\s*'chapters'/, 'public release count must be chapter-only');
+  assert.doesNotMatch(counts, /\(SELECT COUNT\(\*\) FROM ranobelib_releases\) AS releases/);
+});
+
 test('legacy circular crawler is removed from RanobeLib runtime', () => {
   assert.doesNotMatch(runtime, /new RanobeLibClient/);
   assert.doesNotMatch(runtime, /ranobelib_sync_cursor/);
