@@ -23,7 +23,7 @@ test('RanobeLib team discovery requests and preserves translation status metadat
           slug_url: '1000--one',
           rus_name: 'Книга 1',
           cover: { default: 'https://example.test/cover.jpg' },
-          scanlateStatus: { id: 2, label: 'Завершен' },
+          scanlateStatus: { id: 7, label: 'Завершен' },
         }],
         meta: { has_next_page: false },
       });
@@ -34,7 +34,7 @@ test('RanobeLib team discovery requests and preserves translation status metadat
   const teamRequest = requests.find((url) => url.startsWith(teamCatalogPrefix));
   assert.ok(teamRequest, 'team catalog request must be issued');
   assert.match(teamRequest, /(?:\?|&)fields%5B%5D=status_id|(?:\?|&)fields\[\]=status_id/);
-  assert.equal(book.translationStatusId, 2);
+  assert.equal(book.translationStatusId, 7);
   assert.equal(book.translationStatusLabel, 'Завершен');
 });
 
@@ -155,7 +155,8 @@ test('schema persists completion lifecycle and fanout uses the existing outbox',
   assert.match(delivery, /translation_completed/i);
 
   const runtime = readFileSync(new URL('../src/telegram-notification-ux-runtime.ts', import.meta.url), 'utf8');
-  assert.match(runtime, /translation_status_id\s*=\s*2/i);
+  assert.match(runtime, /translation_is_completed/i);
+  assert.doesNotMatch(runtime, /translation_status_id\s*=\s*2/i);
   assert.match(runtime, /is_active\s*=\s*1/i);
 });
 
