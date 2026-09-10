@@ -144,7 +144,7 @@ export async function eligibleReleaseRecipientIds(
     SELECT DISTINCT user_telegram_id
     FROM effective_recipients
     ORDER BY user_telegram_id
-  `).bind(releaseId, releaseId).all<{ user_telegram_id: string }>();
+  `).bind(releaseId).all<{ user_telegram_id: string }>();
   return results.map((row) => String(row.user_telegram_id)).filter(Boolean);
 }
 
@@ -166,14 +166,14 @@ export async function reconcileReleaseOutboxRecipients(
       AND user_telegram_id NOT IN (
         SELECT DISTINCT user_telegram_id FROM effective_recipients
       )
-  `).bind(id, id, id).run();
+  `).bind(id, id).run();
 
   await env.DB.prepare(`${effectiveReleaseRecipientsCte()}
     INSERT OR IGNORE INTO ranobelib_notification_outbox (release_id, user_telegram_id)
     SELECT ?, user_telegram_id
     FROM effective_recipients
     GROUP BY user_telegram_id
-  `).bind(id, id, id).run();
+  `).bind(id, id).run();
 
   const row = await env.DB.prepare(`
     SELECT COUNT(*) AS count
@@ -193,7 +193,7 @@ export async function isUserEligibleForRelease(
     FROM effective_recipients
     WHERE user_telegram_id = ?
     LIMIT 1
-  `).bind(releaseId, releaseId, userId).first<{ eligible: number | string }>();
+  `).bind(releaseId, userId).first<{ eligible: number | string }>();
   return Number(row?.eligible ?? 0) === 1;
 }
 
