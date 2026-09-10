@@ -8,6 +8,10 @@ async function migrationSql() {
   return readFile(new URL('../migrations/0023_multi_team_notifications.sql', import.meta.url), 'utf8');
 }
 
+async function baselineResetSql() {
+  return readFile(new URL('../migrations/0024_multi_team_branch_baseline_reset.sql', import.meta.url), 'utf8');
+}
+
 test('0023 is additive and keeps the legacy delivery path available for rollback', async () => {
   const sql = await migrationSql();
   assert.doesNotMatch(sql, /\bDROP\s+(?:TABLE|COLUMN|INDEX|TRIGGER)\b/i);
@@ -80,4 +84,12 @@ test('branch storage has branch-aware identity and normalized team mapping', asy
   assert.match(sql, /PRIMARY KEY \(book_ref, chapter_id, branch_key, team_id\)/i);
   assert.match(sql, /CREATE TABLE IF NOT EXISTS ranobelib_release_teams/i);
   assert.match(sql, /PRIMARY KEY \(release_id, team_id\)/i);
+});
+
+test('0024 forces a silent branch-aware baseline instead of trusting legacy chapter snapshots', async () => {
+  const sql = normalize(await baselineResetSql());
+  assert.match(sql, /UPDATE ranobelib_team_translations SET baseline_ready = 0/i);
+  assert.match(sql, /SELECT id FROM ranobelib_teams WHERE is_primary = 1 LIMIT 1/i);
+  assert.doesNotMatch(sql, /INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+ranobelib_releases/i);
+  assert.doesNotMatch(sql, /INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+ranobelib_notification_outbox/i);
 });
