@@ -66,7 +66,7 @@ class Statement {
   }
   async all() { return { results: [] }; }
   async run() {
-    if (this.query.startsWith('INSERT INTO ranobelib_titles')) {
+    if (/INSERT INTO ranobelib_titles/i.test(this.query)) {
       this.db.titleInserts.push({ query: this.query, values: [...this.values] });
     }
     return { meta: { changes: 1 } };
@@ -108,7 +108,7 @@ test('Telegram catalog bootstrap stores the discovered title before chapter snap
     assert.match(db.titleInserts[0].query, /\btitle\b/);
     assert.match(db.titleInserts[0].query, /translation_status_id/);
     assert.match(db.titleInserts[0].query, /translation_is_completed/);
-    assert.ok(db.titleInserts[0].values.includes('Покемон: Мастер тактики'));
+    assert.ok(db.titleInserts[0].values.some((value) => typeof value === 'string' && value.includes('Покемон: Мастер тактики'));
   });
 });
 
@@ -122,6 +122,6 @@ test('Telegram catalog refreshes existing active rows when some titles are still
     assert.equal(count, 1);
     assert.deepEqual(requests, [constantsUrl, teamCatalogUrl]);
     assert.equal(db.titleInserts.length, 1);
-    assert.ok(db.titleInserts[0].values.includes('Покемон: Мастер тактики'));
+    assert.ok(db.titleInserts[0].values.some((value) => typeof value === 'string' && value.includes('Покемон: Мастер тактики'));
   });
 });
