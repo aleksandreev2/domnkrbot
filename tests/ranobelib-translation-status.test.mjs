@@ -113,18 +113,9 @@ test('nested scanlateStatus remains authoritative when catalog already returns i
   });
 });
 
-// Temporary diagnostic. Remove before merge. It compares only public team-catalog request shapes
-// and logs bounded response metadata / error text; no auth, user data, or chapter content is used.
-test('diagnostic: compare live RanobeLib team query variants', { timeout: 30_000 }, async () => {
-  const base = 'https://api.cdnlibs.org/api/manga';
-  const variants = [
-    ['current', `${base}?site_id[]=3&target_id=11969&target_model=team&fields[]=status_id&page=1`],
-    ['no-fields', `${base}?site_id[]=3&target_id=11969&target_model=team&page=1`],
-    ['site-index-no-fields', `${base}?site_id[0]=3&target_id=11969&target_model=team&page=1`],
-    ['completed-filter', `${base}?site_id[]=3&target_id=11969&target_model=team&scanlateStatus[]=2&page=1`],
-    ['site-index-completed-filter', `${base}?site_id[0]=3&target_id=11969&target_model=team&scanlateStatus[]=2&page=1`],
-  ];
-
+// Temporary diagnostic. Remove before merge. It uses only public RanobeLib metadata and logs
+// bounded status-field shapes; it never reads chapter content or authenticated user data.
+test('diagnostic: inspect live RanobeLib detail status fields', { timeout: 30_000 }, async () => {
   const headers = {
     accept: 'application/json',
     'accept-language': 'ru,en;q=0.7',
@@ -133,29 +124,42 @@ test('diagnostic: compare live RanobeLib team query variants', { timeout: 30_000
     Origin: 'https://ranobelib.me',
     'User-Agent': 'Mozilla/5.0 RanobeLib-status-diagnostic/1.0',
   };
+  const teamUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&page=1';
+  const teamResponse = await fetch(teamUrl, { headers });
+  const teamPayload = await teamResponse.json().catch(() => null);
+  const rows = Array.isArray(teamPayload?.data) ? teamPayload.data.slice(0, 4) : [];
+  console.log('LIVE_RANOBELIB_DETAIL_TEAM', JSON.stringify({ status: teamResponse.status, count: rows.length }));
 
-  for (const [name, url] of variants) {
-    try {
-      const response = await fetch(url, { headers });
-      const text = await response.text();
-      let payload;
-      try { payload = JSON.parse(text); } catch { payload = null; }
-      const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-      const errorPreview = response.ok ? null : text.replace(/\s+/g, ' ').slice(0, 500);
-      console.log('LIVE_RANOBELIB_VARIANT', JSON.stringify({
-        name,
-        httpStatus: response.status,
-        contentType: response.headers.get('content-type'),
-        dataCount: Array.isArray(payload?.data) ? payload.data.length : null,
-        hasNextPage: payload?.meta?.has_next_page ?? null,
-        keys: first && typeof first === 'object' ? Object.keys(first).sort() : null,
-        status_id: first?.status_id ?? null,
-        status: first?.status ?? null,
-        scanlateStatus: first?.scanlateStatus ?? null,
-        errorPreview,
-      }));
-    } catch (error) {
-      console.log('LIVE_RANOBELIB_VARIANT', JSON.stringify({ name, error: String(error) }));
+  for (const row of rows) {
+    const ref = typeof row?.slug_url === 'string' ? row.slug_url : null;
+    if (!ref) continue;
+    const base = `https://api.cdnlibs.org/api/manga/${encodeURIComponent(ref)}`;
+    const variants = [
+      ['plain', base],
+      ['translation-field', `${base}?fields[]=status_id`],
+      ['both-status-fields', `${base}?fields[]=manga_status_id&fields[]=status_id`],
+    ];
+    for (const [variant, url] of variants) {
+      try {
+        const response = await fetch(url, { headers });
+        const text = await response.text();
+        let payload;
+        try { payload = JSON.parse(text); } catch { payload = null; }
+        const data = payload?.data && typeof payload.data === 'object' ? payload.data : null;
+        console.log('LIVE_RANOBELIB_DETAIL', JSON.stringify({
+          ref,
+          variant,
+          httpStatus: response.status,
+          keys: data ? Object.keys(data).sort() : null,
+          status_id: data?.status_id ?? null,
+          manga_status_id: data?.manga_status_id ?? null,
+          status: data?.status ?? null,
+          scanlateStatus: data?.scanlateStatus ?? null,
+          errorPreview: response.ok ? null : text.replace(/\s+/g, ' ').slice(0, 300),
+        }));
+      } catch (error) {
+        console.log('LIVE_RANOBELIB_DETAIL', JSON.stringify({ ref, variant, error: String(error) }));
+      }
     }
   }
 });
