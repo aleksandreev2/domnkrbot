@@ -34,6 +34,7 @@ export type DueTitle = {
   next_check_at: string | null;
   scan_priority: number | string;
   notification_subscriber_count: number | string;
+  translation_completion_pending: number | string;
 };
 
 export type NextCheckInput = {
@@ -91,12 +92,13 @@ export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT):
   const { results } = await env.DB.prepare(`
     SELECT book_ref, ranobelib_id, slug, url, title, cover_url, snapshot_ready,
            consecutive_no_change, consecutive_failures, last_change_at, next_check_at, scan_priority,
-           notification_subscriber_count
+           notification_subscriber_count, translation_completion_pending
     FROM ranobelib_titles
     WHERE is_active = 1
-      AND (snapshot_ready = 0 OR notification_subscriber_count > 0)
+      AND (translation_completion_pending = 1 OR snapshot_ready = 0 OR notification_subscriber_count > 0)
       AND (next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
-    ORDER BY COALESCE(next_check_at, '') ASC,
+    ORDER BY translation_completion_pending DESC,
+             COALESCE(next_check_at, '') ASC,
              notification_subscriber_count DESC,
              scan_priority DESC,
              book_ref ASC
@@ -110,9 +112,10 @@ export async function selectIdleTitles(env: ScannerEnv, limit = IDLE_SCAN_LIMIT)
   const { results } = await env.DB.prepare(`
     SELECT book_ref, ranobelib_id, slug, url, title, cover_url, snapshot_ready,
            consecutive_no_change, consecutive_failures, last_change_at, next_check_at, scan_priority,
-           notification_subscriber_count
+           notification_subscriber_count, translation_completion_pending
     FROM ranobelib_titles
     WHERE is_active = 1
+      AND translation_completion_pending = 0
       AND snapshot_ready = 1
       AND notification_subscriber_count = 0
       AND (next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
@@ -169,7 +172,11 @@ async function scanSelectedTitles(
 
       try {
         const sync = await scanOneBook(env, client, book, row, teamRef, now, mode);
-        return { succeeded: 1, failed: 0, newReleases: sync.releaseCreated ? 1 : 0 };
+        return {
+          succeeded: 1,
+          failed: 0,
+          newReleases: (sync.releaseCreated ? 1 : 0) + (sync.completionFinalized ? 1 : 0),
+        };
       } catch (error) {
         const message = `${row.book_ref}: ${errorMessage(error)}`;
         await scheduleFailure(env, row, message, now);
@@ -200,9 +207,9 @@ async function scanOneBook(
   teamRef: string,
   now: Date,
   mode: ScanMode,
-): Promise<{ releaseCreated: boolean; releaseId: string | null }> {
+): Promise<{ releaseCreated: boolean; releaseId: string | null; completionFinalized: boolean }> {
   const state = await env.DB.prepare(`
-    SELECT snapshot_ready, last_release_at, title, summary, cover_url
+    SELECT snapshot_ready, last_release_at, title, summary, cover_url, translation_completion_pending
     FROM ranobelib_titles
     WHERE book_ref = ?
   `).bind(book.ref).first<{
@@ -211,8 +218,12 @@ async function scanOneBook(
     title: string | null;
     summary: string | null;
     cover_url: string | null;
+    translation_completion_pending: number | string;
   }>();
   const snapshotReady = Number(state?.snapshot_ready ?? due.snapshot_ready ?? 0) === 1;
+  const completionPending = Number(
+    state?.translation_completion_pending ?? due.translation_completion_pending ?? 0,
+  ) === 1;
   const previousRows = snapshotReady
     ? (await env.DB.prepare(`
         SELECT chapter_id AS id, volume, number, name, first_seen_at AS firstSeenAt
@@ -221,6 +232,7 @@ async function scanOneBook(
     : undefined;
 
   // Discovery is intentionally separate, so explicitly scope chapter polling to our team.
+  // A pending completion is not finalized until this request succeeds.
   const chapters = await client.getChapters(book.ref, { teamRef });
   const latest = chapters.length ? chapters[chapters.length - 1]! : null;
   const delta = detectReleaseDelta(book.ref, previousRows, chapters);
@@ -290,11 +302,20 @@ async function scanOneBook(
     UPDATE ranobelib_titles SET
       ranobelib_id = ?, slug = ?, url = ?, title = ?, summary = ?, cover_url = ?,
       chapter_count = ?, latest_chapter_id = ?, latest_volume = ?, latest_number = ?, latest_name = ?,
-      snapshot_ready = 1, is_active = 1, last_synced_at = CURRENT_TIMESTAMP,
+      snapshot_ready = 1,
+      is_active = CASE
+        WHEN translation_is_completed = 1 AND translation_completion_pending = 0 THEN 0
+        ELSE 1
+      END,
+      last_synced_at = CURRENT_TIMESTAMP,
       last_release_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE last_release_at END,
       consecutive_no_change = ?, consecutive_failures = 0,
       last_change_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE last_change_at END,
-      next_check_at = datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes'),
+      next_check_at = CASE
+        WHEN translation_is_completed = 1 AND translation_completion_pending = 0 THEN NULL
+        WHEN translation_completion_pending = 1 THEN CURRENT_TIMESTAMP
+        ELSE datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes')
+      END,
       scan_priority = CASE WHEN ? = 1 THEN scan_priority + 1 ELSE MAX(scan_priority - 1, 0) END,
       sync_error = NULL
     WHERE book_ref = ?
@@ -318,7 +339,31 @@ async function scanOneBook(
     book.ref,
   ).run();
 
-  return { releaseCreated, releaseId };
+  let completionFinalized = false;
+  if (completionPending) {
+    // Re-check the semantic/pending state in SQL. If discovery reopened the translation while
+    // this scan was in flight, this update becomes a no-op and cannot emit a false completion.
+    const result = await env.DB.prepare(`
+      UPDATE ranobelib_titles SET
+        is_active = 0,
+        translation_completion_pending = CASE
+          WHEN translation_completion_pending = 1 AND translation_is_completed = 1 THEN 0
+          ELSE translation_completion_pending
+        END,
+        notification_subscriber_count = 0,
+        last_release_at = CURRENT_TIMESTAMP,
+        last_change_at = CURRENT_TIMESTAMP,
+        consecutive_no_change = 0,
+        next_check_at = NULL,
+        sync_error = NULL
+      WHERE book_ref = ?
+        AND translation_completion_pending = 1
+        AND translation_is_completed = 1
+    `).bind(book.ref).run();
+    completionFinalized = runChanges(result) > 0;
+  }
+
+  return { releaseCreated, releaseId, completionFinalized };
 }
 
 async function scheduleFailure(env: ScannerEnv, row: DueTitle, message: string, now: Date): Promise<void> {
