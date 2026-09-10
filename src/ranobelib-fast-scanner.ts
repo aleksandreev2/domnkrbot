@@ -94,8 +94,8 @@ export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT):
            consecutive_no_change, consecutive_failures, last_change_at, next_check_at, scan_priority,
            notification_subscriber_count, translation_completion_pending
     FROM ranobelib_titles
-    WHERE is_active = 1
-      AND (translation_completion_pending = 1 OR snapshot_ready = 0 OR notification_subscriber_count > 0)
+    WHERE (translation_completion_pending = 1 OR (is_active = 1
+      AND (snapshot_ready = 0 OR notification_subscriber_count > 0)))
       AND (next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
     ORDER BY translation_completion_pending DESC,
              COALESCE(next_check_at, '') ASC,
@@ -303,17 +303,14 @@ async function scanOneBook(
       ranobelib_id = ?, slug = ?, url = ?, title = ?, summary = ?, cover_url = ?,
       chapter_count = ?, latest_chapter_id = ?, latest_volume = ?, latest_number = ?, latest_name = ?,
       snapshot_ready = 1,
-      is_active = CASE
-        WHEN translation_is_completed = 1 AND translation_completion_pending = 0 THEN 0
-        ELSE 1
-      END,
+      is_active = CASE WHEN translation_is_completed = 1 THEN 0 ELSE 1 END,
       last_synced_at = CURRENT_TIMESTAMP,
       last_release_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE last_release_at END,
       consecutive_no_change = ?, consecutive_failures = 0,
       last_change_at = CASE WHEN ? = 1 THEN CURRENT_TIMESTAMP ELSE last_change_at END,
       next_check_at = CASE
-        WHEN translation_is_completed = 1 AND translation_completion_pending = 0 THEN NULL
         WHEN translation_completion_pending = 1 THEN CURRENT_TIMESTAMP
+        WHEN translation_is_completed = 1 THEN NULL
         ELSE datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes')
       END,
       scan_priority = CASE WHEN ? = 1 THEN scan_priority + 1 ELSE MAX(scan_priority - 1, 0) END,
