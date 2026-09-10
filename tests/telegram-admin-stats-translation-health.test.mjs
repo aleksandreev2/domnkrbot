@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 async function loadRuntime() {
@@ -77,6 +78,7 @@ class StatsDB {
         total: 40,
         active: 24,
         completed: 15,
+        archived: 1,
         unknown_status: 1,
         snapshot_ready: 40,
         with_errors: 1,
@@ -112,6 +114,7 @@ test('translation stats distinguish due scans from genuine delay and name proble
     assert.equal(response?.status, 200);
     const edit = calls.find((call) => call.url.endsWith('/editMessageText'));
     assert.ok(edit);
+    assert.match(edit.body.text, /Убраны из команды:\s*<b>1<\/b>/);
     assert.match(edit.body.text, /Ожидают сканирования:\s*<b>6<\/b>/);
     assert.match(edit.body.text, /Задержка &gt;5 мин:\s*<b>1<\/b>/);
     assert.doesNotMatch(edit.body.text, /Просрочены:/);
@@ -123,4 +126,12 @@ test('translation stats distinguish due scans from genuine delay and name proble
     assert.match(edit.body.text, /задержка 9 мин/);
     assert.match(edit.body.text, /RanobeLib request failed: 500 &lt;upstream&gt;/);
   });
+});
+
+test('translation health SQL excludes removed team titles from unknown/error health while counting them as archive', () => {
+  const source = readFileSync(new URL('../src/telegram-admin-stats.ts', import.meta.url), 'utf8');
+  assert.match(source, /AS archived/i);
+  assert.match(source, /translation_is_completed\s+IS\s+NULL[\s\S]{0,80}is_active\s*=\s*1|is_active\s*=\s*1[\s\S]{0,80}translation_is_completed\s+IS\s+NULL/i);
+  assert.match(source, /sync_error\s+IS\s+NOT\s+NULL[\s\S]{0,180}is_active\s*=\s*1|is_active\s*=\s*1[\s\S]{0,180}sync_error\s+IS\s+NOT\s+NULL/i);
+  assert.match(source, /WHERE\s+is_active\s*=\s*1[\s\S]{0,260}translation_is_completed\s+IS\s+NULL/i);
 });

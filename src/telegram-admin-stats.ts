@@ -136,9 +136,10 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
       COUNT(*) AS total,
       SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) AS active,
       SUM(CASE WHEN translation_is_completed=1 THEN 1 ELSE 0 END) AS completed,
-      SUM(CASE WHEN translation_is_completed IS NULL THEN 1 ELSE 0 END) AS unknown_status,
+      SUM(CASE WHEN is_active=0 AND COALESCE(translation_is_completed,0)<>1 THEN 1 ELSE 0 END) AS archived,
+      SUM(CASE WHEN is_active=1 AND translation_is_completed IS NULL THEN 1 ELSE 0 END) AS unknown_status,
       SUM(CASE WHEN snapshot_ready=1 THEN 1 ELSE 0 END) AS snapshot_ready,
-      SUM(CASE WHEN sync_error IS NOT NULL AND TRIM(sync_error)<>'' THEN 1 ELSE 0 END) AS with_errors,
+      SUM(CASE WHEN is_active=1 AND sync_error IS NOT NULL AND TRIM(sync_error)<>'' THEN 1 ELSE 0 END) AS with_errors,
       SUM(CASE WHEN is_active=1 AND next_check_at IS NOT NULL AND next_check_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS due_now,
       SUM(CASE WHEN is_active=1 AND next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes') THEN 1 ELSE 0 END) AS late_5m,
       SUM(COALESCE(notification_subscriber_count,0)) AS subscribers
@@ -187,7 +188,7 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
       SUM(CASE WHEN created_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) AS releases_7d,
       MAX(created_at) AS last_release_at,
       (SELECT MAX(last_synced_at) FROM ranobelib_titles) AS last_sync_at,
-      (SELECT COUNT(*) FROM ranobelib_titles WHERE consecutive_failures>0 OR (sync_error IS NOT NULL AND TRIM(sync_error)<>'')) AS failures,
+      (SELECT COUNT(*) FROM ranobelib_titles WHERE is_active=1 AND (consecutive_failures>0 OR (sync_error IS NOT NULL AND TRIM(sync_error)<>''))) AS failures,
       (SELECT COUNT(*) FROM ranobelib_titles WHERE is_active=1 AND next_check_at IS NOT NULL AND next_check_at<=CURRENT_TIMESTAMP) AS due_scans
       FROM ranobelib_releases`),
     db.prepare(`SELECT COALESCE(json_group_array(json_object(
@@ -208,14 +209,17 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
         sync_error,
         COALESCE(consecutive_failures,0) AS failures,
         CASE
-          WHEN is_active=1 AND next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes')
+          WHEN next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes')
           THEN CAST(MAX(0, (julianday('now') - julianday(next_check_at)) * 1440) AS INTEGER)
           ELSE 0
         END AS delay_minutes
       FROM ranobelib_titles
-      WHERE translation_is_completed IS NULL
-         OR (sync_error IS NOT NULL AND TRIM(sync_error)<>'')
-         OR (is_active=1 AND next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes'))
+      WHERE is_active=1
+        AND (
+          translation_is_completed IS NULL
+          OR (sync_error IS NOT NULL AND TRIM(sync_error)<>'')
+          OR (next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes'))
+        )
       ORDER BY
         CASE WHEN sync_error IS NOT NULL AND TRIM(sync_error)<>'' THEN 1 ELSE 0 END DESC,
         CASE WHEN translation_is_completed IS NULL THEN 1 ELSE 0 END DESC,
@@ -260,8 +264,8 @@ function buildStatsScreen(section: StatsSection, s: StatsSnapshot) {
     const problems = renderTranslationProblems(s.translationHealth);
     return screen('📚 Переводы', [
       line('Всего', s.translations.total), line('Активные', s.translations.active), line('Завершённые', s.translations.completed),
-      line('Без статуса', s.translations.unknown_status), line('Snapshot готов', s.translations.snapshot_ready), line('С ошибками', s.translations.with_errors),
-      line('Ожидают сканирования', s.translations.due_now), line('Задержка &gt;5 мин', s.translations.late_5m),
+      line('Убраны из команды', s.translations.archived), line('Без статуса', s.translations.unknown_status), line('Snapshot готов', s.translations.snapshot_ready),
+      line('С ошибками', s.translations.with_errors), line('Ожидают сканирования', s.translations.due_now), line('Задержка &gt;5 мин', s.translations.late_5m),
       line('Суммарный спрос подписчиков', s.translations.subscribers),
       '', '<b>Проблемные тайтлы</b>', ...problems,
     ], back);
@@ -294,7 +298,7 @@ function buildStatsScreen(section: StatsSection, s: StatsSnapshot) {
     '📊 <b>Статистика бота</b>', '',
     `👥 Пользователи: <b>${n(s.users.total)}</b>  (+${n(s.users.new_24h)} за 24 ч)`,
     `🔔 Получают уведомления: <b>${n(s.subscriptions.users_enabled)}</b>`,
-    `📚 Переводы: <b>${n(s.translations.active)}</b> активных / <b>${n(s.translations.completed)}</b> завершённых`,
+    `📚 Переводы: <b>${n(s.translations.active)}</b> активных / <b>${n(s.translations.completed)}</b> завершённых / <b>${n(s.translations.archived)}</b> архивных`,
     `📦 Очередь: <b>${n(s.delivery.due_now)}</b> готово / <b>${n(s.delivery.retry)}</b> retry`,
     `📝 Заявки: <b>${n(s.proposals.total)}</b>  (+${n(s.proposals.new_24h)} за 24 ч)`,
     `📖 Уникальных читателей: <b>${n(s.publications.unique_readers)}</b>`,

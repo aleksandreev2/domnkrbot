@@ -98,6 +98,14 @@ test('team discovery keeps D1 writes bounded and caps one-time unknown-status ba
     const payload = JSON.parse(String(db.upserts[0].values[0]));
     assert.equal(payload.filter((row) => row.translationStatusChecked === 1).length, 48);
     assert.equal(db.deactivateCalls, 1);
+    const archive = db.runs.find((call) => /UPDATE ranobelib_titles SET is_active = 0/i.test(call.query));
+    assert.ok(archive, 'missing team titles must be archived');
+    assert.match(archive.query, /next_check_at\s*=\s*NULL/i);
+    assert.match(archive.query, /notification_subscriber_count\s*=\s*0/i);
+    assert.match(archive.query, /consecutive_failures\s*=\s*0/i);
+    assert.match(archive.query, /sync_error\s*=\s*NULL/i);
+    assert.match(archive.query, /WHERE\s+book_ref\s+NOT\s+IN/i, 'legacy inactive rows must also be eligible for archive cleanup');
+    assert.match(archive.query, /AND\s*\(\s*is_active\s*=\s*1\s+OR\s+next_check_at\s+IS\s+NOT\s+NULL/i, 'archive cleanup must avoid repeat writes once stale scheduler state is gone');
     assert.ok(db.runs.length <= 2, `discovery write budget exploded: ${db.runs.length}`);
   });
 });
