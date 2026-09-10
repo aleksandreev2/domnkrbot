@@ -81,8 +81,11 @@ class StatsDB {
     if (/FROM ranobelib_releases/i.test(query)) {
       return [{ releases_24h: 8, releases_7d: 45, last_release_at: '2026-09-10 09:30:00', last_sync_at: '2026-09-10 09:32:00', failures: 2, due_scans: 6 }];
     }
+    if (/json_group_array/i.test(query) && /FROM ranobelib_titles/i.test(query)) {
+      return [{ items: '[]' }];
+    }
     if (/FROM ranobelib_titles/i.test(query)) {
-      return [{ total: 95, active: 80, completed: 12, unknown_status: 3, snapshot_ready: 91, with_errors: 2, overdue: 4, subscribers: 37 }];
+      return [{ total: 95, active: 80, completed: 12, unknown_status: 3, snapshot_ready: 91, with_errors: 2, due_now: 4, late_5m: 1, subscribers: 37 }];
     }
     return [{}];
   }
@@ -160,7 +163,8 @@ test('admin stats section callback edits the current screen and exposes translat
     assert.match(edit.body.text, /Завершённые:\s*<b>12<\/b>/);
     assert.match(edit.body.text, /Без статуса:\s*<b>3<\/b>/);
     assert.match(edit.body.text, /С ошибками:\s*<b>2<\/b>/);
-    assert.match(edit.body.text, /Просрочены:\s*<b>4<\/b>/);
+    assert.match(edit.body.text, /Ожидают сканирования:\s*<b>4<\/b>/);
+    assert.match(edit.body.text, /Задержка &gt;5 мин:\s*<b>1<\/b>/);
     assert.match(JSON.stringify(edit.body.reply_markup), /stats:home/);
     assert.ok(calls.some((call) => call.url.endsWith('/answerCallbackQuery')), 'callback must be acknowledged');
   });
