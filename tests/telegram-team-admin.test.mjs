@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
+  buildTeamAdminCard,
   buildTeamAdminList,
   parseRanobeLibTeamInput,
   normalizeRecommendationChannelInput,
@@ -39,6 +40,28 @@ test('admin list exposes lifecycle controls while keeping the primary identity v
   const callbacks = payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
   assert.ok(callbacks.includes('teamadmin:view:7'));
   assert.ok(callbacks.includes('teamadmin:add'));
+});
+
+test('admin team card exposes team-scoped translation diagnostics', () => {
+  const payload = buildTeamAdminCard({
+    id: 7,
+    ranobelibTeamId: 77,
+    ranobelibTeamRef: '77--team-seven',
+    displayName: 'Team Seven',
+    isPrimary: false,
+    lifecycleState: 'published',
+    recommendationChatId: null,
+    recommendationChatTitle: null,
+    recommendationChatUsername: null,
+    recommendationMembershipCapable: false,
+    lastSyncAt: '2026-09-10 12:00:00',
+    lastSyncError: null,
+  }, { total: 12, active: 8, completed: 3, unknown: 1 });
+  assert.match(payload.text, /Переводы:.*12/);
+  assert.match(payload.text, /активных.*8/);
+  assert.match(payload.text, /завершённых.*3/);
+  assert.match(payload.text, /unknown.*1/);
+  assert.match(source, /FROM ranobelib_team_translations/);
 });
 
 test('recommendation channel code is isolated from publication, download and blacklist settings', () => {
