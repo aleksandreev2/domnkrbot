@@ -74,7 +74,6 @@ export async function handleTelegramAdminStatsWebhook(
 
   const userId = Number(update.callback_query?.from?.id ?? update.message?.from?.id);
   if (!Number.isSafeInteger(userId) || !isAdmin(env, userId)) {
-    // Intentionally silent: no D1 access, no Telegram API call, no callback acknowledgement.
     return new Response('ok');
   }
 
@@ -183,8 +182,14 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
 
   const rows = await batchFirstRows(db, statements);
   return {
-    users: rows[0], subscriptions: rows[1], translations: rows[2], delivery: rows[3],
-    proposals: rows[4], publications: rows[5], access: rows[6], system: rows[7],
+    users: rows[0] ?? {},
+    subscriptions: rows[1] ?? {},
+    translations: rows[2] ?? {},
+    delivery: rows[3] ?? {},
+    proposals: rows[4] ?? {},
+    publications: rows[5] ?? {},
+    access: rows[6] ?? {},
+    system: rows[7] ?? {},
   };
 }
 
