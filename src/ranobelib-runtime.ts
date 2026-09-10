@@ -170,6 +170,7 @@ export async function getRanobeLibHome(env: RanobeLibRuntimeEnv): Promise<Ranobe
       FROM ranobelib_releases r
       JOIN ranobelib_titles t ON t.book_ref = r.book_ref
       WHERE t.is_active = 1
+        AND r.release_kind = 'chapters'
       ORDER BY r.created_at DESC
       LIMIT 30
     `).all<RanobeLibReleaseCard>(),
@@ -245,7 +246,7 @@ async function getCounts(env: RanobeLibRuntimeEnv): Promise<RanobeLibHomeData['s
     SELECT
       SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) AS active_titles,
       SUM(CASE WHEN is_active = 1 AND snapshot_ready = 1 THEN 1 ELSE 0 END) AS synced_titles,
-      (SELECT COUNT(*) FROM ranobelib_releases) AS releases
+      (SELECT COUNT(*) FROM ranobelib_releases WHERE release_kind = 'chapters') AS releases
     FROM ranobelib_titles
   `).first<{ active_titles: number | string | null; synced_titles: number | string | null; releases: number | string | null }>();
   return {
