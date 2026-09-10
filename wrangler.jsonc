@@ -10,6 +10,9 @@
     "enabled": true,
     "head_sampling_rate": 1
   },
+  "placement": {
+    "mode": "smart"
+  },
   "vars": {
     "BOT_USERNAME": "domnekromanta_bot",
     "PUBLISH_CHANNEL_ID": "@domnekromanta",

@@ -42,6 +42,7 @@ jobs:
           grep -Fq 'domnkr-build-20260909-channel-ban1' public/build.txt
           grep -Fq 'domnkr-build-20260909-telegram-perf1' public/build.txt
           grep -Fq 'domnkr-build-20260909-telegram-perf2' public/build.txt
+          grep -Fq 'domnkr-build-20260909-telegram-perf3' public/build.txt
           grep -Fq 'id="rawDrop"' public/propose/index.html
           grep -Fq '/api/proposal-raw/init' public/propose.js
           grep -Fq '/api/title-proposals' public/propose.js
@@ -145,4 +146,4 @@ jobs:
         with:
           node-version: 22
       - name: Verify workers.dev serves current build
-        run: EXPECTED_MARKER=domnkr-build-20260909-telegram-perf2 node scripts/check-production.mjs
+        run: EXPECTED_MARKER=domnkr-build-20260909-telegram-perf3 node scripts/check-production.mjs

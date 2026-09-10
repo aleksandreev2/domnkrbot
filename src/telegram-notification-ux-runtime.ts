@@ -4,11 +4,13 @@ import {
   getTitleDeliverySetting,
   ensureTelegramNotificationSettingsSchema,
   clearNotificationCustomInput,
+  normalizeDeliverySetting,
   type DeliverySetting,
 } from './telegram-notification-settings.js';
 import {
   ensureTelegramSubscriptionSchema,
   isEffectivelySubscribed,
+  resolveEffectiveSubscription,
   setEffectiveTitleSubscription,
   type TelegramSubscriptionEnv,
   type TelegramSubscriptionUpdate,
@@ -38,10 +40,16 @@ import {
   type NotificationDeliverySetting,
 } from './telegram-notification-ux.js';
 import { startCallbackAck, type ExecutionContextLike } from './telegram-fast-ack.js';
+import { notificationRenderStrategy } from './telegram-notification-render-strategy.js';
+import { renderTelegramScreen, type TelegramScreenExecutionContext } from './telegram-screen-renderer.js';
 
 type CountRow = { count: number | string | null };
 type AllTitlesRow = { all_titles: number | string | null };
 type D1PreparedStatement = ReturnType<TelegramSubscriptionEnv['DB']['prepare']>;
+type D1BatchResult<T> = { results?: T[] };
+type D1BatchDatabase = TelegramSubscriptionEnv['DB'] & {
+  batch?<T = Record<string, unknown>>(statements: D1PreparedStatement[]): Promise<D1BatchResult<T>[]>;
+};
 
 export type TelegramNotificationUxEnv = TelegramSubscriptionEnv;
 
@@ -71,7 +79,7 @@ export async function handleTelegramNotificationUxUpdate(
       setProposalInputActive(env, userId, 0),
       clearNotificationCustomInput(env, userId),
     ]);
-    await respond(env, callback, chatId, await dashboardPayload(env, userId));
+    await respond(env, callback, chatId, await dashboardPayload(env, userId), ctx);
     return true;
   }
 
@@ -83,7 +91,7 @@ export async function handleTelegramNotificationUxUpdate(
       : kind === 'completed'
         ? await listCompletedTitles(env, parsed.page)
         : await listAllTitles(env, parsed.page);
-    await respond(env, callback, chatId, buildNotificationTitleList({ kind, rows, page: parsed.page }));
+    await respond(env, callback, chatId, buildNotificationTitleList({ kind, rows, page: parsed.page }), ctx);
     return true;
   }
 
@@ -93,7 +101,7 @@ export async function handleTelegramNotificationUxUpdate(
       clearNotificationCustomInput(env, userId),
       beginNotificationSearch(env, userId, parsed.returnScope),
     ]);
-    await respond(env, callback, chatId, buildNotificationSearchPrompt(parsed.returnScope));
+    await respond(env, callback, chatId, buildNotificationSearchPrompt(parsed.returnScope), ctx);
     return true;
   }
 
@@ -105,7 +113,7 @@ export async function handleTelegramNotificationUxUpdate(
       clearNotificationCustomInput(env, userId),
       beginNotificationSearch(env, userId, returnScope),
     ]);
-    await respond(env, callback, chatId, buildNotificationSearchPrompt(returnScope));
+    await respond(env, callback, chatId, buildNotificationSearchPrompt(returnScope), ctx);
     return true;
   }
 
@@ -113,7 +121,7 @@ export async function handleTelegramNotificationUxUpdate(
     const state = await getNotificationSearchState(env, userId);
     if (!state?.query) {
       await beginNotificationSearch(env, userId, state?.returnScope ?? 'home');
-      await respond(env, callback, chatId, buildNotificationSearchPrompt(state?.returnScope ?? 'home'));
+      await respond(env, callback, chatId, buildNotificationSearchPrompt(state?.returnScope ?? 'home'), ctx);
       return true;
     }
     await saveNotificationSearchPage(env, userId, parsed.page);
@@ -123,12 +131,12 @@ export async function handleTelegramNotificationUxUpdate(
       rows,
       page: parsed.page,
       returnScope: state.returnScope,
-    }));
+    }), ctx);
     return true;
   }
 
   if (parsed.kind === 'clear-confirm') {
-    await respond(env, callback, chatId, buildNotificationDisableAllConfirmation());
+    await respond(env, callback, chatId, buildNotificationDisableAllConfirmation(), ctx);
     return true;
   }
 
@@ -140,12 +148,12 @@ export async function handleTelegramNotificationUxUpdate(
     });
     if (ctx) ctx.waitUntil(refresh);
     else await refresh;
-    await respond(env, callback, chatId, await dashboardPayload(env, userId));
+    await respond(env, callback, chatId, await dashboardPayload(env, userId), ctx);
     return true;
   }
 
   if (parsed.kind === 'mode-home') {
-    await respond(env, callback, chatId, buildNotificationGlobalModeScreen(asUiSetting(await getGlobalDeliverySetting(env, userId))));
+    await respond(env, callback, chatId, buildNotificationGlobalModeScreen(asUiSetting(await getGlobalDeliverySetting(env, userId))), ctx);
     return true;
   }
 
@@ -158,8 +166,6 @@ export async function handleTelegramNotificationUxUpdate(
     if (parsed.kind === 'toggle') {
       await upsertTelegramUser(env, callback.from);
       const before = await isEffectivelySubscribed(env, userId, title.book_ref);
-      // A completed translation can only be removed. We never create a new sleeping
-      // subscription from the archive; existing subscriptions are preserved automatically.
       if (!completed || before) {
         await setEffectiveTitleSubscription(env, userId, title.book_ref, !before);
         const refresh = refreshTitleNotificationDemand(env, title.book_ref).catch((error) => {
@@ -171,12 +177,12 @@ export async function handleTelegramNotificationUxUpdate(
     }
 
     if (parsed.kind === 'title-mode' && !completed) {
-      await respond(env, callback, chatId, await titleModePayload(env, userId, title, context));
+      await respond(env, callback, chatId, await titleModePayload(env, userId, title, context), ctx);
       return true;
     }
 
     const payload = await titleCardPayload(env, userId, title, context);
-    await respond(env, callback, chatId, payload);
+    await respond(env, callback, chatId, payload, ctx);
     return true;
   }
 
@@ -228,36 +234,41 @@ export async function sendTelegramNotificationDashboard(
 }
 
 async function dashboardPayload(env: TelegramNotificationUxEnv, userId: string) {
-  const [allTitles, globalSetting, overrideCount] = await Promise.all([
-    userSubscribesToAll(env, userId),
-    getGlobalDeliverySetting(env, userId),
-    count(env.DB.prepare(`
+  const [allTitlesRow, globalSettingRow, overrideCountRow, activeCountRow, exclusionCountRow, explicitCountRow] = await batchFirstRows(env, [
+    env.DB.prepare('SELECT all_titles FROM telegram_subscription_settings WHERE user_telegram_id = ? LIMIT 1').bind(userId),
+    env.DB.prepare(`
+      SELECT delivery_mode, stack_size
+      FROM telegram_subscription_settings
+      WHERE user_telegram_id = ?
+    `).bind(userId),
+    env.DB.prepare(`
       SELECT COUNT(*) AS count
       FROM telegram_title_delivery_settings d
       JOIN ranobelib_titles t ON t.book_ref = d.book_ref
       WHERE d.user_telegram_id = ? AND t.is_active = 1 AND t.snapshot_ready = 1
-    `).bind(userId)),
-  ]);
-  let effectiveCount: number;
-  if (allTitles) {
-    const [activeCount, exclusionCount] = await Promise.all([
-      count(env.DB.prepare('SELECT COUNT(*) AS count FROM ranobelib_titles WHERE is_active = 1 AND snapshot_ready = 1')),
-      count(env.DB.prepare(`
-        SELECT COUNT(*) AS count
-        FROM title_subscription_exclusions e
-        JOIN ranobelib_titles t ON t.book_ref = e.book_ref
-        WHERE e.user_telegram_id = ? AND t.is_active = 1 AND t.snapshot_ready = 1
-      `).bind(userId)),
-    ]);
-    effectiveCount = Math.max(0, activeCount - exclusionCount);
-  } else {
-    effectiveCount = await count(env.DB.prepare(`
+    `).bind(userId),
+    env.DB.prepare('SELECT COUNT(*) AS count FROM ranobelib_titles WHERE is_active = 1 AND snapshot_ready = 1'),
+    env.DB.prepare(`
+      SELECT COUNT(*) AS count
+      FROM title_subscription_exclusions e
+      JOIN ranobelib_titles t ON t.book_ref = e.book_ref
+      WHERE e.user_telegram_id = ? AND t.is_active = 1 AND t.snapshot_ready = 1
+    `).bind(userId),
+    env.DB.prepare(`
       SELECT COUNT(*) AS count
       FROM title_subscriptions s
       JOIN ranobelib_titles t ON t.book_ref = s.book_ref
       WHERE s.user_telegram_id = ? AND t.is_active = 1 AND t.snapshot_ready = 1
-    `).bind(userId));
-  }
+    `).bind(userId),
+  ]);
+
+  const allTitles = Number(allTitlesRow?.all_titles ?? 0) === 1;
+  const globalSetting = normalizeDeliverySetting(globalSettingRow?.delivery_mode, globalSettingRow?.stack_size);
+  const overrideCount = countRow(overrideCountRow);
+  const effectiveCount = allTitles
+    ? Math.max(0, countRow(activeCountRow) - countRow(exclusionCountRow))
+    : countRow(explicitCountRow);
+
   return buildNotificationDashboard({
     effectiveCount,
     allTitles,
@@ -341,21 +352,43 @@ async function titleCardPayload(
   title: NotificationUiTitle,
   returnContext: NotificationReturnContext,
 ) {
-  const [enabled, globalSetting, titleSetting] = await Promise.all([
-    isEffectivelySubscribed(env, userId, title.book_ref),
-    getGlobalDeliverySetting(env, userId),
-    getTitleDeliverySetting(env, userId, title.book_ref),
+  const [allTitlesRow, explicitRow, excludedRow, globalSettingRow, titleSettingRow] = await batchFirstRows(env, [
+    env.DB.prepare('SELECT all_titles FROM telegram_subscription_settings WHERE user_telegram_id = ? LIMIT 1').bind(userId),
+    env.DB.prepare('SELECT 1 AS subscribed FROM title_subscriptions WHERE user_telegram_id = ? AND book_ref = ? LIMIT 1').bind(userId, title.book_ref),
+    env.DB.prepare('SELECT 1 AS excluded FROM title_subscription_exclusions WHERE user_telegram_id = ? AND book_ref = ? LIMIT 1').bind(userId, title.book_ref),
+    env.DB.prepare(`
+      SELECT delivery_mode, stack_size
+      FROM telegram_subscription_settings
+      WHERE user_telegram_id = ?
+    `).bind(userId),
+    env.DB.prepare(`
+      SELECT delivery_mode, stack_size
+      FROM telegram_title_delivery_settings
+      WHERE user_telegram_id = ? AND book_ref = ?
+    `).bind(userId, title.book_ref),
   ]);
+
+  const allTitles = Number(allTitlesRow?.all_titles ?? 0) === 1;
+  const enabled = resolveEffectiveSubscription({
+    allTitles,
+    explicit: Boolean(explicitRow),
+    excluded: Boolean(excludedRow),
+  });
+  const globalSetting = normalizeDeliverySetting(globalSettingRow?.delivery_mode, globalSettingRow?.stack_size);
+  const inherited = !titleSettingRow;
+  const effective = inherited
+    ? globalSetting
+    : normalizeDeliverySetting(titleSettingRow?.delivery_mode, titleSettingRow?.stack_size);
   const completed = title.translation_status_id === 2;
-  const effective = titleSetting.setting;
   const pendingChapterCount = !completed && effective.mode === 'stack'
     ? await pendingStackChapterCount(env, userId, title.book_ref)
     : null;
+
   return buildNotificationTitleCard({
     title,
     enabled,
     completed,
-    inherited: titleSetting.inherited,
+    inherited,
     effectiveSetting: asUiSetting(effective),
     globalSetting: asUiSetting(globalSetting),
     pendingChapterCount,
@@ -417,6 +450,23 @@ async function userSubscribesToAll(env: TelegramNotificationUxEnv, userId: strin
   return Number(row?.all_titles ?? 0) === 1;
 }
 
+async function batchFirstRows(
+  env: TelegramNotificationUxEnv,
+  statements: D1PreparedStatement[],
+): Promise<Array<Record<string, unknown> | null>> {
+  const db = env.DB as D1BatchDatabase;
+  if (typeof db.batch === 'function') {
+    const results = await db.batch<Record<string, unknown>>(statements);
+    return results.map((result) => Array.isArray(result?.results) ? (result.results[0] ?? null) : null);
+  }
+  return Promise.all(statements.map((statement) => statement.first<Record<string, unknown>>()));
+}
+
+function countRow(row: Record<string, unknown> | null | undefined): number {
+  const value = Number(row?.count ?? 0);
+  return Number.isFinite(value) && value > 0 ? Math.trunc(value) : 0;
+}
+
 async function count(statement: D1PreparedStatement): Promise<number> {
   const row = await statement.first<CountRow>();
   const value = Number(row?.count ?? 0);
@@ -455,16 +505,49 @@ async function respond(
   callback: NonNullable<TelegramSubscriptionUpdate['callback_query']>,
   chatId: number,
   payload: { text: string; parse_mode?: 'HTML'; reply_markup: unknown },
+  ctx?: ExecutionContextLike,
 ): Promise<void> {
-  if (callback.id && callback.message?.message_id) {
-    await telegramCall(env, 'editMessageText', {
-      chat_id: chatId,
-      message_id: callback.message.message_id,
-      ...payload,
-    });
+  const renderCtx = notificationRendererContext(ctx);
+  const messageId = callback.message?.message_id;
+  if (!messageId) {
+    await renderTelegramScreen(
+      env,
+      { chatId },
+      payload,
+      { strategy: 'send', ctx: renderCtx },
+    );
     return;
   }
-  await telegramCall(env, 'sendMessage', { chat_id: chatId, ...payload });
+
+  await renderTelegramScreen(
+    env,
+    { chatId, messageId },
+    payload,
+    {
+      strategy: notificationRenderStrategy(callback.data ?? '', callback.message?.text ?? ''),
+      ctx: renderCtx,
+    },
+  );
+}
+
+function notificationRendererContext(ctx?: ExecutionContextLike): TelegramScreenExecutionContext | undefined {
+  if (!ctx) return undefined;
+  const timing = ctx.telegramLatencyTiming;
+  return {
+    waitUntil(promise) {
+      ctx.waitUntil(promise);
+    },
+    ...(hasRendererTiming(timing) ? { telegramLatencyTiming: timing } : {}),
+  };
+}
+
+function hasRendererTiming(
+  timing: ExecutionContextLike['telegramLatencyTiming'],
+): timing is NonNullable<TelegramScreenExecutionContext['telegramLatencyTiming']> {
+  const candidate = timing as Partial<NonNullable<TelegramScreenExecutionContext['telegramLatencyTiming']>> | undefined;
+  return typeof candidate?.mark === 'function'
+    && typeof candidate.describeRender === 'function'
+    && typeof candidate.recordTelegramApi === 'function';
 }
 
 async function answerCallback(env: TelegramNotificationUxEnv, callbackId: string, text?: string): Promise<void> {

@@ -38,6 +38,7 @@ import {
 } from './ranobelib-fast-scanner.js';
 import { getRanobeLibHome } from './ranobelib-runtime.js';
 import { createTelegramLatencyTiming, type TelegramLatencyTiming } from './telegram-latency-timing.js';
+import { withTrustedTelegramMigrations } from './telegram-migration-trust.js';
 import { notifyAdminsForProposalId } from './telegram-title-proposal-admin-alert.js';
 import {
   DELIVERY_BATCH_LIMIT,
@@ -290,20 +291,25 @@ async function dispatchTelegramWebhook(
     case 'membership-appeal':
       return (await handleChannelMembershipAppealWebhook(request, env, ctx)) ?? new Response('ok');
 
-    case 'notifications':
+    case 'notifications': {
+      const trustedEnv = withTrustedTelegramMigrations(env);
       return (await handleTelegramSubscriptionWebhookRequest(
         request,
-        env as never,
+        trustedEnv as never,
         timedTelegramContext(ctx, timing),
       )) ?? new Response('ok');
+    }
 
-    case 'proposal':
-      return appEntry.fetch(request, env as never, timedTelegramContext(ctx, timing));
+    case 'proposal': {
+      const trustedEnv = withTrustedTelegramMigrations(env);
+      return appEntry.fetch(request, trustedEnv as never, timedTelegramContext(ctx, timing));
+    }
 
     case 'generic-private-text': {
       const appeal = await handleChannelMembershipAppealWebhook(request, env, ctx);
       if (appeal) return appeal;
-      return appEntry.fetch(request, env as never, timedTelegramContext(ctx, timing));
+      const trustedEnv = withTrustedTelegramMigrations(env);
+      return appEntry.fetch(request, trustedEnv as never, timedTelegramContext(ctx, timing));
     }
 
     case 'compat':

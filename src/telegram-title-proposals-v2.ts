@@ -1,6 +1,11 @@
 import { buildMainMenu, type TelegramPayload } from './telegram-bot-ui.js';
 import { startCallbackAck, type ExecutionContextLike } from './telegram-fast-ack.js';
 import {
+  renderTelegramScreen,
+  type TelegramRenderStrategy,
+  type TelegramScreenExecutionContext,
+} from './telegram-screen-renderer.js';
+import {
   clearNotificationSearch,
   ensureTelegramTextBotUxSchema,
   setProposalInputActive,
@@ -132,7 +137,14 @@ export async function handleTelegramTitleProposalV2WebhookRequest(
       await setProposalInputActive(env, String(message.from.id), 0);
       await clearTransientNotificationInput(env, message.from.id);
     })();
-    await Promise.all([menuPromise, housekeepingPromise]);
+    if (ctx) {
+      ctx.waitUntil(housekeepingPromise.catch((error) => {
+        console.error('Telegram /start housekeeping failed', error);
+      }));
+      await menuPromise;
+    } else {
+      await Promise.all([menuPromise, housekeepingPromise]);
+    }
     return json({ ok: true });
   }
 
@@ -208,7 +220,7 @@ async function handleV2Callback(
 
   if (data === 'prop:home') {
     await setProposalInputActive(env, String(callback.from.id), 0);
-    await editCallbackMessage(env, callback, buildMainMenu(origin));
+    await editCallbackMessage(env, callback, buildMainMenu(origin), ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -217,10 +229,10 @@ async function handleV2Callback(
     const session = data === 'prop:new' ? await loadProposalSession(env, callback.from.id) : null;
     if (session && isMeaningfulDraft(session)) {
       await setProposalInputActive(env, String(callback.from.id), 0);
-      await editCallbackMessage(env, callback, buildProposalResume(session));
+      await editCallbackMessage(env, callback, buildProposalResume(session), ctx);
     } else {
       await resetProposalSession(env, callback.from, callback.message!.chat.id);
-      await editCallbackMessage(env, callback, buildProposalSourceChoice());
+      await editCallbackMessage(env, callback, buildProposalSourceChoice(), ctx);
     }
     await answerCallback(env, callback.id);
     return json({ ok: true });
@@ -234,20 +246,20 @@ async function handleV2Callback(
   const session = await loadProposalSession(env, callback.from.id);
   if (data === 'prop:cancel:confirm') {
     await deleteProposalSession(env, callback.from.id);
-    await editCallbackMessage(env, callback, buildMainMenu(origin));
+    await editCallbackMessage(env, callback, buildMainMenu(origin), ctx);
     await answerCallback(env, callback.id, 'Черновик удалён.');
     return json({ ok: true });
   }
 
   if (!session) {
-    await editCallbackMessage(env, callback, buildProposalStale());
+    await editCallbackMessage(env, callback, buildProposalStale(), ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
 
   if (data === 'prop:resume' || data === 'prop:cancel:keep') {
     await setProposalInputActive(env, String(callback.from.id), 1);
-    await editCallbackMessage(env, callback, renderSession(session));
+    await editCallbackMessage(env, callback, renderSession(session), ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -255,10 +267,10 @@ async function handleV2Callback(
   if (data === 'prop:cancel') {
     if (isMeaningfulDraft(session)) {
       await setProposalInputActive(env, String(callback.from.id), 0);
-      await editCallbackMessage(env, callback, buildProposalDeleteConfirmation());
+      await editCallbackMessage(env, callback, buildProposalDeleteConfirmation(), ctx);
     } else {
       await deleteProposalSession(env, callback.from.id);
-      await editCallbackMessage(env, callback, buildMainMenu(origin));
+      await editCallbackMessage(env, callback, buildMainMenu(origin), ctx);
     }
     await answerCallback(env, callback.id);
     return json({ ok: true });
@@ -267,15 +279,15 @@ async function handleV2Callback(
   if (data === 'prop:back') {
     if (returnsToReview(session)) {
       await setSessionStepAndReviewFlag(env, callback.from.id, 'review', 0);
-      await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', return_to_review: 0 }));
+      await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', return_to_review: 0 }), ctx);
     } else {
       const previous = previousStep(session);
       if (!previous) {
-        await editCallbackMessage(env, callback, buildMainMenu(origin));
+        await editCallbackMessage(env, callback, buildMainMenu(origin), ctx);
       } else {
         await setSessionStep(env, callback.from.id, previous);
         const updated = { ...session, step: previous };
-        await editCallbackMessage(env, callback, renderSession(updated));
+        await editCallbackMessage(env, callback, renderSession(updated), ctx);
       }
     }
     await answerCallback(env, callback.id);
@@ -293,7 +305,7 @@ async function handleV2Callback(
     await setSessionStepAndReviewFlag(env, callback.from.id, step, 1);
     const updated = { ...session, step, return_to_review: 1 };
     const payload = step === 'raw' ? buildProposalRawPrompt(updated) : renderSession(updated);
-    await editCallbackMessage(env, callback, payload);
+    await editCallbackMessage(env, callback, payload, ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -306,14 +318,14 @@ async function handleV2Callback(
       SET step=?,source_kind=?,candidates_json='[]',updated_at=CURRENT_TIMESTAMP
       WHERE user_telegram_id=?
     `).bind(step, sourceKind, String(callback.from.id)).run();
-    await editCallbackMessage(env, callback, buildProposalInputPrompt(step, { ...session, step, source_kind: sourceKind }));
+    await editCallbackMessage(env, callback, buildProposalInputPrompt(step, { ...session, step, source_kind: sourceKind }), ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
 
   if (data === 'prop:query:again') {
     await setSessionStep(env, callback.from.id, 'ranobelib_query');
-    await editCallbackMessage(env, callback, buildProposalInputPrompt('ranobelib_query', { ...session, step: 'ranobelib_query' }));
+    await editCallbackMessage(env, callback, buildProposalInputPrompt('ranobelib_query', { ...session, step: 'ranobelib_query' }), ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -321,16 +333,17 @@ async function handleV2Callback(
   if (data === 'prop:retry:ranobelib') {
     const ref = session.ranobelib_book_ref?.trim();
     if (!ref) {
-      await editCallbackMessage(env, callback, buildProposalInputPrompt('ranobelib_query', { ...session, step: 'ranobelib_query' }));
+      await editCallbackMessage(env, callback, buildProposalInputPrompt('ranobelib_query', { ...session, step: 'ranobelib_query' }), ctx);
       await answerCallback(env, callback.id);
       return json({ ok: true });
     }
+    const loadingMessageId = await renderRanobeLibLoading(env, callback, ctx);
     try {
       const [detail, chapters] = await Promise.all([fetchRanobeLibTitle(ref), fetchRanobeLibChapters(ref)]);
       await saveRanobeLibConfirmation(env, callback.from.id, detail, ref);
-      await editCallbackMessage(env, callback, confirmationPayload(detail, ref, chapters));
+      await editLoadingMessage(env, callback, loadingMessageId, confirmationPayload(detail, ref, chapters), ctx);
     } catch {
-      await editCallbackMessage(env, callback, buildProposalRanobeLibError());
+      await editLoadingMessage(env, callback, loadingMessageId, buildProposalRanobeLibError(), ctx);
     }
     await answerCallback(env, callback.id);
     return json({ ok: true });
@@ -339,7 +352,7 @@ async function handleV2Callback(
   if (data.startsWith('prop:results:')) {
     const page = Math.max(0, Number(data.slice('prop:results:'.length)) || 0);
     const candidates = parseCandidates(session.candidates_json);
-    await editCallbackMessage(env, callback, candidatePayload(candidates, page));
+    await editCallbackMessage(env, callback, candidatePayload(candidates, page), ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -350,17 +363,18 @@ async function handleV2Callback(
     const candidate = Number.isInteger(index) && index >= 0 ? candidates[index] : undefined;
     const ref = candidate ? ranobeLibCandidateRef(candidate) : null;
     if (!candidate || !ref) {
-      await editCallbackMessage(env, callback, buildProposalStale());
+      await editCallbackMessage(env, callback, buildProposalStale(), ctx);
       await answerCallback(env, callback.id, 'Этот вариант больше недоступен.');
       return json({ ok: true });
     }
     await savePendingRanobeLibRef(env, callback.from.id, ref);
+    const loadingMessageId = await renderRanobeLibLoading(env, callback, ctx);
     try {
       const [detail, chapters] = await Promise.all([fetchRanobeLibTitle(ref), fetchRanobeLibChapters(ref)]);
       await saveRanobeLibConfirmation(env, callback.from.id, detail, ref);
-      await editCallbackMessage(env, callback, confirmationPayload(detail, ref, chapters));
+      await editLoadingMessage(env, callback, loadingMessageId, confirmationPayload(detail, ref, chapters), ctx);
     } catch {
-      await editCallbackMessage(env, callback, buildProposalRanobeLibError());
+      await editLoadingMessage(env, callback, loadingMessageId, buildProposalRanobeLibError(), ctx);
     }
     await answerCallback(env, callback.id);
     return json({ ok: true });
@@ -369,10 +383,10 @@ async function handleV2Callback(
   if (data === 'prop:confirm') {
     if (returnsToReview(session)) {
       await setSessionStepAndReviewFlag(env, callback.from.id, 'review', 0);
-      await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', return_to_review: 0 }));
+      await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', return_to_review: 0 }), ctx);
     } else {
       await setSessionStep(env, callback.from.id, 'raw');
-      await editCallbackMessage(env, callback, buildProposalRawPrompt({ ...session, step: 'raw' }));
+      await editCallbackMessage(env, callback, buildProposalRawPrompt({ ...session, step: 'raw' }), ctx);
     }
     await answerCallback(env, callback.id);
     return json({ ok: true });
@@ -392,7 +406,7 @@ async function handleV2Callback(
       raw_file_name: null,
       raw_file_size: null,
       return_to_review: 0,
-    }));
+    }), ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -412,7 +426,7 @@ async function handleV2Callback(
         raw_file_name: null,
         raw_file_size: null,
         return_to_review: 0,
-      }));
+      }), ctx);
     } else {
       await env.DB.prepare(`
         UPDATE telegram_proposal_sessions
@@ -420,7 +434,7 @@ async function handleV2Callback(
             raw_mime_type=NULL,updated_at=CURRENT_TIMESTAMP
         WHERE user_telegram_id=?
       `).bind(String(callback.from.id)).run();
-      await editCallbackMessage(env, callback, buildProposalCommentPrompt({ ...session, step: 'comment', raw_file_id: null, raw_file_name: null, raw_file_size: null }));
+      await editCallbackMessage(env, callback, buildProposalCommentPrompt({ ...session, step: 'comment', raw_file_id: null, raw_file_name: null, raw_file_size: null }), ctx);
     }
     await answerCallback(env, callback.id);
     return json({ ok: true });
@@ -428,16 +442,16 @@ async function handleV2Callback(
 
   if (data === 'prop:raw:continue') {
     if (!session.raw_file_id) {
-      await editCallbackMessage(env, callback, buildProposalRawPrompt(session));
+      await editCallbackMessage(env, callback, buildProposalRawPrompt(session), ctx, 'edit');
       await answerCallback(env, callback.id, 'Сначала отправьте RAW-файл или пропустите этот шаг.');
       return json({ ok: true });
     }
     if (returnsToReview(session)) {
       await setSessionStepAndReviewFlag(env, callback.from.id, 'review', 0);
-      await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', return_to_review: 0 }));
+      await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', return_to_review: 0 }), ctx);
     } else {
       await setSessionStep(env, callback.from.id, 'comment');
-      await editCallbackMessage(env, callback, buildProposalCommentPrompt({ ...session, step: 'comment' }));
+      await editCallbackMessage(env, callback, buildProposalCommentPrompt({ ...session, step: 'comment' }), ctx);
     }
     await answerCallback(env, callback.id);
     return json({ ok: true });
@@ -450,7 +464,7 @@ async function handleV2Callback(
           step='raw',updated_at=CURRENT_TIMESTAMP
       WHERE user_telegram_id=?
     `).bind(String(callback.from.id)).run();
-    await editCallbackMessage(env, callback, buildProposalRawPrompt({ ...session, step: 'raw', raw_file_id: null, raw_file_name: null, raw_file_size: null }));
+    await editCallbackMessage(env, callback, buildProposalRawPrompt({ ...session, step: 'raw', raw_file_id: null, raw_file_name: null, raw_file_size: null }), ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -469,7 +483,7 @@ async function handleV2Callback(
         WHERE user_telegram_id=?
       `).bind('review', String(callback.from.id)).run();
     }
-    await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', comment: '', return_to_review: 0 }));
+    await editCallbackMessage(env, callback, buildProposalReview({ ...session, step: 'review', comment: '', return_to_review: 0 }), ctx);
     await answerCallback(env, callback.id);
     return json({ ok: true });
   }
@@ -904,13 +918,83 @@ async function sendMessage(env: TelegramTitleProposalV2Env, chatId: number, payl
   await telegramCall(env, 'sendMessage', { chat_id: chatId, ...payload });
 }
 
-async function editCallbackMessage(env: TelegramTitleProposalV2Env, callback: TelegramCallbackQuery, payload: TelegramPayload): Promise<void> {
+function proposalRenderStrategy(data: string): TelegramRenderStrategy {
+  if (data.startsWith('prop:results:')) return 'edit';
+  return 'replace';
+}
+
+function proposalRendererContext(ctx?: ExecutionContextLike): TelegramScreenExecutionContext | undefined {
+  if (!ctx) return undefined;
+  const timing = ctx.telegramLatencyTiming as unknown as Partial<NonNullable<TelegramScreenExecutionContext['telegramLatencyTiming']>> | undefined;
+  return {
+    waitUntil(promise) {
+      ctx.waitUntil(promise);
+    },
+    ...(typeof timing?.mark === 'function'
+      && typeof timing.describeRender === 'function'
+      && typeof timing.recordTelegramApi === 'function'
+      ? { telegramLatencyTiming: timing as NonNullable<TelegramScreenExecutionContext['telegramLatencyTiming']> }
+      : {}),
+  };
+}
+
+async function editCallbackMessage(
+  env: TelegramTitleProposalV2Env,
+  callback: TelegramCallbackQuery,
+  payload: TelegramPayload,
+  ctx?: ExecutionContextLike,
+  strategy?: TelegramRenderStrategy,
+): Promise<void> {
   if (!callback.message?.chat.id) return;
-  await telegramCall(env, 'editMessageText', {
-    chat_id: callback.message.chat.id,
-    message_id: callback.message.message_id,
-    ...payload,
-  });
+  await renderTelegramScreen(
+    env,
+    { chatId: callback.message.chat.id, messageId: callback.message.message_id },
+    payload,
+    { strategy: strategy ?? proposalRenderStrategy(callback.data ?? ''), ctx: proposalRendererContext(ctx) },
+  );
+}
+
+function ranobeLibLoadingPayload(): TelegramPayload {
+  return {
+    text: '⏳ <b>Загружаю данные RanobeLib…</b>',
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: [] },
+  };
+}
+
+async function renderRanobeLibLoading(
+  env: TelegramTitleProposalV2Env,
+  callback: TelegramCallbackQuery,
+  ctx?: ExecutionContextLike,
+): Promise<number | undefined> {
+  if (!callback.message?.chat.id) return undefined;
+  const rendered = await renderTelegramScreen(
+    env,
+    { chatId: callback.message.chat.id, messageId: callback.message.message_id },
+    ranobeLibLoadingPayload(),
+    { strategy: 'replace', ctx: proposalRendererContext(ctx) },
+  );
+  return rendered.messageId;
+}
+
+async function editLoadingMessage(
+  env: TelegramTitleProposalV2Env,
+  callback: TelegramCallbackQuery,
+  loadingMessageId: number | undefined,
+  payload: TelegramPayload,
+  ctx?: ExecutionContextLike,
+): Promise<void> {
+  if (!callback.message?.chat.id) return;
+  if (!loadingMessageId) {
+    await editCallbackMessage(env, callback, payload, ctx);
+    return;
+  }
+  await renderTelegramScreen(
+    env,
+    { chatId: callback.message.chat.id, messageId: loadingMessageId },
+    payload,
+    { strategy: 'edit', ctx: proposalRendererContext(ctx) },
+  );
 }
 
 async function answerCallback(_env: TelegramTitleProposalV2Env, _callbackId: string, _text?: string): Promise<void> {
