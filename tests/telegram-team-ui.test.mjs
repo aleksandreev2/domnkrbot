@@ -5,6 +5,7 @@ import {
   buildTeamNotificationDashboard,
   buildTeamListScreen,
   buildTeamTitleCard,
+  buildTeamTranslationsScreen,
   buildWorkSearchResults,
   parseTeamNotificationCallback,
 } from '../dist-runtime/telegram-team-notification-ux.js';
@@ -77,6 +78,31 @@ test('team-title card shows translator identity, inherited whole-team state and 
   const callbacks = payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
   assert.ok(callbacks.includes('subs:mt:title:toggle:7:123:team:0'));
   assert.ok(callbacks.includes('subs:mt:title:mode:7:123:team:0'));
+});
+
+test('completed team title preserves completed-list origin for card navigation', () => {
+  const completedTitle = { ...title, semanticStatus: 'completed' };
+  const list = buildTeamTranslationsScreen({
+    team: { id: 7, displayName: 'Team Seven', isPrimary: false, followed: true, activeCount: 3, completedCount: 2 },
+    translations: [completedTitle],
+    completed: true,
+    page: 2,
+  });
+  const titleButton = list.reply_markup.inline_keyboard.flat().find((button) => button.text.includes('Example Novel'));
+  assert.equal(titleButton?.callback_data, 'subs:mt:title:7:123:completed:2');
+  assert.deepEqual(parseTeamNotificationCallback('subs:mt:title:7:123:completed:2'), {
+    kind: 'title', teamId: 7, titleId: 123, origin: 'completed', page: 2,
+  });
+
+  const card = buildTeamTitleCard({
+    translation: completedTitle,
+    deliveryLabel: '⚡ Мгновенно',
+    inheritedDelivery: true,
+    origin: 'completed',
+    page: 2,
+  });
+  const back = card.reply_markup.inline_keyboard.flat().find((button) => button.text === '↩️ Назад');
+  assert.equal(back?.callback_data, 'subs:mt:team:7:completed:2');
 });
 
 test('multi-team callbacks stay compact and retain team/work scope', () => {
