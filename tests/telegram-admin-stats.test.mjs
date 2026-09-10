@@ -81,6 +81,14 @@ class StatsDB {
     if (/FROM ranobelib_releases/i.test(query)) {
       return [{ releases_24h: 8, releases_7d: 45, last_release_at: '2026-09-10 09:30:00', last_sync_at: '2026-09-10 09:32:00', failures: 2, due_scans: 6 }];
     }
+    if (/FROM ranobelib_teams/i.test(query) && /teams_published/i.test(query)) {
+      return [{
+        teams_published: 3, teams_hidden: 2, teams_paused: 1, teams_error: 1, teams_sync_errors: 1, teams_stale: 2,
+        branches_native: 50, branches_fallback: 4, branches_ambiguous: 1,
+        legacy_effective_users: 33, primary_effective_users: 33, parity_mismatch: 0,
+        rollout_shadow: 1, rollout_delivery: 0, rollout_ui: 0,
+      }];
+    }
     if (/json_group_array/i.test(query) && /FROM ranobelib_titles/i.test(query)) {
       return [{ items: '[]' }];
     }
@@ -138,6 +146,8 @@ test('admin /stats sends a compact overview with navigable detailed sections', a
     assert.match(send.body.text, /Пользователи/);
     assert.match(send.body.text, /Переводы/);
     assert.match(send.body.text, /Очередь/);
+    assert.match(send.body.text, /Команды:.*3.*published.*2.*hidden.*1.*paused.*1.*error/);
+    assert.match(send.body.text, /stale.*2/);
     const callbacks = JSON.stringify(send.body.reply_markup);
     for (const section of ['users', 'subscriptions', 'translations', 'delivery', 'proposals', 'publications', 'access', 'system']) {
       assert.match(callbacks, new RegExp(`stats:${section}`), `missing ${section} stats button`);
@@ -167,5 +177,21 @@ test('admin stats section callback edits the current screen and exposes translat
     assert.match(edit.body.text, /Задержка &gt;5 мин:\s*<b>1<\/b>/);
     assert.match(JSON.stringify(edit.body.reply_markup), /stats:home/);
     assert.ok(calls.some((call) => call.url.endsWith('/answerCallbackQuery')), 'callback must be acknowledged');
+  });
+});
+
+test('system stats expose multi-team branch, migration parity and rollout diagnostics', async () => {
+  const runtime = await loadRuntime();
+  const db = new StatsDB();
+  const env = { DB: db, TELEGRAM_BOT_TOKEN: 'token', ADMIN_TELEGRAM_IDS: '42' };
+
+  await captureTelegram(async (calls) => {
+    const response = await runtime.handleTelegramAdminStatsWebhook(requestFor(callback('stats:system')), env);
+    assert.ok(response);
+    const edit = calls.find((call) => call.url.endsWith('/editMessageText'));
+    assert.ok(edit);
+    assert.match(edit.body.text, /Branch identity:.*native.*50.*fallback.*4.*ambiguous.*1/);
+    assert.match(edit.body.text, /Migration parity:.*legacy.*33.*primary.*33.*mismatch.*0/);
+    assert.match(edit.body.text, /Rollout:.*shadow.*ON.*delivery.*OFF.*UI.*OFF/);
   });
 });
