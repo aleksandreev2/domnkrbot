@@ -49,3 +49,14 @@ test('Telegram channel capability is resolved through getChat and probed through
   assert.match(source, /getChat/);
   assert.match(source, /getChatMember/);
 });
+
+test('resume is idempotent and republishes only after a successful hidden sync', () => {
+  const guard = source.indexOf("action === 'resume' && !team.isPrimary && team.lifecycleState === 'paused'");
+  const hidden = source.indexOf("setRanobeLibTeamLifecycle(env, teamId, 'hidden')", guard);
+  const sync = source.indexOf('await discoverOneRegisteredTeam(env, runnable)', hidden);
+  const republish = source.indexOf("setRanobeLibTeamLifecycle(env, teamId, 'published')", sync);
+  assert.ok(guard >= 0, 'resume must only transition an actually paused non-primary team');
+  assert.ok(hidden > guard, 'resume must become hidden while refreshing its baseline');
+  assert.ok(sync > hidden, 'resume must sync before becoming user-visible again');
+  assert.ok(republish > sync, 'resume must restore published only after successful sync');
+});
