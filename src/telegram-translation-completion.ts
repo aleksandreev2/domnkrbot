@@ -7,7 +7,7 @@ export function formatTranslationCompletionNotification(input: {
   chapterCount: number;
   firstNumber: string | null;
   lastNumber: string | null;
-  teamNames?: string[];
+  teamNames?: readonly string[];
 }): TelegramMessagePayload {
   const chapterCount = nonNegativeInteger(input.chapterCount);
   const chapterLine = completionChapterLine(chapterCount, input.firstNumber, input.lastNumber);
