@@ -23,10 +23,11 @@ CREATE INDEX IF NOT EXISTS idx_ranobelib_titles_translation_completed
 CREATE INDEX IF NOT EXISTS idx_ranobelib_titles_completion_pending
   ON ranobelib_titles(translation_completion_pending, is_active, next_check_at);
 
--- Discovery marks a known 0 -> 1 transition as pending and leaves the title technically active.
--- The scanner clears pending only after a successful final chapter poll. This trigger therefore
--- inserts the completion release after any final chapter release, eliminating the discovery/scan
--- race. NULL -> 1 historical/initial classification never enters pending and remains silent.
+-- Discovery marks a known 0 -> 1 transition as logically completed/inactive immediately and sets
+-- pending=1. The fast scanner explicitly includes pending rows even though they are inactive and
+-- clears pending only after a successful final chapter poll. This trigger therefore inserts the
+-- completion release after any final chapter release, eliminating the discovery/scan race.
+-- NULL -> 1 historical/initial classification never enters pending and remains silent.
 CREATE TRIGGER IF NOT EXISTS trg_ranobelib_translation_completed
 AFTER UPDATE OF translation_completion_pending ON ranobelib_titles
 WHEN OLD.translation_completion_pending = 1
