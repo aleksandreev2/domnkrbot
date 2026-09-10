@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+const constantsUrl = 'https://api.cdnlibs.org/api/constants?fields[]=scanlateStatus';
 const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&fields[]=status_id&page=1';
+
+function constantsResponse() {
+  return Response.json({ data: { scanlateStatus: [
+    { id: 1, label: 'Продолжается', site_ids: [3] },
+    { id: 7, label: 'Завершён', site_ids: [3] },
+  ] } });
+}
 
 function catalogResponse(data) {
   return new Response(JSON.stringify({ data, meta: { current_page: 1, has_next_page: false } }), {
@@ -40,6 +48,14 @@ async function withFetch(handler, fn) {
   try { return await fn(requests); } finally { globalThis.fetch = original; }
 }
 
+function discoveryFetch(titles) {
+  return (url) => {
+    if (url === constantsUrl) return constantsResponse();
+    if (url === teamCatalogUrl) return catalogResponse(titles);
+    return new Response('unexpected', { status: 500 });
+  };
+}
+
 test('team discovery uses one bounded JSON upsert, refreshes effective demand, makes new active titles immediately scannable, and never fetches chapters', async () => {
   const { discoverRanobeLibTeam } = await import('../dist-runtime/ranobelib-discovery-scheduler.js');
   const db = new DB(['999--old-book']);
@@ -53,10 +69,10 @@ test('team discovery uses one bounded JSON upsert, refreshes effective demand, m
   }));
 
   await withFetch(
-    (url) => url === teamCatalogUrl ? catalogResponse(titles) : new Response('unexpected', { status: 500 }),
+    discoveryFetch(titles),
     async (requests) => {
       const result = await discoverRanobeLibTeam({ DB: db, RANOBELIB_TEAM_REF: '11969--dom-nekromanta' });
-      assert.deepEqual(requests, [teamCatalogUrl]);
+      assert.deepEqual(requests, [constantsUrl, teamCatalogUrl]);
       assert.equal(requests.some((url) => url.includes('/chapters')), false);
       assert.equal(result.discovered, 60);
       assert.equal(result.activated, 60);
@@ -69,6 +85,7 @@ test('team discovery uses one bounded JSON upsert, refreshes effective demand, m
       assert.match(upsert, /notification_subscriber_count/i);
       assert.match(upsert, /subscriber_count_updated_at/i);
       assert.match(upsert, /translation_status_id/i);
+      assert.match(upsert, /translation_is_completed/i);
       assert.match(upsert, /telegram_delivery_reachability/i);
       assert.match(upsert, /title_subscription_exclusions/i);
       assert.match(upsert, /title_subscriptions/i);
@@ -83,7 +100,7 @@ test('empty team discovery fails before existing active titles can be mass-deact
   const { discoverRanobeLibTeam } = await import('../dist-runtime/ranobelib-discovery-scheduler.js');
   const db = new DB(['62387--pokemon-master-of-tactics']);
   await withFetch(
-    (url) => url === teamCatalogUrl ? catalogResponse([]) : new Response('unexpected', { status: 500 }),
+    discoveryFetch([]),
     async () => {
       await assert.rejects(
         () => discoverRanobeLibTeam({ DB: db, RANOBELIB_TEAM_REF: '11969--dom-nekromanta' }),
