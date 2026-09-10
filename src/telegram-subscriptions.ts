@@ -4,7 +4,7 @@ import { formatReleaseNotification as formatLegacyReleaseNotification } from './
 export * from './telegram-subscriptions-legacy.js';
 
 export type TeamAwareReleaseNotificationInput = Parameters<typeof formatLegacyReleaseNotification>[0] & {
-  teamNames?: string[];
+  teamNames?: readonly string[];
 };
 
 export function formatReleaseNotification(release: TeamAwareReleaseNotificationInput) {
