@@ -42,6 +42,12 @@ type AdminInputRow = {
   draft_team_ref: string | null;
   draft_display_name: string | null;
 };
+export type TeamTranslationDiagnostics = {
+  total: number;
+  active: number;
+  completed: number;
+  unknown: number;
+};
 
 export function parseRanobeLibTeamInput(value: string): { ranobelibTeamId: number; ranobelibTeamRef: string } | null {
   const text = String(value ?? '').trim();
@@ -73,7 +79,7 @@ export function buildTeamAdminList(teams: Array<Pick<RanobeLibTeamRecord, 'id' |
   return { text: lines.join('\n'), parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } };
 }
 
-export function buildTeamAdminCard(team: RanobeLibTeamRecord): TelegramPayload {
+export function buildTeamAdminCard(team: RanobeLibTeamRecord, diagnostics?: TeamTranslationDiagnostics | null): TelegramPayload {
   const rows: TelegramButton[][] = [];
   if (!team.isPrimary) {
     if (team.lifecycleState === 'hidden') rows.push([{ text: '🌐 Опубликовать', callback_data: `teamadmin:publish:${team.id}` }]);
@@ -84,6 +90,10 @@ export function buildTeamAdminCard(team: RanobeLibTeamRecord): TelegramPayload {
   rows.push([{ text: '📣 Канал рекомендации', callback_data: `teamadmin:channel:${team.id}` }]);
   if (team.recommendationChatId) rows.push([{ text: '❌ Убрать канал рекомендации', callback_data: `teamadmin:channel:clear:${team.id}` }]);
   rows.push([{ text: '↩️ Ко всем командам', callback_data: 'teamadmin:home' }], [mainMenuButton()]);
+  const diagnosticLines = diagnostics ? [
+    `Переводы: <b>${diagnostics.total}</b>`,
+    `Статусы: активных <b>${diagnostics.active}</b> · завершённых <b>${diagnostics.completed}</b> · unknown <b>${diagnostics.unknown}</b>`,
+  ] : [];
   return {
     text: [
       `${team.isPrimary ? '⭐ ' : ''}<b>${escapeHtml(team.displayName)}</b>`,
@@ -92,6 +102,7 @@ export function buildTeamAdminCard(team: RanobeLibTeamRecord): TelegramPayload {
       `Состояние: ${lifecycleLabel(team.lifecycleState)}`,
       `Последняя синхронизация: ${escapeHtml(team.lastSyncAt ?? 'ещё не было')}`,
       `Ошибка: ${escapeHtml(team.lastSyncError ?? 'нет')}`,
+      ...diagnosticLines,
       `Канал рекомендации: ${escapeHtml(team.recommendationChatUsername ? `@${team.recommendationChatUsername}` : team.recommendationChatTitle ?? 'не привязан')}`,
       `Проверка членства: ${team.recommendationMembershipCapable ? '✅ доступна' : '— недоступна'}`,
     ].join('\n'),
@@ -181,9 +192,7 @@ export async function handleTelegramTeamAdmin(
         .bind(compactError(error), team.id).run();
     }
     await clearAdminInput(env, String(userId));
-    const refreshed = await getRanobeLibTeamById(env, team.id);
-    if (refreshed) await sendPayload(env, chatId, buildTeamAdminCard(refreshed));
-    return true;
+    return showTeam(env, chatId, team.id);
   }
 
   let match = /^teamadmin:view:(\d+)$/.exec(data);
@@ -284,8 +293,29 @@ export async function handleTelegramTeamAdmin(
 
 async function showTeam(env: TelegramTeamAdminEnv, chatId: number, teamId: number): Promise<boolean> {
   const team = await getRanobeLibTeamById(env, teamId);
-  if (team) await sendPayload(env, chatId, buildTeamAdminCard(team));
+  if (team) {
+    const diagnostics = await loadTeamTranslationDiagnostics(env, teamId);
+    await sendPayload(env, chatId, buildTeamAdminCard(team, diagnostics));
+  }
   return true;
+}
+
+async function loadTeamTranslationDiagnostics(env: TelegramTeamAdminEnv, teamId: number): Promise<TeamTranslationDiagnostics> {
+  const row = await env.DB.prepare(`
+    SELECT
+      COUNT(*) AS total,
+      SUM(CASE WHEN presence_state='active' AND semantic_status='active' THEN 1 ELSE 0 END) AS active,
+      SUM(CASE WHEN presence_state='active' AND semantic_status='completed' THEN 1 ELSE 0 END) AS completed,
+      SUM(CASE WHEN presence_state='active' AND semantic_status='unknown' THEN 1 ELSE 0 END) AS unknown
+    FROM ranobelib_team_translations
+    WHERE team_id=?
+  `).bind(teamId).first<Record<string, unknown>>();
+  return {
+    total: count(row?.total),
+    active: count(row?.active),
+    completed: count(row?.completed),
+    unknown: count(row?.unknown),
+  };
 }
 
 async function getAdminInput(env: TelegramTeamAdminEnv, userId: string): Promise<AdminInputRow | null> {
@@ -386,6 +416,11 @@ function lifecycleLabel(value: RanobeLibTeamRecord['lifecycleState']): string {
 
 function compactError(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 300);
+}
+
+function count(value: unknown): number {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
 }
 
 function truncate(value: string, max: number): string {
