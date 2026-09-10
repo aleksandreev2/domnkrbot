@@ -31,3 +31,9 @@ test('fast scanner prioritizes pending completions even when logically inactive 
   assert.match(scanner, /translation_completion_pending\s*=\s*CASE[\s\S]*THEN\s+0/i);
   assert.match(scanner, /is_active\s*=\s*CASE[\s\S]*translation_is_completed\s*=\s*1[\s\S]*THEN\s+0/i);
 });
+
+test('delivery cannot race the final scan and split final chapters from the completion message', () => {
+  const delivery = read('src/telegram-notification-delivery.ts');
+  assert.match(delivery, /JOIN\s+ranobelib_titles\s+\w+\s+ON\s+\w+\.book_ref\s*=\s*r\.book_ref/i);
+  assert.match(delivery, /translation_completion_pending\s*=\s*0/i);
+});
