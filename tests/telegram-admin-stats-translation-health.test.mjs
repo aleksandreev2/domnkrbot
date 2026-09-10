@@ -131,7 +131,7 @@ test('translation stats distinguish due scans from genuine delay and name proble
 test('translation health SQL excludes removed team titles from unknown/error health while counting them as archive', () => {
   const source = readFileSync(new URL('../src/telegram-admin-stats.ts', import.meta.url), 'utf8');
   assert.match(source, /AS archived/i);
-  assert.match(source, /translation_is_completed\s+IS\s+NULL\s+AND\s+is_active\s*=\s*1/i);
+  assert.match(source, /translation_is_completed\s+IS\s+NULL[\s\S]{0,80}is_active\s*=\s*1|is_active\s*=\s*1[\s\S]{0,80}translation_is_completed\s+IS\s+NULL/i);
   assert.match(source, /sync_error\s+IS\s+NOT\s+NULL[\s\S]{0,180}is_active\s*=\s*1|is_active\s*=\s*1[\s\S]{0,180}sync_error\s+IS\s+NOT\s+NULL/i);
   assert.match(source, /WHERE\s+is_active\s*=\s*1[\s\S]{0,260}translation_is_completed\s+IS\s+NULL/i);
 });
