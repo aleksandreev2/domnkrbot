@@ -41,6 +41,7 @@
     "src/telegram-title-proposal-cabinet.ts",
     "src/telegram-title-proposals.ts",
     "src/telegram-title-proposal-admin-alert.ts",
+    "src/telegram-admin-stats.ts",
     "src/telegram-subscription-webhook.ts",
     "src/telegram-webhook-routing.ts",
     "src/telegram-fast-ack.ts",

@@ -209,12 +209,14 @@ async function selectReadyDeliveryGroups(
           COALESCE(MAX(td.stack_size), MAX(s.stack_size)) AS stack_size
         FROM ranobelib_notification_outbox o
         JOIN ranobelib_releases r ON r.id = o.release_id
+        JOIN ranobelib_titles lifecycle ON lifecycle.book_ref = r.book_ref
         LEFT JOIN telegram_subscription_settings s
           ON s.user_telegram_id = o.user_telegram_id
         LEFT JOIN telegram_title_delivery_settings td
           ON td.user_telegram_id = o.user_telegram_id
          AND td.book_ref = r.book_ref
         WHERE o.status IN ('pending','retry')
+          AND lifecycle.translation_completion_pending = 0
         GROUP BY o.user_telegram_id, r.book_ref
       )
       SELECT grouped.user_telegram_id, grouped.book_ref, grouped.oldest_pending_at

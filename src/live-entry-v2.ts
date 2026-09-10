@@ -37,6 +37,7 @@ import {
   scanIdleRanobeLibTitles,
 } from './ranobelib-fast-scanner.js';
 import { getRanobeLibHome } from './ranobelib-runtime.js';
+import { handleTelegramAdminStatsWebhook, type TelegramAdminStatsEnv } from './telegram-admin-stats.js';
 import { createTelegramLatencyTiming, type TelegramLatencyTiming } from './telegram-latency-timing.js';
 import { withTrustedTelegramMigrations } from './telegram-migration-trust.js';
 import { notifyAdminsForProposalId } from './telegram-title-proposal-admin-alert.js';
@@ -75,6 +76,7 @@ type Env = PublicationCommentGateEnv
   & PublicationFileCachePrewarmEnv
   & PublicationReleaseAnalyticsEnv
   & TelegramSubscriptionEnv
+  & TelegramAdminStatsEnv
   & ChannelMembershipEnv
   & NotificationDeliveryEnv
   & {
@@ -155,14 +157,10 @@ export default {
       }
     }
 
-    // Catalog reads must never start upstream crawling. HOT/IDLE scheduled jobs are the sole
-    // automatic chapter-polling owners; this route only exposes the latest D1 snapshot.
     if (request.method === 'GET' && url.pathname === '/api/ranobelib') {
       return json(await getRanobeLibHome(env));
     }
 
-    // Appeals must run before private reader delivery: an already-blacklisted user must see the
-    // appeal action instead of reaching a download handler first.
     const membershipAppealWebhook = await handleChannelMembershipAppealWebhook(request, env, ctx);
     if (membershipAppealWebhook) return membershipAppealWebhook;
 
@@ -187,8 +185,6 @@ export default {
     const analytics = await handlePublishingAnalyticsV2(request, env);
     if (analytics) return analytics;
 
-    // Website proposals are created by the base worker. Alert admins only after a confirmed 201;
-    // alert delivery is best-effort and never changes the proposal response itself.
     if (request.method === 'POST' && url.pathname === '/api/proposals') {
       const response = await baseWorker.fetch(request, env as never, ctx as never);
       if (response.status === 201) {
@@ -299,6 +295,9 @@ async function dispatchTelegramWebhook(
         timedTelegramContext(ctx, timing),
       )) ?? new Response('ok');
     }
+
+    case 'admin-stats':
+      return (await handleTelegramAdminStatsWebhook(request, env, timedTelegramContext(ctx, timing))) ?? new Response('ok');
 
     case 'proposal': {
       const trustedEnv = withTrustedTelegramMigrations(env);

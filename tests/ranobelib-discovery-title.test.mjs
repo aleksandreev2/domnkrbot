@@ -3,7 +3,15 @@ import test from 'node:test';
 import { RanobeLibClient } from '../dist/index.js';
 import { ensureTelegramSubscriptionCatalog } from '../dist-runtime/telegram-subscription-catalog.js';
 
+const constantsUrl = 'https://api.cdnlibs.org/api/constants?fields[]=scanlateStatus';
 const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&fields[]=status_id&page=1';
+
+function constantsResponse() {
+  return Response.json({ data: { scanlateStatus: [
+    { id: 1, label: 'Продолжается', site_ids: [3] },
+    { id: 7, label: 'Завершён', site_ids: [3] },
+  ] } });
+}
 
 function catalogResponse() {
   return new Response(JSON.stringify({
@@ -23,12 +31,14 @@ function catalogResponse() {
   }), { headers: { 'content-type': 'application/json' } });
 }
 
+function fetchCatalog(url) {
+  if (String(url) === constantsUrl) return constantsResponse();
+  if (String(url) === teamCatalogUrl) return catalogResponse();
+  return new Response('not found', { status: 404 });
+}
+
 test('team discovery preserves title, cover, and translation status metadata', async () => {
-  const client = new RanobeLibClient({
-    fetchImpl: async (url) => String(url) === teamCatalogUrl
-      ? catalogResponse()
-      : new Response('not found', { status: 404 }),
-  });
+  const client = new RanobeLibClient({ fetchImpl: fetchCatalog });
 
   const books = await client.discoverTeamBooks('11969--dom-nekromanta');
   assert.equal(books.length, 1);
@@ -56,7 +66,7 @@ class Statement {
   }
   async all() { return { results: [] }; }
   async run() {
-    if (this.query.startsWith('INSERT INTO ranobelib_titles')) {
+    if (/INSERT INTO ranobelib_titles/i.test(this.query)) {
       this.db.titleInserts.push({ query: this.query, values: [...this.values] });
     }
     return { meta: { changes: 1 } };
@@ -81,9 +91,7 @@ async function withCatalogFetch(fn) {
   const requests = [];
   globalThis.fetch = async (url) => {
     requests.push(String(url));
-    return String(url) === teamCatalogUrl
-      ? catalogResponse()
-      : new Response('not found', { status: 404 });
+    return fetchCatalog(url);
   };
   try { return await fn(requests); } finally { globalThis.fetch = originalFetch; }
 }
@@ -99,7 +107,8 @@ test('Telegram catalog bootstrap stores the discovered title before chapter snap
     assert.equal(db.titleInserts.length, 1);
     assert.match(db.titleInserts[0].query, /\btitle\b/);
     assert.match(db.titleInserts[0].query, /translation_status_id/);
-    assert.ok(db.titleInserts[0].values.includes('Покемон: Мастер тактики'));
+    assert.match(db.titleInserts[0].query, /translation_is_completed/);
+    assert.ok(db.titleInserts[0].values.some((value) => typeof value === 'string' && value.includes('Покемон: Мастер тактики')));
   });
 });
 
@@ -111,8 +120,8 @@ test('Telegram catalog refreshes existing active rows when some titles are still
       RANOBELIB_TEAM_REF: '11969--dom-nekromanta',
     });
     assert.equal(count, 1);
-    assert.deepEqual(requests, [teamCatalogUrl]);
+    assert.deepEqual(requests, [constantsUrl, teamCatalogUrl]);
     assert.equal(db.titleInserts.length, 1);
-    assert.ok(db.titleInserts[0].values.includes('Покемон: Мастер тактики'));
+    assert.ok(db.titleInserts[0].values.some((value) => typeof value === 'string' && value.includes('Покемон: Мастер тактики')));
   });
 });

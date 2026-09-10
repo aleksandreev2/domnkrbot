@@ -5,6 +5,7 @@ export type TelegramWebhookRoute =
   | 'reader-forward'
   | 'membership-appeal'
   | 'notifications'
+  | 'admin-stats'
   | 'proposal'
   | 'generic-private-text'
   | 'compat';
@@ -41,10 +42,12 @@ export function classifyTelegramWebhookUpdate(update: TelegramWebhookUpdateLike)
   if (callbackData.startsWith('gate-thanks:') || callbackData.startsWith('gate-download:')) return 'reader-gate';
   if (callbackData === 'membership:appeal' || callbackData.startsWith('membership:appeal:')) return 'membership-appeal';
   if (callbackData === 'prop:notifications' || callbackData.startsWith('subs:')) return 'notifications';
+  if (callbackData.startsWith('stats:')) return 'admin-stats';
   if (callbackData.startsWith('prop:')) return 'proposal';
 
   if (message?.chat?.type === 'private') {
     if (isCommand(text, 'notifications') || isCommand(text, 'subscriptions')) return 'notifications';
+    if (isCommand(text, 'stats')) return 'admin-stats';
     if (isCommand(text, 'start') || isCommand(text, 'propose')) return 'proposal';
     if (text && !text.startsWith('/')) return 'generic-private-text';
   }
