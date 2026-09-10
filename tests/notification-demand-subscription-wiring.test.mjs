@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-const source = readFileSync(new URL('../src/telegram-subscriptions.ts', import.meta.url), 'utf8');
+const publicSource = readFileSync(new URL('../src/telegram-subscriptions.ts', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../src/telegram-subscriptions-legacy.ts', import.meta.url), 'utf8');
+
+test('public subscription runtime preserves the legacy subscription implementation surface', () => {
+  assert.match(publicSource, /export \* from ['"]\.\/telegram-subscriptions-legacy\.js['"]/);
+});
 
 test('subscription runtime imports demand refresh and reachability helpers', () => {
   assert.match(source, /from ['"]\.\/notification-demand\.js['"]/);
@@ -42,12 +47,12 @@ test('single-title subscription mutations persist first and defer only that titl
   assert.match(
     source,
     /await setEffectiveTitleSubscription\(env, userId, title\.book_ref, enabled\);[\s\S]{0,360}await deferDemandMaintenance\([\s\S]{0,120}\(\) => refreshTitleNotificationDemand\(env, title\.book_ref\)/,
-    'direct notification toggle must persist before scheduling targeted demand refresh',
+    'direct notification toggle must persist before scheduling targeted title demand refresh',
   );
   assert.match(
     source,
     /await setEffectiveTitleSubscription\(env, userId, title\.book_ref, !before\);[\s\S]{0,360}await deferDemandMaintenance\([\s\S]{0,120}\(\) => refreshTitleNotificationDemand\(env, title\.book_ref\)/,
-    'title-list toggle must persist before scheduling targeted demand refresh',
+    'title-list toggle must persist before scheduling targeted title demand refresh',
   );
 });
 
