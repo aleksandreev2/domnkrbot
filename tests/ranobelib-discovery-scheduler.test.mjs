@@ -104,6 +104,8 @@ test('team discovery keeps D1 writes bounded and caps one-time unknown-status ba
     assert.match(archive.query, /notification_subscriber_count\s*=\s*0/i);
     assert.match(archive.query, /consecutive_failures\s*=\s*0/i);
     assert.match(archive.query, /sync_error\s*=\s*NULL/i);
+    assert.match(archive.query, /WHERE\s+book_ref\s+NOT\s+IN/i, 'legacy inactive rows must also be eligible for archive cleanup');
+    assert.match(archive.query, /AND\s*\(\s*is_active\s*=\s*1\s+OR\s+next_check_at\s+IS\s+NOT\s+NULL/i, 'archive cleanup must avoid repeat writes once stale scheduler state is gone');
     assert.ok(db.runs.length <= 2, `discovery write budget exploded: ${db.runs.length}`);
   });
 });
