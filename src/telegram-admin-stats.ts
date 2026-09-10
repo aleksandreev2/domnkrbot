@@ -44,6 +44,7 @@ type StatsSnapshot = {
   access: D1Row;
   system: D1Row;
   translationHealth: D1Row;
+  multiTeam: D1Row;
 };
 
 type TranslationProblem = {
@@ -226,6 +227,31 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
         next_check_at ASC
       LIMIT 6
     )`),
+    db.prepare(`SELECT
+      SUM(CASE WHEN lifecycle_state='published' THEN 1 ELSE 0 END) AS teams_published,
+      SUM(CASE WHEN lifecycle_state='hidden' THEN 1 ELSE 0 END) AS teams_hidden,
+      SUM(CASE WHEN lifecycle_state='paused' THEN 1 ELSE 0 END) AS teams_paused,
+      SUM(CASE WHEN lifecycle_state='error' THEN 1 ELSE 0 END) AS teams_error,
+      SUM(CASE WHEN lifecycle_state='error' OR (last_sync_error IS NOT NULL AND TRIM(last_sync_error)<>'') THEN 1 ELSE 0 END) AS teams_sync_errors,
+      SUM(CASE WHEN lifecycle_state IN ('published','hidden') AND (last_sync_at IS NULL OR last_sync_at < datetime('now','-6 hours')) THEN 1 ELSE 0 END) AS teams_stale,
+      (SELECT COUNT(*) FROM ranobelib_chapter_branches WHERE identity_confidence='native') AS branches_native,
+      (SELECT COUNT(*) FROM ranobelib_chapter_branches WHERE identity_confidence='fallback') AS branches_fallback,
+      (SELECT COUNT(*) FROM ranobelib_chapter_branches WHERE identity_confidence='ambiguous') AS branches_ambiguous,
+      (SELECT COUNT(*) FROM (
+        SELECT s.user_telegram_id
+        FROM telegram_team_subscriptions s
+        JOIN ranobelib_teams p ON p.id=s.team_id
+        WHERE p.is_primary=1
+        UNION
+        SELECT s.user_telegram_id
+        FROM telegram_team_title_subscriptions s
+        JOIN ranobelib_teams p ON p.id=s.team_id
+        WHERE p.is_primary=1
+      )) AS primary_effective_users,
+      COALESCE((SELECT CASE WHEN value='1' THEN 1 ELSE 0 END FROM app_settings WHERE key='ranobelib_multi_team_shadow'),0) AS rollout_shadow,
+      COALESCE((SELECT CASE WHEN value='1' THEN 1 ELSE 0 END FROM app_settings WHERE key='ranobelib_multi_team_delivery'),0) AS rollout_delivery,
+      COALESCE((SELECT CASE WHEN value='1' THEN 1 ELSE 0 END FROM app_settings WHERE key='ranobelib_multi_team_ui'),0) AS rollout_ui
+      FROM ranobelib_teams`),
   ];
 
   const rows = await batchFirstRows(db, statements);
@@ -239,6 +265,7 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
     access: rows[6] ?? {},
     system: rows[7] ?? {},
     translationHealth: rows[8] ?? {},
+    multiTeam: rows[9] ?? {},
   };
 }
 
@@ -292,6 +319,12 @@ function buildStatsScreen(section: StatsSection, s: StatsSnapshot) {
     line('Релизов за 24 ч', s.system.releases_24h), line('Релизов за 7 дней', s.system.releases_7d),
     `Последний релиз: ${formatDate(s.system.last_release_at)}`, `Последняя синхронизация: ${formatDate(s.system.last_sync_at)}`,
     line('Тайтлов с ошибками', s.system.failures), line('Сканов готовы сейчас', s.system.due_scans),
+    '', '<b>Multi-team RanobeLib</b>',
+    `Команды: <b>${n(s.multiTeam.teams_published)}</b> published / <b>${n(s.multiTeam.teams_hidden)}</b> hidden / <b>${n(s.multiTeam.teams_paused)}</b> paused / <b>${n(s.multiTeam.teams_error)}</b> error`,
+    `Sync: errors <b>${n(s.multiTeam.teams_sync_errors)}</b> / stale <b>${n(s.multiTeam.teams_stale)}</b>`,
+    `Branch identity: native <b>${n(s.multiTeam.branches_native)}</b> / fallback <b>${n(s.multiTeam.branches_fallback)}</b> / ambiguous <b>${n(s.multiTeam.branches_ambiguous)}</b>`,
+    `Migration parity: legacy <b>${n(s.subscriptions.users_enabled)}</b> / primary <b>${n(s.multiTeam.primary_effective_users)}</b> / mismatch <b>${Math.abs(n(s.subscriptions.users_enabled) - n(s.multiTeam.primary_effective_users))}</b>`,
+    `Rollout: shadow <b>${flag(s.multiTeam.rollout_shadow)}</b> / delivery <b>${flag(s.multiTeam.rollout_delivery)}</b> / UI <b>${flag(s.multiTeam.rollout_ui)}</b>`,
   ], back);
 
   const text = [
@@ -299,6 +332,7 @@ function buildStatsScreen(section: StatsSection, s: StatsSnapshot) {
     `👥 Пользователи: <b>${n(s.users.total)}</b>  (+${n(s.users.new_24h)} за 24 ч)`,
     `🔔 Получают уведомления: <b>${n(s.subscriptions.users_enabled)}</b>`,
     `📚 Переводы: <b>${n(s.translations.active)}</b> активных / <b>${n(s.translations.completed)}</b> завершённых / <b>${n(s.translations.archived)}</b> архивных`,
+    `🧩 Команды: <b>${n(s.multiTeam.teams_published)}</b> published / <b>${n(s.multiTeam.teams_hidden)}</b> hidden / <b>${n(s.multiTeam.teams_paused)}</b> paused / <b>${n(s.multiTeam.teams_error)}</b> error · stale <b>${n(s.multiTeam.teams_stale)}</b> · sync errors <b>${n(s.multiTeam.teams_sync_errors)}</b>`,
     `📦 Очередь: <b>${n(s.delivery.due_now)}</b> готово / <b>${n(s.delivery.retry)}</b> retry`,
     `📝 Заявки: <b>${n(s.proposals.total)}</b>  (+${n(s.proposals.new_24h)} за 24 ч)`,
     `📖 Уникальных читателей: <b>${n(s.publications.unique_readers)}</b>`,
@@ -346,6 +380,7 @@ function screen(title: string, lines: string[], buttons: Array<Array<{ text: str
 
 function line(label: string, value: unknown): string { return `${label}: <b>${n(value)}</b>`; }
 function n(value: unknown): number { const x = Number(value ?? 0); return Number.isFinite(x) ? Math.max(0, Math.trunc(x)) : 0; }
+function flag(value: unknown): string { return n(value) > 0 ? 'ON' : 'OFF'; }
 function duration(value: unknown): string { const minutes = n(value); return minutes < 60 ? `${minutes} мин` : `${Math.floor(minutes / 60)} ч ${minutes % 60} мин`; }
 function formatDate(value: unknown): string { const text = String(value ?? '').trim(); return text || 'нет данных'; }
 function clip(value: string, maxLength: number): string { return value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 1))}…`; }
