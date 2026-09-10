@@ -313,9 +313,9 @@ async function listAllTitles(env: TelegramNotificationUxEnv, page: number): Prom
 async function listCompletedTitles(env: TelegramNotificationUxEnv, page: number): Promise<NotificationUiTitle[]> {
   return (await env.DB.prepare(`
     SELECT ranobelib_id,book_ref,title,url,
-      CASE WHEN translation_is_completed = 1 THEN 2 ELSE translation_status_id END AS translation_status_id
+      CASE WHEN translation_is_completed = 1 THEN 2 ELSE NULL END AS translation_status_id
     FROM ranobelib_titles
-    WHERE (translation_is_completed = 1 OR translation_status_id = 2) AND ranobelib_id IS NOT NULL
+    WHERE translation_is_completed = 1 AND ranobelib_id IS NOT NULL
     ORDER BY title COLLATE NOCASE ASC, ranobelib_id ASC
     LIMIT ? OFFSET ?
   `).bind(8, safePage(page) * 8).all<NotificationUiTitle>()).results;
@@ -330,9 +330,9 @@ async function searchLocalTitles(
   if (!clean) return [];
   return (await env.DB.prepare(`
     SELECT ranobelib_id,book_ref,title,url,
-      CASE WHEN translation_is_completed = 1 THEN 2 ELSE translation_status_id END AS translation_status_id
+      CASE WHEN translation_is_completed = 1 THEN 2 ELSE NULL END AS translation_status_id
     FROM ranobelib_titles
-    WHERE ((is_active = 1 AND snapshot_ready = 1) OR translation_is_completed = 1 OR translation_status_id = 2)
+    WHERE ((is_active = 1 AND snapshot_ready = 1) OR translation_is_completed = 1)
       AND title LIKE ? COLLATE NOCASE
     ORDER BY title COLLATE NOCASE ASC, ranobelib_id ASC
     LIMIT ? OFFSET ?
@@ -342,9 +342,9 @@ async function searchLocalTitles(
 async function titleById(env: TelegramNotificationUxEnv, titleId: number): Promise<NotificationUiTitle | null> {
   return env.DB.prepare(`
     SELECT ranobelib_id,book_ref,title,url,
-      CASE WHEN translation_is_completed = 1 THEN 2 ELSE translation_status_id END AS translation_status_id
+      CASE WHEN translation_is_completed = 1 THEN 2 ELSE NULL END AS translation_status_id
     FROM ranobelib_titles
-    WHERE ranobelib_id = ? AND (is_active = 1 OR translation_is_completed = 1 OR translation_status_id = 2)
+    WHERE ranobelib_id = ? AND (is_active = 1 OR translation_is_completed = 1)
     LIMIT 1
   `).bind(titleId).first<NotificationUiTitle>();
 }
