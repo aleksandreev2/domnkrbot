@@ -246,6 +246,22 @@ Approved semantics:
 
 The notification should identify the translator team(s) dynamically. Joint translations can display multiple teams in one notification.
 
+## Team translation completion status
+
+Approved rule: RanobeLib's title-level `scanlateStatus` is work-level context only and must not by itself mark every team translation of that work as completed.
+
+A specific `(team, work)` translation may be shown as completed only when there is reliable evidence attributable to that team or to a branch that explicitly belongs to that team. For a joint branch, branch-specific completion evidence may apply to the participating team set represented by that branch.
+
+Consequences:
+
+- a global/title-level `completed` status must never be copied blindly to every team translating the work;
+- disappearance of a team/work relationship from discovery is not, by itself, proof of completion and should be treated as removal/dormancy according to discovery rules;
+- if reliable team- or branch-specific completion evidence is unavailable, the UI must avoid claiming that the team completed the translation;
+- stored team-specific status may distinguish confirmed completion from active/dormant/unknown state as needed by the implementation, but uncertainty must not be converted into a false `completed` state;
+- scanner and catalog behavior must use the team-specific state rather than assuming the work-level status is authoritative for every translation.
+
+This intentionally prefers an unknown or non-final team status over falsely attributing another team's completion to it.
+
 ## Scanner and discovery architecture
 
 The current single-team assumptions must be removed from discovery/scanning.
@@ -411,6 +427,8 @@ Implementation should use TDD and add focused tests for at least:
 - same work translated by multiple teams;
 - joint branch deduplication;
 - two independent branches producing distinct releases;
+- title-level completion not being propagated to every team translation;
+- team/branch-specific completion affecting only the attributable translation or joint branch team set;
 - initial team baseline producing no historical notifications;
 - per-team discovery removal not globally archiving a shared work;
 - paused team preserving subscriptions;
@@ -439,6 +457,7 @@ Implementation should use TDD and add focused tests for at least:
 - Search groups duplicate works only when multiple teams translate them.
 - Joint branch involving multiple teams is one release/one user notification.
 - Independent team branches remain distinct releases.
+- Work-level `scanlateStatus` never marks every team translation completed; completion requires evidence attributable to the specific team/branch.
 - Дом Некроманта is the primary team in first `/start` onboarding.
 - Optional external Telegram channels personalize first onboarding only.
 - Recommendation channels are attached by `@username`, `t.me` link, or forwarded channel message; the bot resolves and verifies the canonical channel ID/access itself.
@@ -450,8 +469,7 @@ Implementation should use TDD and add focused tests for at least:
 
 ## Open decisions before the final implementation plan
 
-1. Exact status semantics for a team translation when RanobeLib's title-level `scanlateStatus` is not team-specific; completion must not be falsely attributed to every team without evidence.
-2. Stable RanobeLib branch identity: use a native branch ID if reliably exposed; otherwise define and test a stable fingerprint.
-3. How completed translations appear in the multi-team user catalog and whether completed titles are shown by default inside a team's page.
-4. Whether hidden-but-synced teams are visible to admins only in `/stats` and team management, and what summary metrics are desired.
-5. Rollout/deployment sequencing for the schema migration, silent baseline, scanner switch, and notification UX switch.
+1. Stable RanobeLib branch identity: use a native branch ID if reliably exposed; otherwise define and test a stable fingerprint.
+2. How completed translations appear in the multi-team user catalog and whether completed titles are shown by default inside a team's page.
+3. Whether hidden-but-synced teams are visible to admins only in `/stats` and team management, and what summary metrics are desired.
+4. Rollout/deployment sequencing for the schema migration, silent baseline, scanner switch, and notification UX switch.
