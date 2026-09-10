@@ -1,0 +1,57 @@
+name: Live RanobeLib 272567 probe
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/live-ranobelib-272567.yml'
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Probe live RanobeLib contract
+        run: |
+          node <<'NODE'
+          const ref='272567--daemabeobsa-gaerreoriui-cheonjae-meogeuri-doeeossda';
+          const api='https://api.cdnlibs.org/api';
+          const headers={accept:'application/json','accept-language':'ru,en;q=0.7','Site-Id':'3'};
+
+          async function probe(label,url,accept='application/json') {
+            const h={...headers,accept};
+            try {
+              const r=await fetch(url,{headers:h,redirect:'follow'});
+              const text=await r.text();
+              console.log(`LIVE272567 ${label} status=${r.status} url=${r.url}`);
+              console.log(`LIVE272567 ${label} body=${text.slice(0,1200).replace(/\n/g,' ')}`);
+              return {status:r.status,text,url:r.url};
+            } catch (e) {
+              console.log(`LIVE272567 ${label} error=${e?.stack||e}`);
+              return {status:0,text:''};
+            }
+          }
+
+          await probe('detail-ref',`${api}/manga/${encodeURIComponent(ref)}?fields[]=status_id`);
+          await probe('detail-id',`${api}/manga/272567?fields[]=status_id`);
+          await probe('chapters-ref',`${api}/manga/${encodeURIComponent(ref)}/chapters`);
+          await probe('chapters-id',`${api}/manga/272567/chapters`);
+
+          const team=await probe('team-page1',`${api}/manga?site_id[]=3&target_id=11969&target_model=team&page=1`);
+          if (team.status===200) {
+            try {
+              const json=JSON.parse(team.text);
+              const rows=Array.isArray(json.data)?json.data:[];
+              const byId=rows.find(x=>Number(x?.id)===272567);
+              const byTitle=rows.filter(x=>/магл|archmage|daemabeobsa/i.test(`${x?.rus_name||''} ${x?.name||''} ${x?.slug_url||''}`));
+              console.log('LIVE272567 team-count='+rows.length);
+              console.log('LIVE272567 team-by-id='+JSON.stringify(byId||null));
+              console.log('LIVE272567 team-by-title='+JSON.stringify(byTitle));
+            } catch(e) { console.log('LIVE272567 team-parse-error='+e); }
+          }
+
+          await probe('public-page',`https://ranobelib.me/ru/book/${ref}`,'text/html,application/xhtml+xml');
+          NODE
