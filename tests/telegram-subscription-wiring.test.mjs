@@ -19,8 +19,8 @@ test('Telegram subscription commands bootstrap the RanobeLib catalog before rend
   const catalog = await read('src/telegram-subscription-catalog.ts');
   assert.match(webhook, /ensureTelegramSubscriptionCatalog/);
   assert.match(webhook, /withTelegramSubscriptionCatalogDb/);
-  assert.match(catalog, /discoverTeamBooks/);
-  assert.match(catalog, /INSERT INTO ranobelib_titles/);
+  assert.match(catalog, /discoverRanobeLibTeam/);
+  assert.match(catalog, /ranobelib-discovery-scheduler/);
   assert.match(catalog, /replace\(\/\\s\+AND snapshot_ready = 1\/g/);
 });
 
