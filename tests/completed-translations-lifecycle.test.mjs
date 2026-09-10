@@ -31,8 +31,9 @@ test('RanobeLib team discovery requests and preserves translation status metadat
   });
 
   const [book] = await client.discoverTeamBooks('11969--dom-nekromanta');
-  assert.ok(requests[0].startsWith(teamCatalogPrefix));
-  assert.match(requests[0], /(?:\?|&)fields%5B%5D=status_id|(?:\?|&)fields\[\]=status_id/);
+  const teamRequest = requests.find((url) => url.startsWith(teamCatalogPrefix));
+  assert.ok(teamRequest, 'team catalog request must be issued');
+  assert.match(teamRequest, /(?:\?|&)fields%5B%5D=status_id|(?:\?|&)fields\[\]=status_id/);
   assert.equal(book.translationStatusId, 2);
   assert.equal(book.translationStatusLabel, 'Завершен');
 });
