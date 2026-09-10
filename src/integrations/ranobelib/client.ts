@@ -12,6 +12,11 @@ export interface RanobeLibChapterOptions {
   teamRef?: string;
 }
 
+export interface RanobeLibTranslationStatus {
+  id: number | null;
+  label: string | null;
+}
+
 export class RanobeLibClient {
   private readonly apiBaseUrl: string;
   private readonly siteBaseUrl: string;
@@ -32,24 +37,19 @@ export class RanobeLibClient {
     const teamId = teamIdFromRef(normalizedTeamRef);
     if (teamId === null) throw new Error(`Invalid RanobeLib team ref: ${teamRef}`);
 
-    // The team catalog commonly exposes only scalar status_id. Resolve that ID through the
-    // scanlateStatus constants once per discovery instead of doing a detail request per title.
-    const translationStatusLabels = await this.getTranslationStatusLabels().catch((error) => {
-      console.warn('RanobeLib scanlateStatus constants unavailable; discovery will fail open', compactError(error));
-      return new Map<number, string>();
-    });
-
     const books: RanobeLibTeamBookRef[] = [];
     const seen = new Set<string>();
     let page = 1;
 
     for (;;) {
+      // The live team-listing endpoint rejects fields[]=status_id with HTTP 422. Translation
+      // status is therefore refreshed separately from the detail endpoint.
       const response = await this.getJson<ApiEnvelope<unknown[]>>(
-        `${this.apiBaseUrl}/manga?site_id[]=3&target_id=${teamId}&target_model=team&fields[]=status_id&page=${page}`,
+        `${this.apiBaseUrl}/manga?site_id[]=3&target_id=${teamId}&target_model=team&page=${page}`,
       );
 
       for (const raw of Array.isArray(response.data) ? response.data : []) {
-        const book = normalizeTeamBook(raw, this.siteBaseUrl, translationStatusLabels);
+        const book = normalizeTeamBook(raw, this.siteBaseUrl);
         if (!book || seen.has(book.ref)) continue;
         seen.add(book.ref);
         books.push(book);
@@ -60,6 +60,18 @@ export class RanobeLibClient {
     }
 
     return books;
+  }
+
+  async getTranslationStatus(bookRef: string): Promise<RanobeLibTranslationStatus> {
+    const response = await this.getJson<ApiEnvelope<Record<string, unknown>>>(
+      `${this.apiBaseUrl}/manga/${encodeURIComponent(bookRef)}?fields[]=status_id`,
+    );
+    const data = isRecord(response.data) ? response.data : {};
+    const scanlateStatus = isRecord(data.scanlateStatus) ? data.scanlateStatus : null;
+    return {
+      id: scanlateStatus ? numberOrNull(scanlateStatus.id) : null,
+      label: scanlateStatus ? stringOrNull(scanlateStatus.label) : null,
+    };
   }
 
   async getTitle(bookRef: string): Promise<RanobeLibTitle> {
@@ -83,26 +95,6 @@ export class RanobeLibClient {
       : [];
 
     return sortChapters(chapters);
-  }
-
-  private async getTranslationStatusLabels(): Promise<Map<number, string>> {
-    const response = await this.getJson<ApiEnvelope<Record<string, unknown>>>(
-      `${this.apiBaseUrl}/constants?fields[]=scanlateStatus`,
-    );
-    const data = isRecord(response.data) ? response.data : {};
-    const rows = Array.isArray(data.scanlateStatus) ? data.scanlateStatus : [];
-    const labels = new Map<number, string>();
-    for (const raw of rows) {
-      if (!isRecord(raw)) continue;
-      const id = numberOrNull(raw.id);
-      const label = stringOrNull(raw.label);
-      const siteIds = Array.isArray(raw.site_ids)
-        ? raw.site_ids.map(numberOrNull).filter((value): value is number => value !== null)
-        : [];
-      if (id === null || !label || (siteIds.length > 0 && !siteIds.includes(3))) continue;
-      labels.set(id, label);
-    }
-    return labels;
   }
 
   private async getJson<T>(url: string): Promise<T> {
@@ -147,11 +139,7 @@ interface ApiEnvelope<T> {
   };
 }
 
-function normalizeTeamBook(
-  raw: unknown,
-  siteBaseUrl: string,
-  translationStatusLabels: ReadonlyMap<number, string> = new Map(),
-): RanobeLibTeamBookRef | null {
+function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBookRef | null {
   if (!isRecord(raw)) return null;
   const id = numberOrNull(raw.id);
   const explicitRef = stringOrNull(raw.slug_url);
@@ -165,15 +153,11 @@ function normalizeTeamBook(
   const title = extractTitle(raw);
   const cover = isRecord(raw.cover) ? raw.cover : {};
   const coverUrl = stringOrNull(cover.default) ?? stringOrNull(cover.thumbnail);
+  // Some responses may already include scanlateStatus; it is safe and authoritative. Generic
+  // status/status_id are deliberately ignored because they can describe the work itself.
   const scanlateStatus = isRecord(raw.scanlateStatus) ? raw.scanlateStatus : null;
-  const status = isRecord(raw.status) ? raw.status : null;
-  const scanlateStatusId = scanlateStatus ? numberOrNull(scanlateStatus.id) : null;
-  const statusObjectId = status ? numberOrNull(status.id) : null;
-  const scalarStatusId = numberOrNull(raw.status_id);
-  const translationStatusId = scanlateStatusId ?? statusObjectId ?? scalarStatusId;
-  const translationStatusLabel = (scanlateStatus ? stringOrNull(scanlateStatus.label) : null)
-    ?? (status ? stringOrNull(status.label) : null)
-    ?? (translationStatusId !== null ? translationStatusLabels.get(translationStatusId) ?? null : null);
+  const translationStatusId = scanlateStatus ? numberOrNull(scanlateStatus.id) : null;
+  const translationStatusLabel = scanlateStatus ? stringOrNull(scanlateStatus.label) : null;
 
   return {
     id,
@@ -279,10 +263,6 @@ function numberOrNull(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
   return null;
-}
-
-function compactError(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).slice(0, 180);
 }
 
 function stripTrailingSlash(value: string): string {
