@@ -53,8 +53,10 @@ test('live delivery derives eligibility and delivery mode from release teams plu
   assert.match(deliverySource, /teamNames/);
 });
 
-test('scanner persists a stable branch delivery scope and migration is additive', () => {
-  assert.match(scannerSource, /delivery_scope_key/);
+test('stable branch release identity feeds additive delivery-scope migration', () => {
+  assert.match(scannerSource, /branch-release:v1:/);
   assert.match(migration, /ALTER TABLE ranobelib_releases\s+ADD COLUMN delivery_scope_key TEXT/i);
+  assert.match(migration, /trg_ranobelib_release_delivery_scope/);
+  assert.match(migration, /branch-release:v1:/);
   assert.doesNotMatch(migration, /DROP\s+TABLE|DROP\s+COLUMN/i);
 });
