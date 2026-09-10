@@ -3,15 +3,8 @@ import test from 'node:test';
 import { RanobeLibClient } from '../dist/index.js';
 import { ensureTelegramSubscriptionCatalog } from '../dist-runtime/telegram-subscription-catalog.js';
 
-const constantsUrl = 'https://api.cdnlibs.org/api/constants?fields[]=scanlateStatus';
-const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&fields[]=status_id&page=1';
-
-function constantsResponse() {
-  return Response.json({ data: { scanlateStatus: [
-    { id: 1, label: 'Продолжается', site_ids: [3] },
-    { id: 7, label: 'Завершён', site_ids: [3] },
-  ] } });
-}
+const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&page=1';
+const detailStatusUrl = 'https://api.cdnlibs.org/api/manga/62387--pokemon-master-of-tactics?fields[]=status_id';
 
 function catalogResponse() {
   return new Response(JSON.stringify({
@@ -31,9 +24,13 @@ function catalogResponse() {
   }), { headers: { 'content-type': 'application/json' } });
 }
 
+function detailStatusResponse() {
+  return Response.json({ data: { scanlateStatus: { id: 1, label: 'Продолжается' } } });
+}
+
 function fetchCatalog(url) {
-  if (String(url) === constantsUrl) return constantsResponse();
   if (String(url) === teamCatalogUrl) return catalogResponse();
+  if (String(url) === detailStatusUrl) return detailStatusResponse();
   return new Response('not found', { status: 404 });
 }
 
@@ -120,7 +117,7 @@ test('Telegram catalog refreshes existing active rows when some titles are still
       RANOBELIB_TEAM_REF: '11969--dom-nekromanta',
     });
     assert.equal(count, 1);
-    assert.deepEqual(requests, [constantsUrl, teamCatalogUrl]);
+    assert.deepEqual(requests, [teamCatalogUrl, detailStatusUrl]);
     assert.equal(db.titleInserts.length, 1);
     assert.ok(db.titleInserts[0].values.some((value) => typeof value === 'string' && value.includes('Покемон: Мастер тактики')));
   });
