@@ -66,9 +66,6 @@ class StatsDB {
     if (/FROM telegram_subscription_settings/i.test(query) && /title_subscriptions/i.test(query)) {
       return [{ users_enabled: 33, all_titles_users: 6, explicit_subscriptions: 48, instant_users: 20, stack_users: 13, title_overrides: 9 }];
     }
-    if (/FROM ranobelib_titles/i.test(query)) {
-      return [{ total: 95, active: 80, completed: 12, unknown_status: 3, snapshot_ready: 91, with_errors: 2, overdue: 4, subscribers: 37 }];
-    }
     if (/FROM ranobelib_notification_outbox/i.test(query)) {
       return [{ pending: 5, retry: 2, sent: 310, disabled: 7, sent_24h: 19, sent_7d: 104, due_now: 3, oldest_due_minutes: 42 }];
     }
@@ -83,6 +80,9 @@ class StatsDB {
     }
     if (/FROM ranobelib_releases/i.test(query)) {
       return [{ releases_24h: 8, releases_7d: 45, last_release_at: '2026-09-10 09:30:00', last_sync_at: '2026-09-10 09:32:00', failures: 2, due_scans: 6 }];
+    }
+    if (/FROM ranobelib_titles/i.test(query)) {
+      return [{ total: 95, active: 80, completed: 12, unknown_status: 3, snapshot_ready: 91, with_errors: 2, overdue: 4, subscribers: 37 }];
     }
     return [{}];
   }
@@ -134,7 +134,7 @@ test('admin /stats sends a compact overview with navigable detailed sections', a
     assert.match(send.body.text, /📊 Статистика бота/);
     assert.match(send.body.text, /Пользователи/);
     assert.match(send.body.text, /Переводы/);
-    assert.match(send.body.text, /Доставка/);
+    assert.match(send.body.text, /Очередь/);
     const callbacks = JSON.stringify(send.body.reply_markup);
     for (const section of ['users', 'subscriptions', 'translations', 'delivery', 'proposals', 'publications', 'access', 'system']) {
       assert.match(callbacks, new RegExp(`stats:${section}`), `missing ${section} stats button`);
@@ -156,11 +156,11 @@ test('admin stats section callback edits the current screen and exposes translat
     const edit = calls.find((call) => call.url.endsWith('/editMessageText'));
     assert.ok(edit, 'section navigation should edit the current stats screen');
     assert.match(edit.body.text, /📚 Переводы/);
-    assert.match(edit.body.text, /Активные:\s*80/);
-    assert.match(edit.body.text, /Завершённые:\s*12/);
-    assert.match(edit.body.text, /Без статуса:\s*3/);
-    assert.match(edit.body.text, /С ошибками:\s*2/);
-    assert.match(edit.body.text, /Просрочены:\s*4/);
+    assert.match(edit.body.text, /Активные:\s*<b>80<\/b>/);
+    assert.match(edit.body.text, /Завершённые:\s*<b>12<\/b>/);
+    assert.match(edit.body.text, /Без статуса:\s*<b>3<\/b>/);
+    assert.match(edit.body.text, /С ошибками:\s*<b>2<\/b>/);
+    assert.match(edit.body.text, /Просрочены:\s*<b>4<\/b>/);
     assert.match(JSON.stringify(edit.body.reply_markup), /stats:home/);
     assert.ok(calls.some((call) => call.url.endsWith('/answerCallbackQuery')), 'callback must be acknowledged');
   });
