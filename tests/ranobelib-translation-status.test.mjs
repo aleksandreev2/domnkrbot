@@ -3,8 +3,8 @@ import test from 'node:test';
 
 import { RanobeLibClient } from '../dist-runtime/integrations/ranobelib/client.js';
 
-const constantsUrl = 'https://api.cdnlibs.org/api/constants?fields[]=scanlateStatus';
-const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&fields[]=status_id&page=1';
+const teamCatalogUrl = 'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&page=1';
+const detailUrl = 'https://api.cdnlibs.org/api/manga/70001--finished-book?fields[]=status_id';
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -27,46 +27,63 @@ async function withFetch(handler, fn) {
   }
 }
 
-test('team catalog resolves scalar status_id through scanlateStatus constants', async () => {
+test('team catalog uses the live accepted request shape and never mistakes generic status for translation status', async () => {
   await withFetch((url) => {
-    if (url === constantsUrl) {
-      return json({
-        data: {
-          scanlateStatus: [
-            { id: 1, label: 'Продолжается', site_ids: [3] },
-            { id: 7, label: 'Завершён', site_ids: [3] },
-          ],
-        },
-      });
-    }
     if (url === teamCatalogUrl) {
       return json({
         data: [{
           id: 70001,
           slug: 'finished-book',
           slug_url: '70001--finished-book',
-          rus_name: 'Завершённая книга',
-          status_id: 7,
-          cover: { default: 'https://cover.imglib.info/example.jpg' },
+          rus_name: 'Оригинал завершён, перевод неизвестен',
+          status: { id: 2, label: 'Завершён' },
         }],
         meta: { has_next_page: false },
       });
     }
     return new Response('unexpected', { status: 500 });
   }, async (requests) => {
-    const client = new RanobeLibClient();
-    const books = await client.discoverTeamBooks('11969--dom-nekromanta');
-
-    assert.deepEqual(requests, [constantsUrl, teamCatalogUrl]);
+    const books = await new RanobeLibClient().discoverTeamBooks('11969--dom-nekromanta');
+    assert.deepEqual(requests, [teamCatalogUrl]);
     assert.equal(books.length, 1);
-    assert.equal(books[0].translationStatusId, 7);
-    assert.equal(books[0].translationStatusLabel, 'Завершён');
+    assert.equal(books[0].translationStatusId, undefined);
+    assert.equal(books[0].translationStatusLabel, undefined);
   });
 });
 
-test('nested scanlateStatus remains authoritative when catalog already returns it', async () => {
+test('detail status request reads scanlateStatus returned by fields[]=status_id', async () => {
   await withFetch((url) => {
-    if (url === constantsUrl) return json({ data: { scanlateStatus: [] } });
+    if (url === detailUrl) {
+      return json({
+        data: {
+          id: 70001,
+          status: { id: 1, label: 'Онгоинг' },
+          scanlateStatus: { id: 2, label: 'Завершён' },
+        },
+      });
+    }
+    return new Response('unexpected', { status: 500 });
+  }, async (requests) => {
+    const status = await new RanobeLibClient().getTranslationStatus('70001--finished-book');
+    assert.deepEqual(requests, [detailUrl]);
+    assert.deepEqual(status, { id: 2, label: 'Завершён' });
+  });
+});
+
+test('detail status request ignores generic work status when scanlateStatus is absent', async () => {
+  await withFetch((url) => {
+    if (url === detailUrl) {
+      return json({ data: { status: { id: 2, label: 'Завершён' } } });
+    }
+    return new Response('unexpected', { status: 500 });
+  }, async () => {
+    const status = await new RanobeLibClient().getTranslationStatus('70001--finished-book');
+    assert.deepEqual(status, { id: null, label: null });
+  });
+});
+
+test('nested scanlateStatus remains authoritative when a catalog response already includes it', async () => {
+  await withFetch((url) => {
     if (url === teamCatalogUrl) {
       return json({
         data: [{
@@ -74,7 +91,7 @@ test('nested scanlateStatus remains authoritative when catalog already returns i
           slug: 'active-book',
           slug_url: '70002--active-book',
           rus_name: 'Активная книга',
-          status_id: 99,
+          status: { id: 2, label: 'Завершён' },
           scanlateStatus: { id: 1, label: 'Продолжается' },
         }],
         meta: { has_next_page: false },

@@ -130,7 +130,7 @@ test('team discovery uses the current RanobeLib catalog filter and chapter sync 
   const requests = [];
   const responses = new Map([
     [
-      'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&fields[]=status_id&page=1',
+      'https://api.cdnlibs.org/api/manga?site_id[]=3&target_id=11969&target_model=team&page=1',
       new Response(JSON.stringify({
         data: [
           { id: 62387, slug: 'pokemon-master-of-tactics', slug_url: '62387--pokemon-master-of-tactics' },

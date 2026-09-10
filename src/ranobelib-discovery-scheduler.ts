@@ -3,10 +3,22 @@ import type { RanobeLibTeamBookRef } from './integrations/ranobelib/types.js';
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
 
 const DEFAULT_TEAM_REF = '11969--dom-nekromanta';
+const INITIAL_STATUS_BACKFILL_LIMIT = 48;
+const PERIODIC_STATUS_REFRESH_LIMIT = 8;
+const STATUS_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const STATUS_REFRESH_CONCURRENCY = 4;
 
 type DiscoveryEnv = {
   DB: D1DatabaseLike;
   RANOBELIB_TEAM_REF?: string;
+};
+
+type StoredTranslationStatus = {
+  book_ref: string;
+  translation_status_id: number | null;
+  translation_status_label: string | null;
+  translation_is_completed: number | null;
+  translation_status_checked_at: string | null;
 };
 
 export type RanobeLibDiscoveryResult = {
@@ -23,15 +35,26 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
   // Never collapse an existing catalog because of a transient upstream or parsing failure.
   if (books.length === 0) throw new Error(`RanobeLib team ${teamRef} returned no book links`);
 
-  const { results: activeRows } = await env.DB.prepare(
-    'SELECT book_ref FROM ranobelib_titles WHERE is_active = 1',
-  ).all<{ book_ref: string }>();
-  const before = new Set(activeRows.map((row) => String(row.book_ref || '')).filter(Boolean));
   const discoveredRefs = new Set(books.map((book) => book.ref));
+  const refsJson = JSON.stringify([...discoveredRefs]);
+  const [{ results: activeRows }, { results: statusRows }] = await Promise.all([
+    env.DB.prepare('SELECT book_ref FROM ranobelib_titles WHERE is_active = 1').all<{ book_ref: string }>(),
+    env.DB.prepare(`
+      SELECT book_ref, translation_status_id, translation_status_label,
+        translation_is_completed, translation_status_checked_at
+      FROM ranobelib_titles
+      WHERE book_ref IN (SELECT CAST(value AS TEXT) FROM json_each(?))
+    `).bind(refsJson).all<StoredTranslationStatus>(),
+  ]);
+
+  const before = new Set(activeRows.map((row) => String(row.book_ref || '')).filter(Boolean));
+  const storedByRef = new Map(statusRows.map((row) => [String(row.book_ref), row]));
+  hydrateStoredTranslationStatus(books, storedByRef);
+  const checkedRefs = await refreshTranslationStatuses(client, books, storedByRef);
+
   const activeAfter = new Set(
     books.filter((book) => inferTranslationCompleted(book) !== true).map((book) => book.ref),
   );
-  const refsJson = JSON.stringify([...discoveredRefs]);
 
   await env.DB.prepare(`
     UPDATE ranobelib_titles SET is_active = 0
@@ -41,7 +64,7 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
       )
   `).bind(refsJson).run();
 
-  await bulkUpsertTitles(env.DB, books);
+  await bulkUpsertTitles(env.DB, books, checkedRefs);
 
   let activated = 0;
   for (const ref of activeAfter) if (!before.has(ref)) activated += 1;
@@ -51,7 +74,69 @@ export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLi
   return { discovered: books.length, activated, deactivated };
 }
 
-async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[]): Promise<void> {
+function hydrateStoredTranslationStatus(
+  books: RanobeLibTeamBookRef[],
+  storedByRef: ReadonlyMap<string, StoredTranslationStatus>,
+): void {
+  for (const book of books) {
+    const stored = storedByRef.get(book.ref);
+    if (!stored) continue;
+    if (book.translationStatusId == null && stored.translation_status_id != null) {
+      book.translationStatusId = Number(stored.translation_status_id);
+    }
+    if (!book.translationStatusLabel && stored.translation_status_label) {
+      book.translationStatusLabel = String(stored.translation_status_label);
+    }
+  }
+}
+
+async function refreshTranslationStatuses(
+  client: RanobeLibClient,
+  books: RanobeLibTeamBookRef[],
+  storedByRef: ReadonlyMap<string, StoredTranslationStatus>,
+): Promise<Set<string>> {
+  const neverChecked = books.filter((book) => !storedByRef.get(book.ref)?.translation_status_checked_at);
+  const candidates = neverChecked.length > 0
+    ? neverChecked.slice(0, INITIAL_STATUS_BACKFILL_LIMIT)
+    : books
+        .filter((book) => isStatusRefreshDue(storedByRef.get(book.ref)?.translation_status_checked_at ?? null))
+        .sort((a, b) => statusCheckedAtMs(storedByRef.get(a.ref)?.translation_status_checked_at ?? null)
+          - statusCheckedAtMs(storedByRef.get(b.ref)?.translation_status_checked_at ?? null))
+        .slice(0, PERIODIC_STATUS_REFRESH_LIMIT);
+
+  const checked = new Set<string>();
+  for (let start = 0; start < candidates.length; start += STATUS_REFRESH_CONCURRENCY) {
+    const chunk = candidates.slice(start, start + STATUS_REFRESH_CONCURRENCY);
+    await Promise.all(chunk.map(async (book) => {
+      try {
+        const status = await client.getTranslationStatus(book.ref);
+        checked.add(book.ref);
+        if (status.id !== null) book.translationStatusId = status.id;
+        if (status.label) book.translationStatusLabel = status.label;
+      } catch (error) {
+        console.warn('RanobeLib translation status refresh failed', book.ref, compactError(error));
+      }
+    }));
+  }
+  return checked;
+}
+
+function isStatusRefreshDue(checkedAt: string | null): boolean {
+  const checkedAtMs = statusCheckedAtMs(checkedAt);
+  return checkedAtMs === 0 || Date.now() - checkedAtMs >= STATUS_REFRESH_INTERVAL_MS;
+}
+
+function statusCheckedAtMs(value: string | null): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+async function bulkUpsertTitles(
+  db: D1DatabaseLike,
+  books: RanobeLibTeamBookRef[],
+  checkedRefs: ReadonlySet<string>,
+): Promise<void> {
   const payload = JSON.stringify(books.map((book) => ({
     ref: book.ref,
     id: book.id,
@@ -62,6 +147,7 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
     translationStatusId: book.translationStatusId ?? null,
     translationStatusLabel: book.translationStatusLabel ?? null,
     translationCompleted: inferTranslationCompleted(book),
+    translationStatusChecked: checkedRefs.has(book.ref) ? 1 : 0,
   })));
 
   // Unknown upstream status preserves a previously known semantic state. A brand-new unknown
@@ -78,7 +164,8 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
         json_extract(j.value, '$.coverUrl') AS cover_url,
         CAST(json_extract(j.value, '$.translationStatusId') AS INTEGER) AS translation_status_id,
         json_extract(j.value, '$.translationStatusLabel') AS translation_status_label,
-        CAST(json_extract(j.value, '$.translationCompleted') AS INTEGER) AS translation_is_completed
+        CAST(json_extract(j.value, '$.translationCompleted') AS INTEGER) AS translation_is_completed,
+        CAST(json_extract(j.value, '$.translationStatusChecked') AS INTEGER) AS translation_status_checked
       FROM json_each(?) AS j
     ),
     discovered_with_demand AS (
@@ -116,7 +203,8 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
       book_ref, ranobelib_id, slug, url, title, cover_url, is_active,
       next_check_at, notification_subscriber_count, subscriber_count_updated_at,
       translation_status_id, translation_status_label, translation_is_completed,
-      translation_completion_pending, translation_status_revision, translation_status_changed_at
+      translation_completion_pending, translation_status_revision, translation_status_changed_at,
+      translation_status_checked_at
     )
     SELECT
       book_ref,
@@ -134,7 +222,8 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
       translation_is_completed,
       0,
       0,
-      CASE WHEN translation_is_completed IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END
+      CASE WHEN translation_is_completed IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END,
+      CASE WHEN translation_status_checked = 1 THEN CURRENT_TIMESTAMP ELSE NULL END
     FROM discovered_with_demand
     WHERE 1
     ON CONFLICT(book_ref) DO UPDATE SET
@@ -176,6 +265,7 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
       translation_status_id = COALESCE(excluded.translation_status_id, ranobelib_titles.translation_status_id),
       translation_status_label = COALESCE(excluded.translation_status_label, ranobelib_titles.translation_status_label),
       translation_is_completed = COALESCE(excluded.translation_is_completed, ranobelib_titles.translation_is_completed),
+      translation_status_checked_at = COALESCE(excluded.translation_status_checked_at, ranobelib_titles.translation_status_checked_at),
       translation_completion_pending = CASE
         WHEN excluded.translation_is_completed IS NULL
           THEN ranobelib_titles.translation_completion_pending
@@ -247,4 +337,8 @@ function normalizeCoverUrl(value: string | null): string | null {
   if (value.startsWith('/')) return `https://cover.imglib.info${value}`;
   if (value.startsWith('uploads/')) return `https://cover.imglib.info/${value}`;
   return null;
+}
+
+function compactError(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 180);
 }

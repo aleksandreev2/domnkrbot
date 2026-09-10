@@ -10,7 +10,7 @@ function telegramCallbacks(payload) {
     .filter(Boolean);
 }
 
-test('RanobeLib team discovery requests and preserves translation status metadata', async () => {
+test('RanobeLib team discovery uses the accepted catalog shape and preserves scanlateStatus when present', async () => {
   const { RanobeLibClient } = await import('../dist/index.js');
   const requests = [];
   const client = new RanobeLibClient({
@@ -33,7 +33,7 @@ test('RanobeLib team discovery requests and preserves translation status metadat
   const [book] = await client.discoverTeamBooks('11969--dom-nekromanta');
   const teamRequest = requests.find((url) => url.startsWith(teamCatalogPrefix));
   assert.ok(teamRequest, 'team catalog request must be issued');
-  assert.match(teamRequest, /(?:\?|&)fields%5B%5D=status_id|(?:\?|&)fields\[\]=status_id/);
+  assert.doesNotMatch(teamRequest, /fields(?:%5B%5D|\[\])=status_id/);
   assert.equal(book.translationStatusId, 7);
   assert.equal(book.translationStatusLabel, 'Завершен');
 });
