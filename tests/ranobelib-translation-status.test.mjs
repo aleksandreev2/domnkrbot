@@ -113,33 +113,49 @@ test('nested scanlateStatus remains authoritative when catalog already returns i
   });
 });
 
-// Temporary diagnostic. It is intentionally removed before merge. The production incident is
-// impossible to distinguish safely from mocks alone, so CI records only field names/status shapes
-// from the public team-catalog response (no auth, no user data, no chapter text).
-test('diagnostic: inspect live RanobeLib team status shape', { timeout: 20_000 }, async () => {
-  try {
-    const response = await fetch(teamCatalogUrl, {
-      headers: {
-        accept: 'application/json',
-        'accept-language': 'ru,en;q=0.7',
-        'Site-Id': '3',
-      },
-    });
-    const text = await response.text();
-    let payload;
-    try { payload = JSON.parse(text); } catch { payload = null; }
-    const first = Array.isArray(payload?.data) ? payload.data[0] : null;
-    console.log('LIVE_RANOBELIB_STATUS_DIAG', JSON.stringify({
-      httpStatus: response.status,
-      contentType: response.headers.get('content-type'),
-      dataCount: Array.isArray(payload?.data) ? payload.data.length : null,
-      keys: first && typeof first === 'object' ? Object.keys(first).sort() : null,
-      status_id: first?.status_id ?? null,
-      status: first?.status ?? null,
-      scanlateStatus: first?.scanlateStatus ?? null,
-      bodyPreview: payload ? null : text.slice(0, 160),
-    }));
-  } catch (error) {
-    console.log('LIVE_RANOBELIB_STATUS_DIAG', JSON.stringify({ error: String(error) }));
+// Temporary diagnostic. Remove before merge. It compares only public team-catalog request shapes
+// and logs bounded response metadata / error text; no auth, user data, or chapter content is used.
+test('diagnostic: compare live RanobeLib team query variants', { timeout: 30_000 }, async () => {
+  const base = 'https://api.cdnlibs.org/api/manga';
+  const variants = [
+    ['current', `${base}?site_id[]=3&target_id=11969&target_model=team&fields[]=status_id&page=1`],
+    ['no-fields', `${base}?site_id[]=3&target_id=11969&target_model=team&page=1`],
+    ['site-index-no-fields', `${base}?site_id[0]=3&target_id=11969&target_model=team&page=1`],
+    ['completed-filter', `${base}?site_id[]=3&target_id=11969&target_model=team&scanlateStatus[]=2&page=1`],
+    ['site-index-completed-filter', `${base}?site_id[0]=3&target_id=11969&target_model=team&scanlateStatus[]=2&page=1`],
+  ];
+
+  const headers = {
+    accept: 'application/json',
+    'accept-language': 'ru,en;q=0.7',
+    'Site-Id': '3',
+    Referer: 'https://ranobelib.me',
+    Origin: 'https://ranobelib.me',
+    'User-Agent': 'Mozilla/5.0 RanobeLib-status-diagnostic/1.0',
+  };
+
+  for (const [name, url] of variants) {
+    try {
+      const response = await fetch(url, { headers });
+      const text = await response.text();
+      let payload;
+      try { payload = JSON.parse(text); } catch { payload = null; }
+      const first = Array.isArray(payload?.data) ? payload.data[0] : null;
+      const errorPreview = response.ok ? null : text.replace(/\s+/g, ' ').slice(0, 500);
+      console.log('LIVE_RANOBELIB_VARIANT', JSON.stringify({
+        name,
+        httpStatus: response.status,
+        contentType: response.headers.get('content-type'),
+        dataCount: Array.isArray(payload?.data) ? payload.data.length : null,
+        hasNextPage: payload?.meta?.has_next_page ?? null,
+        keys: first && typeof first === 'object' ? Object.keys(first).sort() : null,
+        status_id: first?.status_id ?? null,
+        status: first?.status ?? null,
+        scanlateStatus: first?.scanlateStatus ?? null,
+        errorPreview,
+      }));
+    } catch (error) {
+      console.log('LIVE_RANOBELIB_VARIANT', JSON.stringify({ name, error: String(error) }));
+    }
   }
 });
