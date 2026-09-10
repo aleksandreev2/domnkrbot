@@ -32,6 +32,13 @@ export class RanobeLibClient {
     const teamId = teamIdFromRef(normalizedTeamRef);
     if (teamId === null) throw new Error(`Invalid RanobeLib team ref: ${teamRef}`);
 
+    // The team catalog commonly exposes only scalar status_id. Resolve that ID through the
+    // scanlateStatus constants once per discovery instead of doing a detail request per title.
+    const translationStatusLabels = await this.getTranslationStatusLabels().catch((error) => {
+      console.warn('RanobeLib scanlateStatus constants unavailable; discovery will fail open', compactError(error));
+      return new Map<number, string>();
+    });
+
     const books: RanobeLibTeamBookRef[] = [];
     const seen = new Set<string>();
     let page = 1;
@@ -42,7 +49,7 @@ export class RanobeLibClient {
       );
 
       for (const raw of Array.isArray(response.data) ? response.data : []) {
-        const book = normalizeTeamBook(raw, this.siteBaseUrl);
+        const book = normalizeTeamBook(raw, this.siteBaseUrl, translationStatusLabels);
         if (!book || seen.has(book.ref)) continue;
         seen.add(book.ref);
         books.push(book);
@@ -76,6 +83,26 @@ export class RanobeLibClient {
       : [];
 
     return sortChapters(chapters);
+  }
+
+  private async getTranslationStatusLabels(): Promise<Map<number, string>> {
+    const response = await this.getJson<ApiEnvelope<Record<string, unknown>>>(
+      `${this.apiBaseUrl}/constants?fields[]=scanlateStatus`,
+    );
+    const data = isRecord(response.data) ? response.data : {};
+    const rows = Array.isArray(data.scanlateStatus) ? data.scanlateStatus : [];
+    const labels = new Map<number, string>();
+    for (const raw of rows) {
+      if (!isRecord(raw)) continue;
+      const id = numberOrNull(raw.id);
+      const label = stringOrNull(raw.label);
+      const siteIds = Array.isArray(raw.site_ids)
+        ? raw.site_ids.map(numberOrNull).filter((value): value is number => value !== null)
+        : [];
+      if (id === null || !label || (siteIds.length > 0 && !siteIds.includes(3))) continue;
+      labels.set(id, label);
+    }
+    return labels;
   }
 
   private async getJson<T>(url: string): Promise<T> {
@@ -120,7 +147,11 @@ interface ApiEnvelope<T> {
   };
 }
 
-function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBookRef | null {
+function normalizeTeamBook(
+  raw: unknown,
+  siteBaseUrl: string,
+  translationStatusLabels: ReadonlyMap<number, string> = new Map(),
+): RanobeLibTeamBookRef | null {
   if (!isRecord(raw)) return null;
   const id = numberOrNull(raw.id);
   const explicitRef = stringOrNull(raw.slug_url);
@@ -134,9 +165,12 @@ function normalizeTeamBook(raw: unknown, siteBaseUrl: string): RanobeLibTeamBook
   const title = extractTitle(raw);
   const cover = isRecord(raw.cover) ? raw.cover : {};
   const coverUrl = stringOrNull(cover.default) ?? stringOrNull(cover.thumbnail);
-  const scanlateStatus = isRecord(raw.scanlateStatus) ? raw.scanlateStatus : {};
-  const translationStatusId = numberOrNull(scanlateStatus.id);
-  const translationStatusLabel = stringOrNull(scanlateStatus.label);
+  const scanlateStatus = isRecord(raw.scanlateStatus) ? raw.scanlateStatus : null;
+  const nestedStatusId = scanlateStatus ? numberOrNull(scanlateStatus.id) : null;
+  const scalarStatusId = numberOrNull(raw.status_id);
+  const translationStatusId = nestedStatusId ?? scalarStatusId;
+  const translationStatusLabel = (scanlateStatus ? stringOrNull(scanlateStatus.label) : null)
+    ?? (translationStatusId !== null ? translationStatusLabels.get(translationStatusId) ?? null : null);
 
   return {
     id,
@@ -189,8 +223,6 @@ function releasedTeamBranch(raw: Record<string, unknown>, teamRef: string, nowMs
     const createdAt = stringOrNull(branch.created_at);
     if (!createdAt) return branch;
     const releaseMs = Date.parse(createdAt);
-    // Preserve compatibility if RanobeLib returns an unexpected timestamp format, but
-    // never expose a branch whose parseable publication time is still in the future.
     if (!Number.isFinite(releaseMs) || releaseMs <= nowMs) return branch;
   }
   return null;
@@ -244,6 +276,10 @@ function numberOrNull(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
   return null;
+}
+
+function compactError(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).slice(0, 180);
 }
 
 function stripTrailingSlash(value: string): string {
