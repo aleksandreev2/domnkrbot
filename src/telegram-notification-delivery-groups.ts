@@ -25,15 +25,19 @@ export type ClaimedDeliveryRowLike = {
   last_volume?: string | null;
   last_number: string | null;
   summary: string;
+  delivery_scope_key?: string | null;
+  team_names_json?: string | null;
   [key: string]: unknown;
 };
 
 export type DeliveryGroup<T extends ClaimedDeliveryRowLike = ClaimedDeliveryRowLike> = {
   userTelegramId: string;
   bookRef: string;
+  deliveryScopeKey: string | null;
   titleId: number | string | null;
   title: string;
   titleUrl: string;
+  teamNames: string[];
   members: T[];
   chapterCount: number;
   firstVolume: string | null;
@@ -67,18 +71,22 @@ export function aggregateClaimedDeliveryRows<T extends ClaimedDeliveryRowLike>(r
   for (const row of rows) {
     const userTelegramId = String(row.user_telegram_id);
     const bookRef = String(row.book_ref);
-    const key = `${userTelegramId}\u0000${bookRef}`;
+    const deliveryScopeKey = normalizedToken(row.delivery_scope_key);
+    const key = `${userTelegramId}\u0000${bookRef}\u0000${deliveryScopeKey ?? ''}`;
     const isCompletion = row.release_kind === 'translation_completed';
     const chapterCount = isCompletion ? 0 : nonNegativeInteger(row.chapter_count);
+    const rowTeams = parseTeamNames(row.team_names_json);
     const existing = groups.get(key);
 
     if (!existing) {
       groups.set(key, {
         userTelegramId,
         bookRef,
+        deliveryScopeKey,
         titleId: row.ranobelib_id,
         title: row.title,
         titleUrl: row.url,
+        teamNames: rowTeams,
         members: [row],
         chapterCount,
         firstVolume: isCompletion ? null : (row.first_volume ?? null),
@@ -92,6 +100,7 @@ export function aggregateClaimedDeliveryRows<T extends ClaimedDeliveryRowLike>(r
     }
 
     existing.members.push(row);
+    mergeTeamNames(existing.teamNames, rowTeams);
     existing.translationCompleted ||= isCompletion;
     if (!isCompletion) {
       existing.chapterCount += chapterCount;
@@ -114,6 +123,34 @@ export function aggregateClaimedDeliveryRows<T extends ClaimedDeliveryRowLike>(r
   }
 
   return [...groups.values()];
+}
+
+function parseTeamNames(value: unknown): string[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const item of parsed) {
+      const name = typeof item === 'string' ? item.trim() : '';
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      result.push(name);
+    }
+    return result;
+  } catch {
+    return [];
+  }
+}
+
+function mergeTeamNames(target: string[], additions: string[]): void {
+  const seen = new Set(target);
+  for (const name of additions) {
+    if (seen.has(name)) continue;
+    seen.add(name);
+    target.push(name);
+  }
 }
 
 function hasSafeContiguousRange<T extends ClaimedDeliveryRowLike>(rows: T[]): boolean {
