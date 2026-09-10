@@ -256,9 +256,20 @@ A paused/hidden team must not independently create scanner demand.
 
 ## First `/start` onboarding
 
-A special onboarding flow is shown for the user's first normal `/start` according to the final rollout rule still to be decided for pre-existing users.
+A special onboarding flow is shown for genuinely new users and, at rollout, for existing users who have no notification subscriptions. Existing users who already have at least one effective notification subscription skip the onboarding and continue to the normal main menu.
 
 `Дом Некроманта` must be clearly identified as the **primary team of the bot**, but it must not be silently subscribed without a user action.
+
+### Existing-user rollout
+
+Approved rollout rule:
+
+- genuinely new users receive the new onboarding;
+- existing users with any current notification subscription do **not** get interrupted by the new onboarding;
+- existing users with zero current notification subscriptions receive the onboarding on their next normal `/start`;
+- existing subscription state is never rewritten merely because onboarding exists.
+
+The rollout check must account for migrated legacy subscriptions so an existing `all_titles=1`, explicit title subscription, or equivalent migrated team/team-title subscription counts as already configured.
 
 ### Default onboarding
 
@@ -373,6 +384,7 @@ Implementation should use TDD and add focused tests for at least:
 - paused team preserving subscriptions;
 - recommendation membership influencing first onboarding only;
 - recommendation lookup failure fallback;
+- onboarding rollout: existing subscribed users are not interrupted, existing unsubscribed users are offered onboarding;
 - publication-channel isolation and prohibition of writes to external recommendation channels;
 - existing publication/download membership behavior remaining unchanged;
 - delivery-mode migration and team-title scoping;
@@ -395,15 +407,15 @@ Implementation should use TDD and add focused tests for at least:
 - Optional external Telegram channels personalize first onboarding only.
 - Channel membership never silently changes subscriptions later.
 - External team channels are completely isolated from publication/channel-write infrastructure.
+- New onboarding is shown to new users and existing users with no notification subscriptions; existing subscribed users skip it.
 
 ## Open decisions before the final implementation plan
 
-1. Rollout rule for the new first-run onboarding for **existing** users versus only genuinely new users.
-2. Exact onboarding completion semantics: what action marks onboarding complete and how `Назад`/abandon/retry behaves.
-3. Whether a whole-team subscription should allow a team-wide delivery-mode override, or only global default + team-title override.
-4. Exact admin flow for attaching/verifying an optional Telegram recommendation channel (`@username`, numeric chat ID, forwarded channel message, or supported combination).
-5. Exact status semantics for a team translation when RanobeLib's title-level `scanlateStatus` is not team-specific; completion must not be falsely attributed to every team without evidence.
-6. Stable RanobeLib branch identity: use a native branch ID if reliably exposed; otherwise define and test a stable fingerprint.
-7. How completed translations appear in the multi-team user catalog and whether completed titles are shown by default inside a team's page.
-8. Whether hidden-but-synced teams are visible to admins only in `/stats` and team management, and what summary metrics are desired.
-9. Rollout/deployment sequencing for the schema migration, silent baseline, scanner switch, and notification UX switch.
+1. Exact onboarding completion semantics: what action marks onboarding complete and how `Назад`/abandon/retry behaves.
+2. Whether a whole-team subscription should allow a team-wide delivery-mode override, or only global default + team-title override.
+3. Exact admin flow for attaching/verifying an optional Telegram recommendation channel (`@username`, numeric chat ID, forwarded channel message, or supported combination).
+4. Exact status semantics for a team translation when RanobeLib's title-level `scanlateStatus` is not team-specific; completion must not be falsely attributed to every team without evidence.
+5. Stable RanobeLib branch identity: use a native branch ID if reliably exposed; otherwise define and test a stable fingerprint.
+6. How completed translations appear in the multi-team user catalog and whether completed titles are shown by default inside a team's page.
+7. Whether hidden-but-synced teams are visible to admins only in `/stats` and team management, and what summary metrics are desired.
+8. Rollout/deployment sequencing for the schema migration, silent baseline, scanner switch, and notification UX switch.
