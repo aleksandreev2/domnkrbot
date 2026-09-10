@@ -166,10 +166,13 @@ function normalizeTeamBook(
   const cover = isRecord(raw.cover) ? raw.cover : {};
   const coverUrl = stringOrNull(cover.default) ?? stringOrNull(cover.thumbnail);
   const scanlateStatus = isRecord(raw.scanlateStatus) ? raw.scanlateStatus : null;
-  const nestedStatusId = scanlateStatus ? numberOrNull(scanlateStatus.id) : null;
+  const status = isRecord(raw.status) ? raw.status : null;
+  const scanlateStatusId = scanlateStatus ? numberOrNull(scanlateStatus.id) : null;
+  const statusObjectId = status ? numberOrNull(status.id) : null;
   const scalarStatusId = numberOrNull(raw.status_id);
-  const translationStatusId = nestedStatusId ?? scalarStatusId;
+  const translationStatusId = scanlateStatusId ?? statusObjectId ?? scalarStatusId;
   const translationStatusLabel = (scanlateStatus ? stringOrNull(scanlateStatus.label) : null)
+    ?? (status ? stringOrNull(status.label) : null)
     ?? (translationStatusId !== null ? translationStatusLabels.get(translationStatusId) ?? null : null);
 
   return {
