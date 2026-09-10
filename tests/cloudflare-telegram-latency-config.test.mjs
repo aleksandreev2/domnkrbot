@@ -9,3 +9,14 @@ test('Cloudflare latency config enables Smart Placement without D1 read replicat
   assert.doesNotMatch(source, /read_replication|readReplication/i);
   assert.doesNotMatch(source, /"sessions?"\s*:/i);
 });
+
+test('Workers Paid subrequest budget is explicit in the deployment source of truth', async () => {
+  const source = await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+  const wrangler = JSON.parse(source);
+
+  assert.equal(
+    wrangler.limits?.subrequests,
+    10_000,
+    'production must not depend on an implicit or dashboard-only subrequest limit',
+  );
+});
