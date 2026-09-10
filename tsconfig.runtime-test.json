@@ -28,6 +28,10 @@
     "src/channel-membership-appeals.ts",
     "src/admin-user-workspace.ts",
     "src/telegram-subscriptions.ts",
+    "src/telegram-subscriptions-legacy.ts",
+    "src/telegram-notification-team-copy.ts",
+    "src/multi-team-notification-render.ts",
+    "src/telegram-translation-completion.ts",
     "src/telegram-notification-settings.ts",
     "src/telegram-notification-controls.ts",
     "src/telegram-notification-mode-runtime.ts",
@@ -52,6 +56,16 @@
     "src/ranobelib-discovery-scheduler.ts",
     "src/telegram-notification-delivery-groups.ts",
     "src/telegram-notification-delivery.ts",
-    "src/notification-demand.ts"
+    "src/notification-demand.ts",
+    "src/ranobelib-team-registry.ts",
+    "src/ranobelib-multi-team-discovery.ts",
+    "src/ranobelib-multi-team-scanner.ts",
+    "src/multi-team-subscriptions.ts",
+    "src/multi-team-notification-demand.ts",
+    "src/multi-team-shadow-parity.ts",
+    "src/telegram-team-catalog.ts",
+    "src/telegram-team-notification-ux.ts",
+    "src/telegram-team-onboarding.ts",
+    "src/telegram-team-admin.ts"
   ]
 }

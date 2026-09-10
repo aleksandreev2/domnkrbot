@@ -1,3 +1,4 @@
+import { notificationTranslatorLine } from './telegram-notification-team-copy.js';
 import type { TelegramMessagePayload } from './telegram-subscriptions.js';
 
 export function formatTranslationCompletionNotification(input: {
@@ -6,6 +7,7 @@ export function formatTranslationCompletionNotification(input: {
   chapterCount: number;
   firstNumber: string | null;
   lastNumber: string | null;
+  teamNames?: readonly string[];
 }): TelegramMessagePayload {
   const chapterCount = nonNegativeInteger(input.chapterCount);
   const chapterLine = completionChapterLine(chapterCount, input.firstNumber, input.lastNumber);
@@ -19,7 +21,7 @@ export function formatTranslationCompletionNotification(input: {
         ? [`🆕 ${chapterLine}`, 'Этими главами перевод тайтла завершён.']
         : ['Мы завершили перевод этого тайтла.']),
       '',
-      'Перевод команды «Дом Некроманта».',
+      notificationTranslatorLine(input.teamNames, escapeHtml),
     ].join('\n'),
     parse_mode: 'HTML',
     reply_markup: {

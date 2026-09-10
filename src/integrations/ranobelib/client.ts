@@ -1,5 +1,6 @@
+import { buildRanobeLibBranchIdentity, normalizeRanobeLibTeamIds } from './branch-identity.js';
 import { sortChapters } from './release-detector.js';
-import type { RanobeLibChapter, RanobeLibTeamBookRef, RanobeLibTitle } from './types.js';
+import type { RanobeLibChapter, RanobeLibChapterBranch, RanobeLibTeamBookRef, RanobeLibTitle } from './types.js';
 
 export interface RanobeLibClientOptions {
   apiBaseUrl?: string;
@@ -34,7 +35,7 @@ export class RanobeLibClient {
   async discoverTeamBooks(teamRef: string): Promise<RanobeLibTeamBookRef[]> {
     const normalizedTeamRef = teamRef.trim();
     this.discoveredTeamRef = normalizedTeamRef || null;
-    const teamId = teamIdFromRef(normalizedTeamRef);
+    const teamId = ranobeLibTeamIdFromRef(normalizedTeamRef);
     if (teamId === null) throw new Error(`Invalid RanobeLib team ref: ${teamRef}`);
 
     const books: RanobeLibTeamBookRef[] = [];
@@ -81,10 +82,12 @@ export class RanobeLibClient {
     return normalizeTitle(response.data ?? {}, bookRef);
   }
 
+  /**
+   * Compatibility projection used by the existing single-team scanner. New multi-team code should
+   * call getChapterBranches so two translations of the same chapter do not collapse to chapter.id.
+   */
   async getChapters(bookRef: string, options: RanobeLibChapterOptions = {}): Promise<RanobeLibChapter[]> {
-    const response = await this.getJson<ApiEnvelope<unknown[]>>(
-      `${this.apiBaseUrl}/manga/${encodeURIComponent(bookRef)}/chapters`,
-    );
+    const response = await this.getChapterPayload(bookRef);
     const teamRef = options.teamRef ?? this.discoveredTeamRef ?? undefined;
     const nowMs = Date.now();
 
@@ -95,6 +98,23 @@ export class RanobeLibClient {
       : [];
 
     return sortChapters(chapters);
+  }
+
+  /** Returns every currently released chapter branch with stable/conservative identity metadata. */
+  async getChapterBranches(bookRef: string): Promise<RanobeLibChapterBranch[]> {
+    const response = await this.getChapterPayload(bookRef);
+    const nowMs = Date.now();
+    const branches: RanobeLibChapterBranch[] = [];
+    for (const value of Array.isArray(response.data) ? response.data : []) {
+      branches.push(...normalizeChapterBranches(value, bookRef, nowMs));
+    }
+    return branches.sort(compareChapterBranches);
+  }
+
+  private getChapterPayload(bookRef: string): Promise<ApiEnvelope<unknown[]>> {
+    return this.getJson<ApiEnvelope<unknown[]>>(
+      `${this.apiBaseUrl}/manga/${encodeURIComponent(bookRef)}/chapters`,
+    );
   }
 
   private async getJson<T>(url: string): Promise<T> {
@@ -203,20 +223,71 @@ function normalizeChapter(raw: unknown, teamRef: string | undefined, nowMs: numb
   };
 }
 
+function normalizeChapterBranches(raw: unknown, bookRef: string, nowMs: number): RanobeLibChapterBranch[] {
+  if (!isRecord(raw)) return [];
+  const chapterId = numberOrNull(raw.id);
+  const volume = tokenOrNull(raw.volume);
+  const number = tokenOrNull(raw.number);
+  if (chapterId === null || volume === null || number === null) return [];
+
+  const chapterName = stringOrNull(raw.name);
+  const rawBranches = Array.isArray(raw.branches) ? raw.branches : [];
+  const normalized: RanobeLibChapterBranch[] = [];
+
+  for (let index = 0; index < rawBranches.length; index += 1) {
+    const branch = rawBranches[index];
+    if (!isRecord(branch) || !branchIsReleased(branch, nowMs)) continue;
+    const releasedAt = stringOrNull(branch.created_at);
+    const teamIds = branchTeamIds(branch);
+    const nativeBranchId = numberOrNull(branch.branch_id) ?? numberOrNull(branch.id);
+    const stableBranchRef = stringOrNull(branch.slug_url)
+      ?? stringOrNull(branch.ref)
+      ?? stringOrNull(branch.slug)
+      ?? stringOrNull(branch.uuid);
+    const identity = buildRanobeLibBranchIdentity({
+      bookRef,
+      chapterId,
+      nativeBranchId,
+      teamIds,
+      releasedAt,
+      stableBranchRef,
+      branchOrdinal: index,
+    });
+
+    normalized.push({
+      chapterId,
+      volume,
+      number,
+      name: chapterName,
+      branchKey: identity.key,
+      nativeBranchId: identity.nativeBranchId,
+      identityConfidence: identity.confidence,
+      teamIds,
+      releasedAt,
+    });
+  }
+
+  return normalized;
+}
+
 function releasedTeamBranch(raw: Record<string, unknown>, teamRef: string, nowMs: number): Record<string, unknown> | null {
   const branches = Array.isArray(raw.branches) ? raw.branches : [];
   for (const branch of branches) {
-    if (!isRecord(branch) || !branchHasTeam(branch, teamRef)) continue;
-    const createdAt = stringOrNull(branch.created_at);
-    if (!createdAt) return branch;
-    const releaseMs = Date.parse(createdAt);
-    if (!Number.isFinite(releaseMs) || releaseMs <= nowMs) return branch;
+    if (!isRecord(branch) || !branchHasTeam(branch, teamRef) || !branchIsReleased(branch, nowMs)) continue;
+    return branch;
   }
   return null;
 }
 
+function branchIsReleased(branch: Record<string, unknown>, nowMs: number): boolean {
+  const createdAt = stringOrNull(branch.created_at);
+  if (!createdAt) return true;
+  const releaseMs = Date.parse(createdAt);
+  return !Number.isFinite(releaseMs) || releaseMs <= nowMs;
+}
+
 function branchHasTeam(branch: Record<string, unknown>, teamRef: string): boolean {
-  const teamId = teamIdFromRef(teamRef);
+  const teamId = ranobeLibTeamIdFromRef(teamRef);
   const teams = Array.isArray(branch.teams) ? branch.teams : [];
   return teams.some((team) => {
     if (!isRecord(team)) return false;
@@ -226,9 +297,28 @@ function branchHasTeam(branch: Record<string, unknown>, teamRef: string): boolea
   });
 }
 
-function teamIdFromRef(teamRef: string): number | null {
+function branchTeamIds(branch: Record<string, unknown>): number[] {
+  const teams = Array.isArray(branch.teams) ? branch.teams : [];
+  return normalizeRanobeLibTeamIds(teams.map((team) => isRecord(team) ? team.id : null));
+}
+
+export function ranobeLibTeamIdFromRef(teamRef: string): number | null {
   const match = /^(\d+)(?:--|$)/.exec(teamRef.trim());
   return match?.[1] ? Number(match[1]) : null;
+}
+
+function compareChapterBranches(a: RanobeLibChapterBranch, b: RanobeLibChapterBranch): number {
+  const projected = sortChapters([
+    { id: a.chapterId, volume: a.volume, number: a.number, name: a.name },
+    { id: b.chapterId, volume: b.volume, number: b.number, name: b.name },
+  ]);
+  if (projected[0]?.id === a.chapterId && projected[1]?.id === b.chapterId) {
+    if (a.chapterId !== b.chapterId || a.volume !== b.volume || a.number !== b.number) return -1;
+  }
+  if (projected[0]?.id === b.chapterId && projected[1]?.id === a.chapterId) {
+    if (a.chapterId !== b.chapterId || a.volume !== b.volume || a.number !== b.number) return 1;
+  }
+  return a.branchKey.localeCompare(b.branchKey);
 }
 
 function extractTitle(raw: Record<string, unknown>): string | null {

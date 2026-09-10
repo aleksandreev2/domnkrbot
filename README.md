@@ -197,7 +197,16 @@ migrations/0016_telegram_notification_delivery_modes.sql
 migrations/0017_telegram_text_bot_ux_v2.sql
 ```
 
-`0015` добавляет `notification_subscriber_count`, `subscriber_count_updated_at`, таблицу `telegram_delivery_reachability`, индексы и начальный пересчёт effective demand. Последующие `0016`/`0017` расширяют настройки и UX-состояния без удаления существующих таблиц/подписок и без отката схемы назад.
+Multi-team RanobeLib notifications добавляются следующими forward-only миграциями:
+
+```text
+migrations/0023_multi_team_notifications.sql
+migrations/0024_multi_team_branch_baseline_reset.sql
+migrations/0025_multi_team_telegram_admin_state.sql
+migrations/0026_multi_team_delivery_scope.sql
+```
+
+`0023` создаёт team/translation/branch/subscription структуры, seed основной команды «Дом Некроманта» и три независимых rollout-флага со значением `0`. Legacy `all_titles=1`, явные подписки, исключения и delivery overrides мигрируются только в scope основной команды; legacy-строки сохраняются. `0024` сбрасывает только branch-aware baseline primary-team переводов, чтобы первый проход был тихим и не создавал historical replay. Миграции не создают исторические release/outbox записи и не удаляют legacy schema.
 
 Безопасный локальный порядок:
 
@@ -220,6 +229,45 @@ npm run dev
 
 Публичные данные можно смотреть сразу. Для реального Telegram Login нужен HTTPS domain, привязанный к боту через BotFather.
 
+## Multi-team RanobeLib rollout
+
+Multi-team cutover обратим на уровне feature flags. Схема остаётся forward-only: после применения миграций новые таблицы не удаляются даже при rollback. Legacy primary-team path сохраняется на время стабилизации.
+
+Три независимых ключа находятся в `app_settings` и по умолчанию равны `0`:
+
+```text
+ranobelib_multi_team_shadow=0
+ranobelib_multi_team_delivery=0
+ranobelib_multi_team_ui=0
+```
+
+Безопасный production rollout выполняется только поэтапно:
+
+1. Задеплоить миграции и код, оставив все три switch в `0`.
+2. Проверить primary-team migration parity и убедиться, что migration/baseline не создали historical releases или outbox replay.
+3. Включить только `ranobelib_multi_team_shadow=1`.
+4. Наблюдать как минимум один нормальный цикл discovery/HOT/IDLE и проверить shadow parity, native/fallback/ambiguous branch counters и отсутствие user-visible release/outbox записей от shadow path.
+5. Включить `ranobelib_multi_team_delivery=1`, оставив `ranobelib_multi_team_ui=0`.
+6. Проверить production notifications основной команды: eligibility, outbox, Queue wake-up/fallback, instant/stack thresholds и 7-day flush.
+7. Добавлять внешние команды только как `hidden`, выполнить для каждой тихую initial sync/baseline и проверить отсутствие historical replay.
+8. Публиковать только проверенные команды через `/teams`.
+9. После проверки delivery включить `ranobelib_multi_team_ui=1`.
+10. Сохранять legacy tables/read path в течение периода стабилизации; destructive cleanup требует отдельной задачи.
+
+Операционные сигналы доступны администраторам: `/stats` показывает lifecycle/error/stale, branch identity, migration parity и rollout state; `/teams` — детальное состояние конкретной команды и её переводов.
+
+### Multi-team rollback
+
+Для немедленного возврата на legacy behavior выставить:
+
+```text
+ranobelib_multi_team_ui=0
+ranobelib_multi_team_delivery=0
+ranobelib_multi_team_shadow=0
+```
+
+Не откатывать `0023_multi_team_notifications.sql` и последующие multi-team migrations, не удалять новые таблицы и не чистить сохранённые team subscriptions/history. После выключения флагов сохранённый legacy primary-team path снова становится authoritative; данные новой схемы остаются для диагностики и последующего безопасного повторного rollout.
+
 ## Production
 
 Перед production rollout:
@@ -232,6 +280,8 @@ npx wrangler deploy --dry-run
 ```
 
 Перед rollout demand-aware scheduler отдельно убедитесь, что Queue `domnkrbot-notifications-v3` уже создана, migration `0015_paid_backend_demand_aware.sql` применена к правильной production D1, а Worker действительно работает на оплачиваемом Workers plan, для которого рассчитан HOT batch 24.
+
+Для multi-team deployment сначала применяются `0023`–`0026` и новая версия Worker при всех трёх multi-team flags = `0`. Не включать delivery/UI автоматически после merge: переход выполняется только по staged rollout выше после проверки production parity/shadow diagnostics.
 
 После deploy проверить:
 
@@ -251,6 +301,11 @@ npx wrangler deploy --dry-run
 - Queue wake-up и доставка нового релиза;
 - пяти-минутный fallback из D1 при недоступной Queue;
 - RanobeLib team discovery;
+- multi-team flags остаются в ожидаемом состоянии для текущей rollout phase;
+- `/stats` показывает lifecycle/error/stale, branch identity и parity без user IDs;
+- `/teams` показывает lifecycle, sync error/last sync, translation counts и recommendation readiness;
+- hidden/paused external teams не появляются в пользовательском каталоге;
+- recommendation channels не меняют publication/download/blacklist configuration;
 - hourly membership reconciliation;
 - RanobeLib read/manual sync;
 - publication test/publish;

@@ -1,3 +1,5 @@
+import type { RanobeLibBranchIdentityConfidence } from './branch-identity.js';
+
 export interface RanobeLibTeamBookRef {
   id: number;
   slug: string;
@@ -27,6 +29,18 @@ export interface RanobeLibChapter {
   releasedAt?: string | null;
   /** Local D1 timestamp used only when reconciling snapshots created before a scheduled release. */
   firstSeenAt?: string | null;
+}
+
+export interface RanobeLibChapterBranch {
+  chapterId: number;
+  volume: string;
+  number: string;
+  name: string | null;
+  branchKey: string;
+  nativeBranchId: number | null;
+  identityConfidence: RanobeLibBranchIdentityConfidence;
+  teamIds: number[];
+  releasedAt: string | null;
 }
 
 export interface RanobeLibReleaseDelta {

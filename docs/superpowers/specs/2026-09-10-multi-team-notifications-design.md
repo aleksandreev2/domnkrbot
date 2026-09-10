@@ -1,0 +1,475 @@
+# Multi-Team RanobeLib Notifications — Design
+
+Status: **Draft / active design discussion**
+
+This document captures decisions already approved in chat for multi-team RanobeLib notifications. It is intentionally a design plan, not yet the implementation plan. Open decisions are listed at the end and must be resolved before implementation planning.
+
+## Goal
+
+Turn the current single-team notification system into a first-class multi-team system without making Telegram UX confusing and without allowing external team metadata to leak into the existing publication/channel-delivery subsystem.
+
+Users should be able to:
+
+- follow an entire translation team;
+- follow individual title translations from a specific team;
+- exclude individual title translations from an otherwise followed team;
+- search titles without being confused by duplicate translations;
+- receive exactly one notification for a joint branch translated by multiple followed teams;
+- understand why a title is or is not currently notifying them.
+
+Admins should be able to add, verify, synchronize, publish, pause, and manage RanobeLib teams through the Telegram bot.
+
+`Дом Некроманта` remains the primary/default team of the bot.
+
+## Non-goals / safety boundaries
+
+Multi-team support is a **notification/source aggregation feature**, not a multi-channel publishing feature.
+
+An external team's optional Telegram channel must never become a publication destination. It must not inherit or participate in:
+
+- `publications` delivery;
+- `publish_channel_id`;
+- publication editing/deletion;
+- publication asset delivery;
+- the existing download membership gate;
+- blacklist or Telegram ban enforcement;
+- any other write operation against that team's channel.
+
+The optional external team channel exists only to help personalize first-run recommendations. Its intended Telegram usage is read-only membership/metadata lookup such as `getChatMember`/`getChat` where permitted.
+
+The existing `Дом Некроманта` publication pipeline remains independent.
+
+## Core domain model
+
+The system must stop treating a RanobeLib `book_ref` as the complete identity of a translation.
+
+Use three conceptual layers:
+
+1. **Work / title** — the RanobeLib book page itself. Global metadata such as `book_ref`, RanobeLib ID, title, cover, summary, and URL belong here.
+2. **Team translation** — a specific team translating a specific work. Subscription semantics, team presence, active/dormant state, and team-scoped notification demand belong to the pair `(team, work)`.
+3. **Chapter branch / release** — the actual RanobeLib translation branch for one or more chapters. A branch can belong to one team or multiple teams in a joint translation.
+
+This avoids duplicating the work itself while preserving team-specific subscription identity.
+
+The current `ranobelib_titles` table can remain the work-level foundation rather than being discarded. New team/work and branch/team structures should be layered around it with a migration that preserves historical IDs, links, snapshots, and notification history wherever possible.
+
+## Team registry
+
+Introduce a first-class RanobeLib team registry. Each team needs at least:
+
+- stable internal ID;
+- RanobeLib team ID/ref;
+- display name;
+- primary-team flag;
+- visibility/lifecycle state;
+- optional recommendation Telegram channel reference;
+- sync timestamps and sync error state.
+
+Suggested lifecycle states are conceptually:
+
+- `hidden/syncing` — added by admin but not visible to users;
+- `published` — available to users and eligible for notification subscriptions;
+- `paused` — hidden and not actively scanned, but all user subscription state is preserved;
+- `error` — sync failed and requires admin attention.
+
+Exact persistence values can be selected in the implementation plan.
+
+`Дом Некроманта` is seeded as the primary team and remains published.
+
+## Admin: adding a team through Telegram
+
+Only admins add teams. Ordinary users never paste RanobeLib team URLs or IDs.
+
+Proposed flow:
+
+1. Admin opens `Управление командами`.
+2. Admin selects `Добавить команду`.
+3. Bot asks for the RanobeLib team URL/ref.
+4. Bot validates the team against RanobeLib before mutating the active catalog.
+5. Bot shows a preview: team name, RanobeLib ID/ref, number of discovered works, active/completed counts where trustworthy, and validation/sync warnings.
+6. Admin confirms.
+7. Bot performs the initial synchronization **silently**, without generating historical release notifications.
+8. The team remains hidden after successful initial sync.
+9. Admin explicitly selects `Опубликовать команду` to expose it to users.
+
+An optional Telegram channel may be attached to the team. Attaching it must be independent from RanobeLib sync success.
+
+### Attaching a recommendation Telegram channel
+
+Approved admin flow:
+
+- the admin may send an `@username`, a `t.me/...` channel link, or forward a message from the target channel;
+- the bot resolves that input to the canonical Telegram chat/channel ID and stores the resolved identifier plus safe display metadata such as title/username when available;
+- raw numeric Telegram chat IDs are an internal implementation detail and are not a normal admin-facing input path;
+- before enabling membership-based onboarding recommendations, the bot checks that the channel can be resolved and that membership lookup is reliable with the bot's current access;
+- if the channel resolves but reliable membership lookup is unavailable, the team remains fully usable for RanobeLib notifications and the admin receives a clear warning that personalized onboarding from that channel is disabled;
+- a forwarded message that does not expose a resolvable source channel must not be guessed from; the bot asks the admin to use the public username/link instead;
+- attaching, replacing, or removing this recommendation channel must never alter team subscriptions or publication-channel settings.
+
+The resolved recommendation channel is read-only metadata. It must not become a publication destination or participate in download membership gates, blacklist enforcement, or any other external-channel write path.
+
+If membership cannot be reliably checked (for example, the bot lacks sufficient rights), the team still functions normally for RanobeLib notifications; only personalized onboarding recommendations for that channel are unavailable.
+
+## Admin: pausing a team
+
+Pausing is non-destructive.
+
+When a published team is paused:
+
+- it disappears from the normal user team catalog;
+- active scanning for that team stops unless another published team on the same work independently requires the shared work fetch;
+- notifications attributable only to the paused team stop;
+- team subscriptions, title subscriptions, exclusions, and history remain stored;
+- resuming/re-publishing restores the previous user subscription state automatically.
+
+Pausing must not delete subscriptions.
+
+## Subscription model
+
+### Team subscription
+
+A user may follow a whole team.
+
+Following a team means receiving all current and future title translations from that team, except explicit per-title exclusions.
+
+### Explicit title subscription
+
+A user may follow one title translation from a specific team without following that team globally.
+
+A title subscription is therefore always scoped to `(user, team, work)`, never just `(user, work)`.
+
+### Exclusions
+
+If a user follows a whole team, an explicit exclusion for one `(team, work)` wins over the inherited team subscription.
+
+Effective precedence:
+
+1. explicit title exclusion;
+2. whole-team subscription;
+3. explicit title subscription;
+4. no subscription.
+
+The UI should explain the effective reason in human language, for example:
+
+- `Получаете уведомления: подписка на всю команду`;
+- `Уведомления отключены: исключение из подписки на команду`;
+- `Получаете уведомления: выбрано вручную`.
+
+### Existing users / `all_titles`
+
+The old global `all_titles=1` behavior must **not** become “follow every current and future team”.
+
+Approved migration semantics:
+
+- existing `all_titles=1` becomes “follow all translations from Дом Некроманта”;
+- newly added teams are never auto-enabled for those users;
+- existing title subscriptions/exclusions and title delivery overrides are migrated into the `Дом Некроманта + title` scope.
+
+This preserves previous behavior without surprising users when new teams are added.
+
+## User notification center
+
+The main notification center becomes team-aware and avoids dumping every inherited title into one giant list.
+
+Recommended root structure:
+
+```text
+🔔 Уведомления
+
+👥 Мои команды
+📚 Мои новеллы
+🔎 Найти новеллу
+🧭 Все команды
+⚙️ Режим доставки
+```
+
+### `Мои команды`
+
+Shows teams the user follows as a whole.
+
+Opening a team shows its status, active translation count, exclusions count, and actions to browse its translations or stop following the whole team.
+
+### `Мои новеллы`
+
+Approved semantics: this screen shows **only manually selected title translations** from teams the user does not follow as a whole.
+
+Titles inherited from a team subscription do not flood this screen.
+
+### Team title card
+
+A title card is always for a concrete team translation.
+
+If inherited from a team subscription, show an action such as `Не уведомлять по этой новелле`, creating an exclusion.
+
+If explicitly excluded, show `Вернуть уведомления`.
+
+If the team is not followed, show the normal explicit title subscribe/unsubscribe action.
+
+## Search UX and duplicate titles
+
+Search operates across published teams.
+
+Approved behavior:
+
+- if a work has only one available team translation, go directly to that team-title card;
+- if multiple teams translate the same work, group the search result by the work first and then show a team chooser;
+- never expose internal IDs or make users understand branch mechanics.
+
+Example:
+
+```text
+📚 Культивация Онлайн
+Переводят 2 команды
+```
+
+Then:
+
+```text
+Выберите перевод:
+
+🔔 Дом Некроманта
+🔕 Team X
+```
+
+## Release identity and joint translations
+
+A release must no longer be globally identified only by `book_ref` and chapter IDs.
+
+The system must preserve RanobeLib branch identity or a stable branch fingerprint and its associated team set.
+
+Approved semantics:
+
+- one branch associated with `Дом Некроманта + Team X` is one release;
+- a user following either participating team is eligible;
+- a user following both still receives that release only once;
+- two independent branches of the same chapter from two teams are two different releases and may produce two notifications if the user follows both.
+
+The notification should identify the translator team(s) dynamically. Joint translations can display multiple teams in one notification.
+
+## Team translation completion status
+
+Approved rule: RanobeLib's title-level `scanlateStatus` is work-level context only and must not by itself mark every team translation of that work as completed.
+
+A specific `(team, work)` translation may be shown as completed only when there is reliable evidence attributable to that team or to a branch that explicitly belongs to that team. For a joint branch, branch-specific completion evidence may apply to the participating team set represented by that branch.
+
+Consequences:
+
+- a global/title-level `completed` status must never be copied blindly to every team translating the work;
+- disappearance of a team/work relationship from discovery is not, by itself, proof of completion and should be treated as removal/dormancy according to discovery rules;
+- if reliable team- or branch-specific completion evidence is unavailable, the UI must avoid claiming that the team completed the translation;
+- stored team-specific status may distinguish confirmed completion from active/dormant/unknown state as needed by the implementation, but uncertainty must not be converted into a false `completed` state;
+- scanner and catalog behavior must use the team-specific state rather than assuming the work-level status is authoritative for every translation.
+
+This intentionally prefers an unknown or non-final team status over falsely attributing another team's completion to it.
+
+## Scanner and discovery architecture
+
+The current single-team assumptions must be removed from discovery/scanning.
+
+### Discovery
+
+Discovery is per team. A work disappearing from Team A's catalog must only archive/pause the Team A → work relationship; it must not globally deactivate the work if Team B still translates it.
+
+### Chapter fetching
+
+Prefer a work-level network fetch followed by branch parsing/fan-out rather than fetching the exact same `/chapters` payload once per team.
+
+If a work is translated by three monitored teams, one RanobeLib chapter fetch should ideally update all relevant branch/team state.
+
+This reduces subrequests, naturally handles joint branches, and prevents the same work from being scanned redundantly.
+
+### Demand
+
+Notification demand should be computed for team-title subscriptions, then aggregated to the work-level scanner scheduler. If any active monitored translation of a work has meaningful subscriber demand, the shared work fetch can run at the appropriate hot cadence.
+
+A paused/hidden team must not independently create scanner demand.
+
+## First `/start` onboarding
+
+A special onboarding flow is shown for genuinely new users and, at rollout, for existing users who have no notification subscriptions. Existing users who already have at least one effective notification subscription skip the onboarding and continue to the normal main menu.
+
+`Дом Некроманта` must be clearly identified as the **primary team of the bot**, but it must not be silently subscribed without a user action.
+
+### Existing-user rollout
+
+Approved rollout rule:
+
+- genuinely new users receive the new onboarding;
+- existing users with any current notification subscription do **not** get interrupted by the new onboarding;
+- existing users with zero current notification subscriptions receive the onboarding on their next normal `/start`;
+- existing subscription state is never rewritten merely because onboarding exists.
+
+The rollout check must account for migrated legacy subscriptions so an existing `all_titles=1`, explicit title subscription, or equivalent migrated team/team-title subscription counts as already configured.
+
+### Completion semantics
+
+Approved completion rule:
+
+- onboarding is marked completed only after the user successfully chooses at least one team to follow, or explicitly chooses `Не сейчас`;
+- merely opening the team catalog or manual-selection flow does not complete onboarding until at least one team choice is persisted;
+- `Назад`, another `/start`, closing Telegram, timing out, or abandoning the flow does not mark onboarding complete;
+- if onboarding remains incomplete, the next normal `/start` offers it again;
+- the completion write must be idempotent so retries cannot create duplicate subscriptions or inconsistent state.
+
+This gives users an explicit opt-out without allowing an accidental close or half-finished selection to permanently suppress onboarding.
+
+### Default onboarding
+
+When no reliable external-team membership signal is available, show a concise introduction and make `Дом Некроманта` the primary recommendation while still exposing the full team catalog.
+
+Conceptually:
+
+```text
+Добро пожаловать в Дом Некроманта!
+
+Бот следит за новыми главами на RanobeLib и присылает уведомления сюда.
+
+🏠 Дом Некроманта — основная команда бота.
+
+[ 🏠 Следить за Домом Некроманта ]
+[ 👥 Посмотреть все команды ]
+```
+
+### Personalized onboarding from an optional team Telegram channel
+
+A team may have an optional recommendation Telegram channel.
+
+During first onboarding only, the bot may check whether the user belongs to that channel when Telegram permissions make the answer reliable.
+
+If the user belongs to Team X's linked channel, Team X becomes a personalized recommendation while `Дом Некроманта` remains visibly primary.
+
+Recommended single-match choices:
+
+```text
+[ ✅ Team X + Дом Некроманта ]
+[ 👥 Только Team X ]
+[ 🏠 Только Дом Некроманта ]
+[ ⚙️ Выбрать команды вручную ]
+```
+
+If multiple linked-team memberships are detected, show a compact team selector rather than an explosion of combination buttons.
+
+### Recommendation is not synchronization
+
+Approved rule: external Telegram membership is used **only to personalize first onboarding**.
+
+It never automatically changes notification subscriptions later.
+
+Examples:
+
+- leaving Team X's Telegram channel does not unsubscribe Team X in the bot;
+- joining Team X's Telegram channel later does not silently subscribe Team X in the bot;
+- a Telegram membership lookup failure falls back to normal onboarding and does not block `/start`.
+
+## Strict publication-channel isolation
+
+This is a hard invariant.
+
+External team recommendation channels are read-only recommendation metadata.
+
+They must not be accepted as destinations by the publication subsystem, notification delivery subsystem, publication lifecycle, download membership gate, or blacklist/ban subsystem.
+
+Implementation should enforce this structurally, not only by convention:
+
+- use separate data fields/tables and naming for recommendation channels;
+- do not expose recommendation-channel IDs through publication settings APIs;
+- keep `publish_channel_id` as the publication destination for the existing Дом Некроманта publication system;
+- ensure normal chapter notifications are sent to the subscribed user's private Telegram chat, not to a team's channel;
+- add regression tests proving external recommendation channel IDs cannot flow into publication/write operations.
+
+The existing `channel-membership-access` behavior for Дом Некроманта downloads remains a separate feature and must not be generalized to external team channels as part of this project.
+
+## Delivery modes
+
+Approved rule: there is no team-wide delivery-mode override.
+
+The hierarchy stays intentionally simple:
+
+1. the user's global delivery mode is the default for every followed team and title;
+2. a specific `(team, work)` translation may override that global mode;
+3. there is no intermediate per-team delivery mode.
+
+Per-title overrides must therefore become team-title scoped so two translations of the same work can still be configured independently. Following an entire team changes subscription scope only; it does not introduce another delivery-settings layer.
+
+## Historical data and migration safety
+
+Migration must be additive and backward-compatible where practical.
+
+Requirements:
+
+- seed Дом Некроманта as the primary team;
+- associate existing known translation state with Дом Некроманта without losing archived rows/history;
+- migrate `all_titles=1` into the Дом Некроманта whole-team subscription;
+- migrate existing explicit subscriptions, exclusions, and title delivery overrides into Дом Некроманта team-title scope;
+- preserve delivered/outbox history so migration cannot resend old notifications;
+- initial sync of a newly added team establishes a silent baseline and must not emit its historical chapters as new releases;
+- deployment must be safe if migration and new Worker code overlap briefly.
+
+## Failure and recovery UX
+
+Admin team sync failures must be visible from the team-management screen with a retry action and a short safe error summary.
+
+User-facing behavior should fail closed for unavailable new data but fail open for already stored settings:
+
+- RanobeLib outage does not delete or rewrite subscriptions;
+- Telegram recommendation-channel lookup failure does not block onboarding;
+- one broken team must not prevent scanning or notifications for other teams;
+- one broken work must not block unrelated works;
+- pausing/resuming a team must be idempotent.
+
+## Testing requirements
+
+Implementation should use TDD and add focused tests for at least:
+
+- old `all_titles` migration to Дом Некроманта;
+- team follow + title exclusion precedence;
+- explicit team-title subscriptions;
+- same work translated by multiple teams;
+- joint branch deduplication;
+- two independent branches producing distinct releases;
+- title-level completion not being propagated to every team translation;
+- team/branch-specific completion affecting only the attributable translation or joint branch team set;
+- initial team baseline producing no historical notifications;
+- per-team discovery removal not globally archiving a shared work;
+- paused team preserving subscriptions;
+- recommendation membership influencing first onboarding only;
+- recommendation lookup failure fallback;
+- onboarding rollout: existing subscribed users are not interrupted, existing unsubscribed users are offered onboarding;
+- onboarding completion: choosing at least one team or `Не сейчас` completes it, while back/abandon/retry does not;
+- recommendation-channel attachment by `@username`, `t.me` link, and forwarded channel message;
+- unresolved/insufficient-access recommendation channels disabling personalization without breaking team notifications;
+- publication-channel isolation and prohibition of writes to external recommendation channels;
+- existing publication/download membership behavior remaining unchanged;
+- delivery-mode migration and team-title scoping;
+- global delivery mode applying to team subscriptions while team-title overrides take precedence;
+- notification outbox deduplication/idempotency.
+
+## Approved decisions summary
+
+- Architecture: normalized work → team translation → branch/release model.
+- Only admins add teams, through the Telegram bot.
+- New teams are hidden after initial sync and require explicit admin publication.
+- Pausing a team preserves subscriptions/history.
+- Whole-team subscriptions and individual team-title subscriptions are both supported.
+- Whole-team subscription supports per-title exclusions.
+- Old global `all_titles` migrates to whole-team Дом Некроманта only.
+- `Мои новеллы` shows only manually selected title translations.
+- Search groups duplicate works only when multiple teams translate them.
+- Joint branch involving multiple teams is one release/one user notification.
+- Independent team branches remain distinct releases.
+- Work-level `scanlateStatus` never marks every team translation completed; completion requires evidence attributable to the specific team/branch.
+- Дом Некроманта is the primary team in first `/start` onboarding.
+- Optional external Telegram channels personalize first onboarding only.
+- Recommendation channels are attached by `@username`, `t.me` link, or forwarded channel message; the bot resolves and verifies the canonical channel ID/access itself.
+- Channel membership never silently changes subscriptions later.
+- External team channels are completely isolated from publication/channel-write infrastructure.
+- New onboarding is shown to new users and existing users with no notification subscriptions; existing subscribed users skip it.
+- Onboarding completes only after choosing at least one team or explicitly selecting `Не сейчас`; abandoned flows are retried on the next normal `/start`.
+- Delivery mode has only two levels: global user default and optional team-title override; there is no team-wide override.
+
+## Open decisions before the final implementation plan
+
+1. Stable RanobeLib branch identity: use a native branch ID if reliably exposed; otherwise define and test a stable fingerprint.
+2. How completed translations appear in the multi-team user catalog and whether completed titles are shown by default inside a team's page.
+3. Whether hidden-but-synced teams are visible to admins only in `/stats` and team management, and what summary metrics are desired.
+4. Rollout/deployment sequencing for the schema migration, silent baseline, scanner switch, and notification UX switch.

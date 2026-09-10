@@ -10,6 +10,9 @@ import {
   runChannelMembershipMaintenance,
   type ChannelMembershipEnv,
 } from './channel-membership-access.js';
+import { discoverRegisteredRanobeLibTeams } from './ranobelib-multi-team-discovery.js';
+import { scanDueMultiTeamWorks } from './ranobelib-multi-team-scanner.js';
+import { getMultiTeamRollout, multiTeamScannerMode } from './multi-team-rollout.js';
 import {
   handlePublicationCommentGateRequest,
   handlePublicationCommentGateWebhook,
@@ -204,22 +207,101 @@ export default {
 
   async scheduled(controller: ScheduledControllerLike, env: Env, _ctx: CommentGateExecutionContext): Promise<void> {
     if (controller.cron === FAST_SCAN_CRON) {
-      const scan = await scanDueRanobeLibTitles(env, { limit: FAST_SCAN_LIMIT });
-      if (scan.newReleases > 0) await queueNotificationWakeup(env);
-      console.log('RanobeLib fast scan complete', { cron: controller.cron, ...scan });
+      const rollout = await getMultiTeamRollout(env);
+      const mode = multiTeamScannerMode(rollout);
+
+      if (mode === 'legacy') {
+        const scan = await scanDueRanobeLibTitles(env, { limit: FAST_SCAN_LIMIT });
+        if (scan.newReleases > 0) await queueNotificationWakeup(env);
+        console.log('RanobeLib fast scan complete', { cron: controller.cron, mode, ...scan });
+        return;
+      }
+
+      if (mode === 'shadow') {
+        const legacy = await scanDueRanobeLibTitles(env, { limit: FAST_SCAN_LIMIT });
+        const shadow = await scanDueMultiTeamWorks(env, {
+          limit: FAST_SCAN_LIMIT,
+          mode: 'shadow',
+          scanClass: 'hot',
+        });
+        if (legacy.newReleases > 0) await queueNotificationWakeup(env);
+        console.log('RanobeLib fast scan complete', {
+          cron: controller.cron,
+          mode,
+          legacy,
+          multiTeam: shadow,
+        });
+        return;
+      }
+
+      const scan = await scanDueMultiTeamWorks(env, {
+        limit: FAST_SCAN_LIMIT,
+        mode: 'live',
+        scanClass: 'hot',
+      });
+      if (scan.persistedReleases > 0) await queueNotificationWakeup(env);
+      console.log('RanobeLib fast scan complete', { cron: controller.cron, mode, ...scan });
       return;
     }
 
     if (controller.cron === IDLE_SCAN_CRON) {
-      const idleScan = await scanIdleRanobeLibTitles(env, { limit: IDLE_SCAN_LIMIT });
-      if (idleScan.newReleases > 0) await queueNotificationWakeup(env);
-      console.log('RanobeLib idle scan complete', { cron: controller.cron, ...idleScan });
+      const rollout = await getMultiTeamRollout(env);
+      const mode = multiTeamScannerMode(rollout);
+
+      if (mode === 'legacy') {
+        const idleScan = await scanIdleRanobeLibTitles(env, { limit: IDLE_SCAN_LIMIT });
+        if (idleScan.newReleases > 0) await queueNotificationWakeup(env);
+        console.log('RanobeLib idle scan complete', { cron: controller.cron, mode, ...idleScan });
+        return;
+      }
+
+      if (mode === 'shadow') {
+        const legacy = await scanIdleRanobeLibTitles(env, { limit: IDLE_SCAN_LIMIT });
+        const shadow = await scanDueMultiTeamWorks(env, {
+          limit: IDLE_SCAN_LIMIT,
+          mode: 'shadow',
+          scanClass: 'idle',
+        });
+        if (legacy.newReleases > 0) await queueNotificationWakeup(env);
+        console.log('RanobeLib idle scan complete', {
+          cron: controller.cron,
+          mode,
+          legacy,
+          multiTeam: shadow,
+        });
+        return;
+      }
+
+      const scan = await scanDueMultiTeamWorks(env, {
+        limit: IDLE_SCAN_LIMIT,
+        mode: 'live',
+        scanClass: 'idle',
+      });
+      if (scan.persistedReleases > 0) await queueNotificationWakeup(env);
+      console.log('RanobeLib idle scan complete', { cron: controller.cron, mode, ...scan });
       return;
     }
 
     if (controller.cron === DISCOVERY_CRON) {
-      const discovery = await discoverRanobeLibTeam(env);
-      console.log('RanobeLib team discovery complete', { cron: controller.cron, ...discovery });
+      const rollout = await getMultiTeamRollout(env);
+      const anyMultiTeam = rollout.shadow || rollout.delivery || rollout.ui;
+
+      if (!anyMultiTeam) {
+        const discovery = await discoverRanobeLibTeam(env);
+        console.log('RanobeLib team discovery complete', { cron: controller.cron, mode: 'legacy', ...discovery });
+        return;
+      }
+
+      // Until live delivery cutover, preserve the legacy primary-team discovery as authority while
+      // also refreshing the registered-team model for baseline/shadow verification.
+      const legacy = rollout.delivery ? null : await discoverRanobeLibTeam(env);
+      const multiTeam = await discoverRegisteredRanobeLibTeams(env);
+      console.log('RanobeLib team discovery complete', {
+        cron: controller.cron,
+        mode: rollout.delivery ? 'live' : 'shadow',
+        legacy,
+        multiTeam,
+      });
       return;
     }
 
