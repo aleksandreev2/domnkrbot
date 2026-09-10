@@ -1,0 +1,1 @@
+The legacy implementation is preserved by blob identity during the wrapper cutover.
