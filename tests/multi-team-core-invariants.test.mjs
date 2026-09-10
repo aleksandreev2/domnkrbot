@@ -80,6 +80,6 @@ test('team-aware demand unions eligible users and preserves delivered history du
   assert.match(source, /COUNT\(DISTINCT user_telegram_id\)/i);
   assert.match(source, /ranobelib_release_teams/);
   assert.match(source, /INSERT OR IGNORE INTO ranobelib_notification_outbox/i);
-  assert.match(source, /status IN \('pending','retry'\)/i);
+  assert.match(source, /status IN \('pending',\s*'retry'\)/i);
   assert.doesNotMatch(source, /DELETE FROM ranobelib_notification_outbox[\s\S]*status\s*=\s*'sent'/i);
 });
