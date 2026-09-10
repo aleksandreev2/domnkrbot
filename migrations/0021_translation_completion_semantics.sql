@@ -1,12 +1,13 @@
 ALTER TABLE ranobelib_titles
 ADD COLUMN translation_is_completed INTEGER CHECK (translation_is_completed IN (0, 1));
 
--- Backfill only statuses we already know. This happens before replacing the trigger, so
--- historical completed translations cannot generate synthetic "just completed" releases.
+-- Backfill only semantic labels we already know. Numeric RanobeLib status IDs are not stable
+-- completion identifiers. This happens before replacing the trigger, so historical completed
+-- translations cannot generate synthetic "just completed" releases.
 UPDATE ranobelib_titles
 SET translation_is_completed = CASE
-  WHEN translation_status_id = 2 OR TRIM(COALESCE(translation_status_label, '')) = 'Завершён' THEN 1
-  WHEN translation_status_id IS NOT NULL OR TRIM(COALESCE(translation_status_label, '')) <> '' THEN 0
+  WHEN TRIM(COALESCE(translation_status_label, '')) IN ('Завершён', 'Завершен', 'завершён', 'завершен') THEN 1
+  WHEN TRIM(COALESCE(translation_status_label, '')) <> '' THEN 0
   ELSE NULL
 END;
 
