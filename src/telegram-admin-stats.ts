@@ -43,6 +43,17 @@ type StatsSnapshot = {
   publications: D1Row;
   access: D1Row;
   system: D1Row;
+  translationHealth: D1Row;
+};
+
+type TranslationProblem = {
+  book_ref?: unknown;
+  title?: unknown;
+  unknown?: unknown;
+  has_error?: unknown;
+  sync_error?: unknown;
+  failures?: unknown;
+  delay_minutes?: unknown;
 };
 
 const SECTION_LABELS: Array<[Exclude<StatsSection, 'home'>, string]> = [
@@ -128,7 +139,8 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
       SUM(CASE WHEN translation_is_completed IS NULL THEN 1 ELSE 0 END) AS unknown_status,
       SUM(CASE WHEN snapshot_ready=1 THEN 1 ELSE 0 END) AS snapshot_ready,
       SUM(CASE WHEN sync_error IS NOT NULL AND TRIM(sync_error)<>'' THEN 1 ELSE 0 END) AS with_errors,
-      SUM(CASE WHEN is_active=1 AND next_check_at IS NOT NULL AND next_check_at < CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS overdue,
+      SUM(CASE WHEN is_active=1 AND next_check_at IS NOT NULL AND next_check_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS due_now,
+      SUM(CASE WHEN is_active=1 AND next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes') THEN 1 ELSE 0 END) AS late_5m,
       SUM(COALESCE(notification_subscriber_count,0)) AS subscribers
       FROM ranobelib_titles`),
     db.prepare(`SELECT
@@ -178,6 +190,38 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
       (SELECT COUNT(*) FROM ranobelib_titles WHERE consecutive_failures>0 OR (sync_error IS NOT NULL AND TRIM(sync_error)<>'')) AS failures,
       (SELECT COUNT(*) FROM ranobelib_titles WHERE is_active=1 AND next_check_at IS NOT NULL AND next_check_at<=CURRENT_TIMESTAMP) AS due_scans
       FROM ranobelib_releases`),
+    db.prepare(`SELECT COALESCE(json_group_array(json_object(
+      'book_ref', book_ref,
+      'title', title,
+      'unknown', unknown,
+      'has_error', has_error,
+      'sync_error', sync_error,
+      'failures', failures,
+      'delay_minutes', delay_minutes
+    )), '[]') AS items
+    FROM (
+      SELECT
+        book_ref,
+        COALESCE(NULLIF(TRIM(title), ''), book_ref) AS title,
+        CASE WHEN translation_is_completed IS NULL THEN 1 ELSE 0 END AS unknown,
+        CASE WHEN sync_error IS NOT NULL AND TRIM(sync_error)<>'' THEN 1 ELSE 0 END AS has_error,
+        sync_error,
+        COALESCE(consecutive_failures,0) AS failures,
+        CASE
+          WHEN is_active=1 AND next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes')
+          THEN CAST(MAX(0, (julianday('now') - julianday(next_check_at)) * 1440) AS INTEGER)
+          ELSE 0
+        END AS delay_minutes
+      FROM ranobelib_titles
+      WHERE translation_is_completed IS NULL
+         OR (sync_error IS NOT NULL AND TRIM(sync_error)<>'')
+         OR (is_active=1 AND next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes'))
+      ORDER BY
+        CASE WHEN sync_error IS NOT NULL AND TRIM(sync_error)<>'' THEN 1 ELSE 0 END DESC,
+        CASE WHEN translation_is_completed IS NULL THEN 1 ELSE 0 END DESC,
+        next_check_at ASC
+      LIMIT 6
+    )`),
   ];
 
   const rows = await batchFirstRows(db, statements);
@@ -190,6 +234,7 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
     publications: rows[5] ?? {},
     access: rows[6] ?? {},
     system: rows[7] ?? {},
+    translationHealth: rows[8] ?? {},
   };
 }
 
@@ -211,11 +256,16 @@ function buildStatsScreen(section: StatsSection, s: StatsSnapshot) {
     line('Явных подписок', s.subscriptions.explicit_subscriptions), line('Мгновенный режим', s.subscriptions.instant_users),
     line('Режим стака', s.subscriptions.stack_users), line('Индивидуальных режимов', s.subscriptions.title_overrides),
   ], back);
-  if (section === 'translations') return screen('📚 Переводы', [
-    line('Всего', s.translations.total), line('Активные', s.translations.active), line('Завершённые', s.translations.completed),
-    line('Без статуса', s.translations.unknown_status), line('Snapshot готов', s.translations.snapshot_ready), line('С ошибками', s.translations.with_errors),
-    line('Просрочены', s.translations.overdue), line('Суммарный спрос подписчиков', s.translations.subscribers),
-  ], back);
+  if (section === 'translations') {
+    const problems = renderTranslationProblems(s.translationHealth);
+    return screen('📚 Переводы', [
+      line('Всего', s.translations.total), line('Активные', s.translations.active), line('Завершённые', s.translations.completed),
+      line('Без статуса', s.translations.unknown_status), line('Snapshot готов', s.translations.snapshot_ready), line('С ошибками', s.translations.with_errors),
+      line('Ожидают сканирования', s.translations.due_now), line('Задержка &gt;5 мин', s.translations.late_5m),
+      line('Суммарный спрос подписчиков', s.translations.subscribers),
+      '', '<b>Проблемные тайтлы</b>', ...problems,
+    ], back);
+  }
   if (section === 'delivery') return screen('📦 Доставка уведомлений', [
     line('Pending', s.delivery.pending), line('Retry', s.delivery.retry), line('Sent', s.delivery.sent), line('Disabled', s.delivery.disabled),
     line('Отправлено за 24 ч', s.delivery.sent_24h), line('Отправлено за 7 дней', s.delivery.sent_7d), line('Готовы к отправке сейчас', s.delivery.due_now),
@@ -260,6 +310,32 @@ function buildStatsScreen(section: StatsSection, s: StatsSnapshot) {
   return { text, parse_mode: 'HTML' as const, reply_markup: { inline_keyboard: buttons } };
 }
 
+function renderTranslationProblems(row: D1Row): string[] {
+  const raw = String(row.items ?? '[]');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = [];
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return ['Нет проблемных тайтлов.'];
+
+  const lines: string[] = [];
+  for (const item of parsed.slice(0, 6) as TranslationProblem[]) {
+    const title = escapeHtml(String(item.title ?? item.book_ref ?? 'Без названия'));
+    const reasons: string[] = [];
+    if (n(item.unknown) > 0) reasons.push('без статуса');
+    if (n(item.has_error) > 0) reasons.push(`ошибка ×${Math.max(1, n(item.failures))}`);
+    if (n(item.delay_minutes) > 5) reasons.push(`задержка ${duration(item.delay_minutes)}`);
+    if (reasons.length === 0) reasons.push('требует проверки');
+    lines.push(`• <b>${title}</b> — ${reasons.join('; ')}`);
+
+    const error = String(item.sync_error ?? '').trim();
+    if (error) lines.push(`  ↳ <code>${escapeHtml(clip(error, 140))}</code>`);
+  }
+  return lines;
+}
+
 function screen(title: string, lines: string[], buttons: Array<Array<{ text: string; callback_data: string }>>) {
   return { text: [`<b>${title}</b>`, '', ...lines].join('\n'), parse_mode: 'HTML' as const, reply_markup: { inline_keyboard: buttons } };
 }
@@ -268,6 +344,14 @@ function line(label: string, value: unknown): string { return `${label}: <b>${n(
 function n(value: unknown): number { const x = Number(value ?? 0); return Number.isFinite(x) ? Math.max(0, Math.trunc(x)) : 0; }
 function duration(value: unknown): string { const minutes = n(value); return minutes < 60 ? `${minutes} мин` : `${Math.floor(minutes / 60)} ч ${minutes % 60} мин`; }
 function formatDate(value: unknown): string { const text = String(value ?? '').trim(); return text || 'нет данных'; }
+function clip(value: string, maxLength: number): string { return value.length <= maxLength ? value : `${value.slice(0, Math.max(0, maxLength - 1))}…`; }
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
 
 function isAdmin(env: TelegramAdminStatsEnv, userId: number): boolean {
   return String(env.ADMIN_TELEGRAM_IDS ?? '').split(/[,\s]+/).some((value) => Number(value) === userId);
