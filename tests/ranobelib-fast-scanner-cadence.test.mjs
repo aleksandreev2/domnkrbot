@@ -49,3 +49,21 @@ test('hot-title cadence keeps the 2-minute window through one hour and the 5-min
     now,
   }), 30, '6h01m with three misses should fall back to the 30-minute stable cadence');
 });
+
+test('default scan batches stay inside a 50-subrequest budget even with two RanobeLib redirects per chapter fetch', async () => {
+  const scanner = await loadScanner();
+  const externalSubrequestBudget = 50;
+  const reservedSubrequests = 2;
+  const worstCaseSubrequestsPerLogicalFetch = 3;
+  const safeBatch = Math.floor((externalSubrequestBudget - reservedSubrequests) / worstCaseSubrequestsPerLogicalFetch);
+
+  assert.equal(safeBatch, 16);
+  assert.ok(
+    scanner.FAST_SCAN_LIMIT <= safeBatch,
+    `FAST_SCAN_LIMIT=${scanner.FAST_SCAN_LIMIT} can exceed the 50-subrequest production budget`,
+  );
+  assert.ok(
+    scanner.IDLE_SCAN_LIMIT <= safeBatch,
+    `IDLE_SCAN_LIMIT=${scanner.IDLE_SCAN_LIMIT} can exceed the 50-subrequest production budget`,
+  );
+});
