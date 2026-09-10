@@ -94,6 +94,20 @@ Proposed flow:
 
 An optional Telegram channel may be attached to the team. Attaching it must be independent from RanobeLib sync success.
 
+### Attaching a recommendation Telegram channel
+
+Approved admin flow:
+
+- the admin may send an `@username`, a `t.me/...` channel link, or forward a message from the target channel;
+- the bot resolves that input to the canonical Telegram chat/channel ID and stores the resolved identifier plus safe display metadata such as title/username when available;
+- raw numeric Telegram chat IDs are an internal implementation detail and are not a normal admin-facing input path;
+- before enabling membership-based onboarding recommendations, the bot checks that the channel can be resolved and that membership lookup is reliable with the bot's current access;
+- if the channel resolves but reliable membership lookup is unavailable, the team remains fully usable for RanobeLib notifications and the admin receives a clear warning that personalized onboarding from that channel is disabled;
+- a forwarded message that does not expose a resolvable source channel must not be guessed from; the bot asks the admin to use the public username/link instead;
+- attaching, replacing, or removing this recommendation channel must never alter team subscriptions or publication-channel settings.
+
+The resolved recommendation channel is read-only metadata. It must not become a publication destination or participate in download membership gates, blacklist enforcement, or any other external-channel write path.
+
 If membership cannot be reliably checked (for example, the bot lacks sufficient rights), the team still functions normally for RanobeLib notifications; only personalized onboarding recommendations for that channel are unavailable.
 
 ## Admin: pausing a team
@@ -404,6 +418,8 @@ Implementation should use TDD and add focused tests for at least:
 - recommendation lookup failure fallback;
 - onboarding rollout: existing subscribed users are not interrupted, existing unsubscribed users are offered onboarding;
 - onboarding completion: choosing at least one team or `Не сейчас` completes it, while back/abandon/retry does not;
+- recommendation-channel attachment by `@username`, `t.me` link, and forwarded channel message;
+- unresolved/insufficient-access recommendation channels disabling personalization without breaking team notifications;
 - publication-channel isolation and prohibition of writes to external recommendation channels;
 - existing publication/download membership behavior remaining unchanged;
 - delivery-mode migration and team-title scoping;
@@ -425,6 +441,7 @@ Implementation should use TDD and add focused tests for at least:
 - Independent team branches remain distinct releases.
 - Дом Некроманта is the primary team in first `/start` onboarding.
 - Optional external Telegram channels personalize first onboarding only.
+- Recommendation channels are attached by `@username`, `t.me` link, or forwarded channel message; the bot resolves and verifies the canonical channel ID/access itself.
 - Channel membership never silently changes subscriptions later.
 - External team channels are completely isolated from publication/channel-write infrastructure.
 - New onboarding is shown to new users and existing users with no notification subscriptions; existing subscribed users skip it.
@@ -433,9 +450,8 @@ Implementation should use TDD and add focused tests for at least:
 
 ## Open decisions before the final implementation plan
 
-1. Exact admin flow for attaching/verifying an optional Telegram recommendation channel (`@username`, numeric chat ID, forwarded channel message, or supported combination).
-2. Exact status semantics for a team translation when RanobeLib's title-level `scanlateStatus` is not team-specific; completion must not be falsely attributed to every team without evidence.
-3. Stable RanobeLib branch identity: use a native branch ID if reliably exposed; otherwise define and test a stable fingerprint.
-4. How completed translations appear in the multi-team user catalog and whether completed titles are shown by default inside a team's page.
-5. Whether hidden-but-synced teams are visible to admins only in `/stats` and team management, and what summary metrics are desired.
-6. Rollout/deployment sequencing for the schema migration, silent baseline, scanner switch, and notification UX switch.
+1. Exact status semantics for a team translation when RanobeLib's title-level `scanlateStatus` is not team-specific; completion must not be falsely attributed to every team without evidence.
+2. Stable RanobeLib branch identity: use a native branch ID if reliably exposed; otherwise define and test a stable fingerprint.
+3. How completed translations appear in the multi-team user catalog and whether completed titles are shown by default inside a team's page.
+4. Whether hidden-but-synced teams are visible to admins only in `/stats` and team management, and what summary metrics are desired.
+5. Rollout/deployment sequencing for the schema migration, silent baseline, scanner switch, and notification UX switch.
