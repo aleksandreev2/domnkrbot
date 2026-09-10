@@ -62,6 +62,10 @@
     "src/ranobelib-multi-team-scanner.ts",
     "src/multi-team-subscriptions.ts",
     "src/multi-team-notification-demand.ts",
-    "src/telegram-team-catalog.ts"
+    "src/multi-team-shadow-parity.ts",
+    "src/telegram-team-catalog.ts",
+    "src/telegram-team-notification-ux.ts",
+    "src/telegram-team-onboarding.ts",
+    "src/telegram-team-admin.ts"
   ]
 }
