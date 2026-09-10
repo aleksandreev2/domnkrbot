@@ -54,6 +54,34 @@ type TranslationRow = {
   excluded: number | string;
 };
 
+export async function countFollowedTeams(env: TelegramTeamCatalogEnv, userId: string): Promise<number> {
+  const row = await env.DB.prepare(`
+    SELECT COUNT(*) AS count
+    FROM telegram_team_subscriptions sub
+    JOIN ranobelib_teams team ON team.id=sub.team_id
+    WHERE sub.user_telegram_id=? AND team.lifecycle_state='published'
+  `).bind(userId).first<{ count: number | string | null }>();
+  return nonNegative(row?.count);
+}
+
+export async function countManualTeamTitles(env: TelegramTeamCatalogEnv, userId: string): Promise<number> {
+  const row = await env.DB.prepare(`
+    SELECT COUNT(*) AS count
+    FROM telegram_team_title_subscriptions manual
+    JOIN ranobelib_team_translations tt
+      ON tt.team_id=manual.team_id AND tt.book_ref=manual.book_ref
+    JOIN ranobelib_teams team ON team.id=manual.team_id
+    WHERE manual.user_telegram_id=?
+      AND team.lifecycle_state='published'
+      AND tt.presence_state='active'
+      AND NOT EXISTS (
+        SELECT 1 FROM telegram_team_subscriptions whole
+        WHERE whole.user_telegram_id=manual.user_telegram_id AND whole.team_id=manual.team_id
+      )
+  `).bind(userId).first<{ count: number | string | null }>();
+  return nonNegative(row?.count);
+}
+
 export async function listPublishedTeams(
   env: TelegramTeamCatalogEnv,
   userId: string,
