@@ -26,7 +26,7 @@ export function buildMainMenu(origin: string): TelegramPayload {
   };
 }
 
-export function mainMenuButton(callbackData = 'prop:home'): TelegramButton {
+export function mainMenuButton(callbackData = 'prop:home'): TelegramButton & { callback_data: string } {
   return { text: '🏠 Главное меню', callback_data: callbackData };
 }
 
