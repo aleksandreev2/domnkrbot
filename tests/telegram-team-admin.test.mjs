@@ -9,6 +9,7 @@ import {
 } from '../dist-runtime/telegram-team-admin.js';
 
 const source = readFileSync(new URL('../src/telegram-team-admin.ts', import.meta.url), 'utf8');
+const registrySource = readFileSync(new URL('../src/ranobelib-team-registry.ts', import.meta.url), 'utf8');
 
 test('admin team parser accepts RanobeLib team URL or canonical ref', () => {
   assert.deepEqual(parseRanobeLibTeamInput('https://ranobelib.me/ru/team/123--some-team'), {
@@ -41,7 +42,8 @@ test('admin list exposes lifecycle controls while keeping the primary identity v
 });
 
 test('recommendation channel code is isolated from publication, download and blacklist settings', () => {
-  assert.match(source, /recommendation_chat_id/);
+  assert.match(source, /setRanobeLibRecommendationChannel/);
+  assert.match(registrySource, /recommendation_chat_id/);
   assert.doesNotMatch(source, /publish_channel_id|publications|channel_access_state|channel_telegram_bans|blacklist/i);
 });
 
