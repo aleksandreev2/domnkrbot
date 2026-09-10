@@ -65,7 +65,8 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
   })));
 
   // Unknown upstream status preserves a previously known semantic state. A brand-new unknown
-  // title fails open as active. Known completion always wins over notification demand.
+  // title fails open as active. A known active -> completed transition enters a short pending
+  // state so the fast scanner gets one guaranteed final chapter poll before deactivation.
   await db.prepare(`
     WITH discovered AS (
       SELECT
@@ -115,7 +116,7 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
       book_ref, ranobelib_id, slug, url, title, cover_url, is_active,
       next_check_at, notification_subscriber_count, subscriber_count_updated_at,
       translation_status_id, translation_status_label, translation_is_completed,
-      translation_status_revision, translation_status_changed_at
+      translation_completion_pending, translation_status_revision, translation_status_changed_at
     )
     SELECT
       book_ref,
@@ -131,6 +132,7 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
       translation_status_id,
       translation_status_label,
       translation_is_completed,
+      0,
       0,
       CASE WHEN translation_is_completed IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END
     FROM discovered_with_demand
@@ -174,7 +176,27 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
       translation_status_id = COALESCE(excluded.translation_status_id, ranobelib_titles.translation_status_id),
       translation_status_label = COALESCE(excluded.translation_status_label, ranobelib_titles.translation_status_label),
       translation_is_completed = COALESCE(excluded.translation_is_completed, ranobelib_titles.translation_is_completed),
+      translation_completion_pending = CASE
+        WHEN excluded.translation_is_completed IS NULL
+          THEN ranobelib_titles.translation_completion_pending
+        WHEN ranobelib_titles.translation_completion_pending = 1
+          AND excluded.translation_is_completed = 1
+          THEN 1
+        WHEN ranobelib_titles.translation_is_completed = 0
+          AND excluded.translation_is_completed = 1
+          THEN 1
+        ELSE 0
+      END,
       next_check_at = CASE
+        WHEN excluded.translation_is_completed IS NULL
+          AND ranobelib_titles.translation_completion_pending = 1
+          THEN CURRENT_TIMESTAMP
+        WHEN ranobelib_titles.translation_completion_pending = 1
+          AND excluded.translation_is_completed = 1
+          THEN CURRENT_TIMESTAMP
+        WHEN ranobelib_titles.translation_is_completed = 0
+          AND excluded.translation_is_completed = 1
+          THEN CURRENT_TIMESTAMP
         WHEN COALESCE(excluded.translation_is_completed, ranobelib_titles.translation_is_completed, 0) = 1
           THEN NULL
         WHEN ranobelib_titles.translation_is_completed = 1
@@ -196,12 +218,30 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
         ELSE ranobelib_titles.scan_priority
       END,
       notification_subscriber_count = CASE
+        WHEN excluded.translation_is_completed IS NULL
+          AND ranobelib_titles.translation_completion_pending = 1
+          THEN ranobelib_titles.notification_subscriber_count
+        WHEN ranobelib_titles.translation_completion_pending = 1
+          AND excluded.translation_is_completed = 1
+          THEN ranobelib_titles.notification_subscriber_count
+        WHEN ranobelib_titles.translation_is_completed = 0
+          AND excluded.translation_is_completed = 1
+          THEN ranobelib_titles.notification_subscriber_count
         WHEN COALESCE(excluded.translation_is_completed, ranobelib_titles.translation_is_completed, 0) = 1
           THEN 0
         ELSE excluded.notification_subscriber_count
       END,
       subscriber_count_updated_at = CURRENT_TIMESTAMP,
       is_active = CASE
+        WHEN excluded.translation_is_completed IS NULL
+          AND ranobelib_titles.translation_completion_pending = 1
+          THEN 1
+        WHEN ranobelib_titles.translation_completion_pending = 1
+          AND excluded.translation_is_completed = 1
+          THEN 1
+        WHEN ranobelib_titles.translation_is_completed = 0
+          AND excluded.translation_is_completed = 1
+          THEN 1
         WHEN COALESCE(excluded.translation_is_completed, ranobelib_titles.translation_is_completed, 0) = 1
           THEN 0
         ELSE 1
