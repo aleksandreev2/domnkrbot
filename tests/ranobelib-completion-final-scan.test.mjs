@@ -12,21 +12,22 @@ test('completion lifecycle has an explicit pending-final-scan state', () => {
   assert.match(migration, /NEW\.translation_is_completed\s*=\s*1/i);
 });
 
-test('discovery defers a known active-to-completed transition instead of immediately disabling the title', () => {
+test('discovery queues a final scan while completed titles are already hidden from active UX', () => {
   const scheduler = read('src/ranobelib-discovery-scheduler.ts');
   assert.match(scheduler, /translation_completion_pending/i);
   assert.match(scheduler, /ranobelib_titles\.translation_is_completed\s*=\s*0[\s\S]*excluded\.translation_is_completed\s*=\s*1/i);
   assert.match(scheduler, /next_check_at[\s\S]*CURRENT_TIMESTAMP/i);
+  assert.match(scheduler, /is_active\s*=\s*CASE[\s\S]*translation_is_completed[\s\S]*THEN\s+0/i);
 });
 
-test('fast scanner prioritizes pending completions and finalizes only after chapter polling succeeds', () => {
+test('fast scanner prioritizes pending completions even when logically inactive and finalizes only after chapter polling succeeds', () => {
   const scanner = read('src/ranobelib-fast-scanner.ts');
   const fetchIndex = scanner.indexOf('await client.getChapters');
   const finalizeIndex = scanner.indexOf('translation_completion_pending', fetchIndex);
   assert.ok(fetchIndex >= 0, 'scanner must poll chapters');
   assert.ok(finalizeIndex > fetchIndex, 'completion must finalize only after chapter polling');
-  assert.match(scanner, /translation_completion_pending\s*=\s*1[\s\S]*snapshot_ready\s*=\s*0[\s\S]*notification_subscriber_count\s*>\s*0/i);
+  assert.match(scanner, /translation_completion_pending\s*=\s*1\s+OR\s+\(is_active\s*=\s*1[\s\S]*snapshot_ready\s*=\s*0[\s\S]*notification_subscriber_count\s*>\s*0/i);
   assert.match(scanner, /ORDER BY[\s\S]*translation_completion_pending\s+DESC/i);
   assert.match(scanner, /translation_completion_pending\s*=\s*CASE[\s\S]*THEN\s+0/i);
-  assert.match(scanner, /is_active\s*=\s*CASE[\s\S]*THEN\s+0/i);
+  assert.match(scanner, /is_active\s*=\s*CASE[\s\S]*translation_is_completed\s*=\s*1[\s\S]*THEN\s+0/i);
 });
