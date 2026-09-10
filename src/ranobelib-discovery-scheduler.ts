@@ -3,7 +3,6 @@ import type { RanobeLibTeamBookRef } from './integrations/ranobelib/types.js';
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
 
 const DEFAULT_TEAM_REF = '11969--dom-nekromanta';
-const LEGACY_COMPLETED_TRANSLATION_STATUS = 2;
 
 type DiscoveryEnv = {
   DB: D1DatabaseLike;
@@ -210,11 +209,13 @@ async function bulkUpsertTitles(db: D1DatabaseLike, books: RanobeLibTeamBookRef[
   `).bind(payload).run();
 }
 
-function inferTranslationCompleted(book: Pick<RanobeLibTeamBookRef, 'translationStatusId' | 'translationStatusLabel'>): boolean | null {
-  const label = String(book.translationStatusLabel ?? '').trim().toLocaleLowerCase('ru-RU');
-  if (label) return label === 'завершён';
-  if (book.translationStatusId === LEGACY_COMPLETED_TRANSLATION_STATUS) return true;
-  return null;
+function inferTranslationCompleted(book: Pick<RanobeLibTeamBookRef, 'translationStatusLabel'>): boolean | null {
+  const label = String(book.translationStatusLabel ?? '')
+    .trim()
+    .toLocaleLowerCase('ru-RU')
+    .replace(/ё/g, 'е');
+  if (!label) return null;
+  return label === 'завершен';
 }
 
 function normalizeCoverUrl(value: string | null): string | null {
