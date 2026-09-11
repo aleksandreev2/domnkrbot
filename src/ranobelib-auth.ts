@@ -3,6 +3,7 @@ import type { D1DatabaseLike } from './ranobelib-runtime.js';
 export interface RanobeLibAuthEnv {
   DB: D1DatabaseLike;
   RANOBELIB_TOKEN_ENCRYPTION_KEY?: string;
+  TELEGRAM_BOT_TOKEN?: string;
 }
 
 export interface RanobeLibTokenBundle {
@@ -42,6 +43,11 @@ type StoreMetadata = {
   refreshedAt?: string | null;
 };
 
+type EncryptionMaterial = {
+  key: CryptoKey;
+  keyVersion: 1 | 2;
+};
+
 const API_ORIGIN = 'https://api.cdnlibs.org';
 const ADDITIONAL_DATA = 'domnkrbot:ranobelib-auth:v1';
 const REFRESH_SKEW_MS = 2 * 60 * 1000;
@@ -60,12 +66,12 @@ export class RanobeLibAuthProvider {
 
   async store(bundle: RanobeLibTokenBundle, metadata: StoreMetadata = {}): Promise<void> {
     const normalized = normalizeBundle(bundle);
-    const key = await this.encryptionKey();
+    const encryption = await this.encryptionMaterial();
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const plaintext = encoder.encode(JSON.stringify(normalized));
     const ciphertext = await crypto.subtle.encrypt(
       { name: 'AES-GCM', iv, additionalData: encoder.encode(ADDITIONAL_DATA) },
-      key,
+      encryption.key,
       plaintext,
     );
     const state = Date.parse(normalized.expiresAt) <= this.now().getTime() ? 'expired' : 'active';
@@ -73,7 +79,7 @@ export class RanobeLibAuthProvider {
       INSERT INTO ranobelib_auth_credentials (
         singleton_id, ciphertext, iv, key_version, access_expires_at, state,
         last_validated_at, last_refreshed_at, last_error, updated_at
-      ) VALUES (1, ?, ?, 1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ) VALUES (1, ?, ?, ${encryption.keyVersion}, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(singleton_id) DO UPDATE SET
         ciphertext=excluded.ciphertext, iv=excluded.iv, key_version=excluded.key_version,
         access_expires_at=excluded.access_expires_at, state=excluded.state,
@@ -95,9 +101,10 @@ export class RanobeLibAuthProvider {
     const row = await this.readRow();
     if (!row) return null;
     try {
+      const encryption = await this.encryptionMaterial(normalizeKeyVersion(row.key_version));
       const plaintext = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv: byteBuffer(base64Decode(row.iv)), additionalData: encoder.encode(ADDITIONAL_DATA) },
-        await this.encryptionKey(),
+        encryption.key,
         byteBuffer(base64Decode(row.ciphertext)),
       );
       return normalizeBundle(JSON.parse(decoder.decode(plaintext)) as RanobeLibTokenBundle);
@@ -133,7 +140,12 @@ export class RanobeLibAuthProvider {
   async health(): Promise<RanobeLibAuthHealth> {
     const row = await this.readRow();
     if (!row) return emptyHealth('missing');
-    const configured = Boolean(this.env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim());
+    const keyVersion = normalizeKeyVersion(row.key_version);
+    const configured = keyVersion === 1
+      ? Boolean(this.env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim())
+      : keyVersion === 2
+        ? Boolean(this.env.TELEGRAM_BOT_TOKEN?.trim())
+        : false;
     const timeState = Date.parse(row.access_expires_at) <= this.now().getTime() ? 'expired' : row.state;
     return {
       state: configured ? timeState : 'unavailable',
@@ -204,14 +216,28 @@ export class RanobeLibAuthProvider {
     `).first<CredentialRow>();
   }
 
-  private async encryptionKey(): Promise<CryptoKey> {
-    const secret = this.env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim();
+  private async encryptionMaterial(requestedVersion?: 1 | 2 | null): Promise<EncryptionMaterial> {
+    const dedicated = this.env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim() ?? '';
+    const telegram = this.env.TELEGRAM_BOT_TOKEN?.trim() ?? '';
+    const keyVersion = requestedVersion ?? (dedicated ? 1 : 2);
+    const secret = keyVersion === 1 ? dedicated : telegram;
     if (!secret) throw new Error('RanobeLib token encryption key is not configured');
+    const namespace = keyVersion === 1
+      ? 'domnkrbot:ranobelib-auth:key:v1'
+      : 'domnkrbot:ranobelib-auth:telegram-fallback:v1';
     const material = await crypto.subtle.digest(
-      'SHA-256', encoder.encode(`domnkrbot:ranobelib-auth:key:v1\n${secret}`),
+      'SHA-256', encoder.encode(`${namespace}\n${secret}`),
     );
-    return crypto.subtle.importKey('raw', material, 'AES-GCM', false, ['encrypt', 'decrypt']);
+    return {
+      key: await crypto.subtle.importKey('raw', material, 'AES-GCM', false, ['encrypt', 'decrypt']),
+      keyVersion,
+    };
   }
+}
+
+function normalizeKeyVersion(value: unknown): 1 | 2 | null {
+  const parsed = Number(value);
+  return parsed === 1 || parsed === 2 ? parsed : null;
 }
 
 function normalizeBundle(bundle: RanobeLibTokenBundle): RanobeLibTokenBundle {
