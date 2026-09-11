@@ -42,6 +42,7 @@ import {
 import { getRanobeLibHome } from './ranobelib-runtime.js';
 import { handleRanobeLibAuthAdmin, type RanobeLibAuthAdminEnv } from './ranobelib-auth-admin.js';
 import { handleTelegramAdminStatsWebhook, type TelegramAdminStatsEnv } from './telegram-admin-stats.js';
+import { handleTelegramRanobeLibAuthWebhook } from './telegram-ranobelib-auth.js';
 import { createTelegramLatencyTiming, type TelegramLatencyTiming } from './telegram-latency-timing.js';
 import { withTrustedTelegramMigrations } from './telegram-migration-trust.js';
 import { notifyAdminsForProposalId } from './telegram-title-proposal-admin-alert.js';
@@ -385,6 +386,9 @@ async function dispatchTelegramWebhook(
 
     case 'admin-stats':
       return (await handleTelegramAdminStatsWebhook(request, env, timedTelegramContext(ctx, timing))) ?? new Response('ok');
+
+    case 'ranobelib-auth':
+      return (await handleTelegramRanobeLibAuthWebhook(request, env)) ?? new Response('ok');
 
     case 'proposal': {
       const trustedEnv = withTrustedTelegramMigrations(env);
