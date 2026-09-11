@@ -108,21 +108,43 @@ export async function completeRanobeLibAuthorizationFromCallback(
     refreshToken,
     expiresAt: new Date(now.getTime() + expiresIn * 1000).toISOString(),
   });
+  await wakeRanobeLibTitles(env);
+  return auth.health();
+}
 
-  await env.DB.prepare(`
-    UPDATE ranobelib_titles
-    SET next_check_at = CURRENT_TIMESTAMP,
-        scan_priority = scan_priority + 20
-    WHERE EXISTS (
-      SELECT 1
-      FROM ranobelib_team_translations tt
-      JOIN ranobelib_teams team ON team.id = tt.team_id
-      WHERE tt.book_ref = ranobelib_titles.book_ref
-        AND tt.presence_state = 'active'
-        AND team.lifecycle_state IN ('hidden','published')
-    )
-  `).run();
+export async function importRanobeLibTokenBundle(
+  env: TelegramRanobeLibAuthEnv,
+  input: unknown,
+  options: OAuthOptions = {},
+): Promise<RanobeLibAuthHealth> {
+  const now = options.now?.() ?? new Date();
+  const fetchImpl = options.fetchImpl ?? ((request, init) => fetch(request, init));
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('RanobeLib token bundle is invalid.');
+  }
 
+  const payload = input as Record<string, unknown>;
+  const accessToken = stringValue(payload.access_token);
+  const refreshToken = stringValue(payload.refresh_token);
+  const expiresIn = Number(payload.expires_in);
+  const timestamp = Number(payload.timestamp);
+  if (!accessToken || !refreshToken || !Number.isFinite(expiresIn) || expiresIn <= 0) {
+    throw new Error('RanobeLib token bundle is invalid.');
+  }
+
+  const baseTime = Number.isFinite(timestamp) && timestamp > 0
+    ? normalizeTimestampMilliseconds(timestamp)
+    : now.getTime();
+  const expiresAt = new Date(baseTime + expiresIn * 1000);
+  if (Number.isNaN(expiresAt.getTime())) throw new Error('RanobeLib token bundle is invalid.');
+
+  const auth = new RanobeLibAuthProvider(env, { fetchImpl, now: () => now });
+  await auth.validateAndStore({
+    accessToken,
+    refreshToken,
+    expiresAt: expiresAt.toISOString(),
+  });
+  await wakeRanobeLibTitles(env);
   return auth.health();
 }
 
@@ -142,8 +164,9 @@ export async function handleTelegramRanobeLibAuthWebhook(
   if (!message || !user || !chatId || message.chat.type !== 'private') return null;
 
   const command = /^\/ranobelib_auth(?:@[A-Za-z0-9_]+)?$/i.test(text);
+  const importMatch = /^\/ranobelib_import(?:@[A-Za-z0-9_]+)?\s+([\s\S]+)$/i.exec(text);
   const callback = isRanobeLibOAuthCallbackText(text);
-  if (!command && !callback) return null;
+  if (!command && !importMatch && !callback) return null;
   if (!isAdmin(env, user.id)) return new Response('ok');
 
   if (command) {
@@ -172,6 +195,22 @@ export async function handleTelegramRanobeLibAuthWebhook(
     return new Response('ok');
   }
 
+  if (importMatch) {
+    try {
+      const bundle = JSON.parse(importMatch[1]!) as unknown;
+      await importRanobeLibTokenBundle(env, bundle, options);
+      await sendTelegramMessage(env, chatId, {
+        text: '✅ RanobeLib-токены импортированы и проверены. Скрытые тайтлы поставлены на немедленное сканирование.',
+      }, options.fetchImpl);
+    } catch (error) {
+      console.error('RanobeLib token import failed', safeOAuthError(error));
+      await sendTelegramMessage(env, chatId, {
+        text: '❌ Не удалось импортировать RanobeLib-токены. Проверьте JSON bundle и отправьте команду ещё раз.',
+      }, options.fetchImpl).catch(() => undefined);
+    }
+    return new Response('ok');
+  }
+
   try {
     await completeRanobeLibAuthorizationFromCallback(env, String(user.id), text, options);
     await sendTelegramMessage(env, chatId, {
@@ -193,6 +232,22 @@ export function isRanobeLibOAuthCallbackText(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+async function wakeRanobeLibTitles(env: TelegramRanobeLibAuthEnv): Promise<void> {
+  await env.DB.prepare(`
+    UPDATE ranobelib_titles
+    SET next_check_at = CURRENT_TIMESTAMP,
+        scan_priority = scan_priority + 20
+    WHERE EXISTS (
+      SELECT 1
+      FROM ranobelib_team_translations tt
+      JOIN ranobelib_teams team ON team.id = tt.team_id
+      WHERE tt.book_ref = ranobelib_titles.book_ref
+        AND tt.presence_state = 'active'
+        AND team.lifecycle_state IN ('hidden','published')
+    )
+  `).run();
 }
 
 async function verifyState(
@@ -297,6 +352,10 @@ function safeOAuthError(error: unknown): string {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeTimestampMilliseconds(value: number): number {
+  return value < 100_000_000_000 ? value * 1000 : value;
 }
 
 function defaultRandomBytes(length: number): Uint8Array {
