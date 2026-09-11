@@ -1,7 +1,7 @@
 import { mainMenuButton, type TelegramButton, type TelegramPayload } from './telegram-bot-ui.js';
 import type { TeamCatalogTeam, TeamCatalogTranslation, WorkSearchGroup } from './telegram-team-catalog.js';
 
-export type TeamNotificationOrigin = 'team' | 'completed' | 'mine' | 'search' | 'work';
+export type TeamNotificationOrigin = 'team' | 'completed' | 'mine' | 'search' | 'work' | 'alt';
 
 export type TeamNotificationCallback =
   | { kind: 'dashboard' }
@@ -10,6 +10,7 @@ export type TeamNotificationCallback =
   | { kind: 'team-translations'; teamId: number; completed: boolean; page: number }
   | { kind: 'team-toggle'; teamId: number; page: number }
   | { kind: 'work'; titleId: number; page: number }
+  | { kind: 'alternates'; titleId: number; page: number }
   | { kind: 'title'; teamId: number; titleId: number; origin: TeamNotificationOrigin; page: number }
   | { kind: 'title-toggle'; teamId: number; titleId: number; origin: TeamNotificationOrigin; page: number }
   | { kind: 'title-mode'; teamId: number; titleId: number; origin: TeamNotificationOrigin; page: number }
@@ -163,13 +164,17 @@ export function buildWorkSearchResults(input: {
   };
 }
 
-export function buildWorkTranslationPicker(input: { group: WorkSearchGroup; page: number }): TelegramPayload {
+export function buildWorkTranslationPicker(input: { group: WorkSearchGroup; page: number; origin?: 'work' | 'alt' }): TelegramPayload {
   const page = safePage(input.page);
+  const origin = input.origin ?? 'work';
   const rows: TelegramButton[][] = input.group.translations.map((translation) => [{
     text: `${translation.teamIsPrimary ? '⭐ ' : ''}${translation.semanticStatus === 'completed' ? '✅ ' : ''}${truncate(translation.teamName, 42)}`,
-    callback_data: titleCallback(translation, 'work', page),
+    callback_data: titleCallback(translation, origin, page),
   }]);
-  rows.push([{ text: '↩️ К результатам', callback_data: `subs:mt:search:page:${page}` }], [mainMenuButton()]);
+  rows.push([origin === 'alt'
+    ? { text: '↩️ К уведомлениям', callback_data: 'subs:mt:home' }
+    : { text: '↩️ К результатам', callback_data: `subs:mt:search:page:${page}` }]);
+  rows.push([mainMenuButton()]);
   return {
     text: `📚 <b>${escapeHtml(input.group.title)}</b>\n\nЭту новеллу переводят несколько команд. Выберите нужный перевод:`,
     parse_mode: 'HTML',
@@ -183,6 +188,7 @@ export function buildTeamTitleCard(input: {
   inheritedDelivery: boolean;
   origin: TeamNotificationOrigin;
   page: number;
+  hasAlternatives?: boolean;
 }): TelegramPayload {
   const item = input.translation;
   const id = safeId(item.ranobelibId);
@@ -200,6 +206,9 @@ export function buildTeamTitleCard(input: {
   if (!completed) lines.push(`Режим доставки: ${escapeHtml(input.deliveryLabel)}${input.inheritedDelivery ? ' · общий' : ''}`);
 
   const buttons: TelegramButton[][] = [[{ text: '📖 Открыть на RanobeLib', url: item.url }]];
+  if (input.hasAlternatives && id > 0) {
+    buttons.push([{ text: '👥 Другие переводы этой новеллы', callback_data: `subs:mt:alts:${id}:${page}` }]);
+  }
   if (!completed || item.enabled) {
     buttons.push([{
       text: item.enabled ? '🔕 Отключить уведомления' : '🔔 Включить уведомления',
@@ -212,7 +221,7 @@ export function buildTeamTitleCard(input: {
       callback_data: `subs:mt:title:mode:${item.teamId}:${id}:${input.origin}:${page}`,
     }]);
   }
-  buttons.push([{ text: '↩️ Назад', callback_data: backCallback(item.teamId, input.origin, page) }], [mainMenuButton()]);
+  buttons.push([{ text: '↩️ Назад', callback_data: backCallback(item.teamId, id, input.origin, page) }], [mainMenuButton()]);
   return { text: lines.join('\n'), parse_mode: 'HTML', reply_markup: { inline_keyboard: buttons } };
 }
 
@@ -264,11 +273,13 @@ export function parseTeamNotificationCallback(data: string): TeamNotificationCal
   if (match) return { kind: 'team-toggle', teamId: safeId(match[1]), page: safePage(match[2]) };
   match = /^subs:mt:work:(\d+):(\d+)$/.exec(data);
   if (match) return { kind: 'work', titleId: safeId(match[1]), page: safePage(match[2]) };
-  match = /^subs:mt:title:(\d+):(\d+):(team|completed|mine|search|work):(\d+)$/.exec(data);
+  match = /^subs:mt:alts:(\d+):(\d+)$/.exec(data);
+  if (match) return { kind: 'alternates', titleId: safeId(match[1]), page: safePage(match[2]) };
+  match = /^subs:mt:title:(\d+):(\d+):(team|completed|mine|search|work|alt):(\d+)$/.exec(data);
   if (match) return { kind: 'title', teamId: safeId(match[1]), titleId: safeId(match[2]), origin: match[3] as TeamNotificationOrigin, page: safePage(match[4]) };
-  match = /^subs:mt:title:toggle:(\d+):(\d+):(team|completed|mine|search|work):(\d+)$/.exec(data);
+  match = /^subs:mt:title:toggle:(\d+):(\d+):(team|completed|mine|search|work|alt):(\d+)$/.exec(data);
   if (match) return { kind: 'title-toggle', teamId: safeId(match[1]), titleId: safeId(match[2]), origin: match[3] as TeamNotificationOrigin, page: safePage(match[4]) };
-  match = /^subs:mt:title:mode:(\d+):(\d+):(team|completed|mine|search|work):(\d+)$/.exec(data);
+  match = /^subs:mt:title:mode:(\d+):(\d+):(team|completed|mine|search|work|alt):(\d+)$/.exec(data);
   if (match) return { kind: 'title-mode', teamId: safeId(match[1]), titleId: safeId(match[2]), origin: match[3] as TeamNotificationOrigin, page: safePage(match[4]) };
   match = /^subs:mt:search:page:(\d+)$/.exec(data);
   if (match) return { kind: 'search-page', page: safePage(match[1]) };
@@ -279,9 +290,10 @@ function titleCallback(translation: TeamCatalogTranslation, origin: TeamNotifica
   return `subs:mt:title:${translation.teamId}:${safeId(translation.ranobelibId)}:${origin}:${safePage(page)}`;
 }
 
-function backCallback(teamId: number, origin: TeamNotificationOrigin, page: number): string {
+function backCallback(teamId: number, titleId: number, origin: TeamNotificationOrigin, page: number): string {
   if (origin === 'mine') return `subs:mt:titles:${page}`;
   if (origin === 'search' || origin === 'work') return `subs:mt:search:page:${page}`;
+  if (origin === 'alt') return `subs:mt:alts:${titleId}:${page}`;
   if (origin === 'completed') return `subs:mt:team:${teamId}:completed:${page}`;
   return `subs:mt:team:${teamId}:active:${page}`;
 }

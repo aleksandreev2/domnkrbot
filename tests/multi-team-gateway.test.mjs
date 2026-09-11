@@ -11,7 +11,15 @@ test('multi-team gateway is UI-flagged while admin team management remains indep
   assert.match(gateway, /rollout\.ui/);
   assert.match(gateway, /handleTelegramTeamAdmin/);
   assert.match(gateway, /handleTelegramTeamOnboarding/);
+  assert.match(gateway, /handleTelegramPartnerCollaboration/);
+  assert.match(gateway, /sendPartnerAwareMainMenu/);
   assert.match(gateway, /handleTelegramTeamNotification/);
+
+  const uiGate = gateway.indexOf('if (!rollout.ui) return null;');
+  const partnerRuntime = gateway.indexOf('handleTelegramPartnerCollaboration(update');
+  const partnerStart = gateway.indexOf('sendPartnerAwareMainMenu(update');
+  assert.ok(uiGate >= 0 && partnerRuntime > uiGate, 'partner catalog must stay behind ranobelib_multi_team_ui');
+  assert.ok(uiGate >= 0 && partnerStart > uiGate, 'partner-aware /start must stay behind ranobelib_multi_team_ui');
 });
 
 test('new production entry only intercepts fetch and delegates scheduled plus Queue behavior unchanged', () => {

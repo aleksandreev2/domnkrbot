@@ -78,7 +78,7 @@ export async function handleTelegramTeamNotification(
   const isDashboardCommand = /^\/(?:notifications|subscriptions)(?:@[A-Za-z0-9_]+)?$/i.test(text);
   const isDashboardCallback = data === 'prop:notifications' || data === 'subs:center' || data === 'subs:mt:home';
   const parsed = parseTeamNotificationCallback(data);
-  const titleModeSet = /^subs:mt:title:mode:set:(\d+):(\d+):(i|5|10|20|x):(team|mine|search|work):(\d+)$/.exec(data);
+  const titleModeSet = /^subs:mt:title:mode:set:(\d+):(\d+):(i|5|10|20|x):(team|mine|search|work|alt):(\d+)$/.exec(data);
 
   if (!isDashboardCommand && !isDashboardCallback && !parsed && !titleModeSet) {
     if (!text || text.startsWith('/')) return false;
@@ -179,6 +179,12 @@ export async function handleTelegramTeamNotification(
     return true;
   }
 
+  if (parsed.kind === 'alternates') {
+    const group = await getWorkGroup(env, userId, parsed.titleId);
+    if (group) await render(env, chatId, messageId, buildWorkTranslationPicker({ group, page: parsed.page, origin: 'alt' }), ctx);
+    return true;
+  }
+
   if (parsed.kind === 'title' || parsed.kind === 'title-toggle' || parsed.kind === 'title-mode') {
     const translation = await getTranslation(env, userId, parsed.teamId, parsed.titleId);
     if (!translation) return true;
@@ -242,13 +248,17 @@ async function renderTitleCard(
   messageId?: number,
   ctx?: TeamNotificationExecutionContext,
 ): Promise<void> {
-  const delivery = await getEffectiveTeamTitleDeliverySetting(env, userId, translation.teamId, translation.bookRef);
+  const [delivery, group] = await Promise.all([
+    getEffectiveTeamTitleDeliverySetting(env, userId, translation.teamId, translation.bookRef),
+    translation.ranobelibId ? getWorkGroup(env, userId, translation.ranobelibId) : Promise.resolve(null),
+  ]);
   await render(env, chatId, messageId, buildTeamTitleCard({
     translation,
     deliveryLabel: deliverySettingLabel(delivery.setting),
     inheritedDelivery: delivery.inherited,
     origin,
     page,
+    hasAlternatives: (group?.translations.length ?? 0) > 1,
   }), ctx);
 }
 
