@@ -41,6 +41,10 @@ export interface RanobeLibChapterBranch {
   identityConfidence: RanobeLibBranchIdentityConfidence;
   teamIds: number[];
   releasedAt: string | null;
+  /** Stable upstream branch reference when RanobeLib exposes one. Used only for delivery grouping. */
+  stableBranchRef: string | null;
+  /** Position of the branch inside this chapter payload; conservative fallback delivery slot. */
+  branchOrdinal: number;
 }
 
 export interface RanobeLibReleaseDelta {
