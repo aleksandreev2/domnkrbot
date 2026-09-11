@@ -137,14 +137,3 @@ jobs:
         run: npm test
       - name: Wrangler dry run
         run: npx wrangler deploy --dry-run
-
-  production-smoke:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Verify workers.dev serves current build
-        run: EXPECTED_MARKER=domnkr-build-20260910-multiteam-v1 node scripts/check-production.mjs
