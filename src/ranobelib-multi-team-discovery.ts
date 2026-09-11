@@ -2,6 +2,7 @@ import { RanobeLibClient } from './integrations/ranobelib/client.js';
 import { createRanobeLibClient } from './ranobelib-client-factory.js';
 import type { RanobeLibTeamBookRef } from './integrations/ranobelib/types.js';
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
+import { refreshAllWorkNotificationDemand } from './multi-team-notification-demand.js';
 import {
   listRunnableRanobeLibTeams,
   recordRanobeLibTeamSyncFailure,
@@ -165,6 +166,7 @@ export async function discoverOneRegisteredTeam(
   if (reconciliation.makeDormant.length > 0) {
     await markTeamTranslationsDormant(env.DB, team.id, reconciliation.makeDormant);
   }
+  await refreshAllWorkNotificationDemand(env);
   await recordRanobeLibTeamSyncSuccess(env, team.id);
 
   const created = books.reduce((count, book) => count + (existing.has(book.ref) ? 0 : 1), 0);
