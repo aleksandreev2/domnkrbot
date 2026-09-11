@@ -67,6 +67,17 @@ const DEFAULT_LIMIT = 24;
 const CONCURRENCY = 4;
 const IDLE_DELAY_MINUTES = 180;
 
+export function computeMultiTeamNextCheckDelayMinutes(input: {
+  scanClass: MultiTeamScanClass;
+  changed: boolean;
+  consecutiveNoChange: number;
+}): number {
+  if (input.scanClass === 'idle') return IDLE_DELAY_MINUTES;
+  if (input.changed) return 1;
+  const misses = Math.max(0, Math.floor(Number(input.consecutiveNoChange) || 0));
+  return misses <= 2 ? 2 : 5;
+}
+
 export async function scanDueMultiTeamWorks(
   env: MultiTeamScannerEnv,
   options: MultiTeamScanOptions,
@@ -130,6 +141,10 @@ export async function selectDueMultiTeamWorks(
              AND bootstrap.baseline_ready = 0
          )`
       : '1 = 1';
+  const staleHotSchedulePredicate = scanClass === 'hot'
+    ? `OR (COALESCE(t.notification_subscriber_count, 0) > 0
+           AND t.next_check_at > datetime(CURRENT_TIMESTAMP, '+5 minutes'))`
+    : '';
 
   const { results } = await env.DB.prepare(`
     SELECT t.book_ref, t.ranobelib_id, t.slug, t.url, t.title, t.cover_url,
@@ -160,6 +175,7 @@ export async function selectDueMultiTeamWorks(
         )
         OR t.next_check_at IS NULL
         OR t.next_check_at <= CURRENT_TIMESTAMP
+        ${staleHotSchedulePredicate}
       )
     ORDER BY
       CASE WHEN EXISTS (
@@ -467,9 +483,11 @@ async function updateWorkAfterSuccessfulScan(
   const latest = ordered[ordered.length - 1] ?? null;
   const previousMisses = Math.max(0, Math.floor(Number(work.consecutive_no_change ?? 0)));
   const misses = changed ? 0 : previousMisses + 1;
-  const delay = scanClass === 'idle'
-    ? IDLE_DELAY_MINUTES
-    : changed ? 1 : misses <= 2 ? 10 : 30;
+  const delay = computeMultiTeamNextCheckDelayMinutes({
+    scanClass,
+    changed,
+    consecutiveNoChange: misses,
+  });
 
   await db.prepare(`
     UPDATE ranobelib_titles
@@ -509,7 +527,13 @@ async function scheduleNextWorkCheck(
   scanClass: MultiTeamScanClass,
   changed: boolean,
 ): Promise<void> {
-  const delay = scanClass === 'idle' ? IDLE_DELAY_MINUTES : changed ? 1 : 30;
+  const previousMisses = Math.max(0, Math.floor(Number(work.consecutive_no_change ?? 0)));
+  const misses = changed ? 0 : previousMisses + 1;
+  const delay = computeMultiTeamNextCheckDelayMinutes({
+    scanClass,
+    changed,
+    consecutiveNoChange: misses,
+  });
   await db.prepare(`
     UPDATE ranobelib_titles
     SET next_check_at = datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes')
