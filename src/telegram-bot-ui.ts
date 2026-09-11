@@ -10,14 +10,29 @@ export type TelegramPayload = {
   reply_markup: { inline_keyboard: TelegramButton[][] };
 };
 
-export function buildMainMenu(origin: string): TelegramPayload {
+export type MainMenuOptions = {
+  collaborations?: boolean;
+};
+
+export function buildMainMenu(origin: string, options: MainMenuOptions = {}): TelegramPayload {
   const base = origin.replace(/\/+$/, '');
+  const collaborations = options.collaborations === true;
   return {
-    text: '<b>Дом Некроманта</b>\n\nПереводы, уведомления и предложения новых новелл.',
+    text: collaborations
+      ? [
+          '<b>Дом Некроманта</b>',
+          '',
+          'Официальный бот команды «Дом Некроманта».',
+          'Переводы, уведомления и предложения новых новелл.',
+          '',
+          '🤝 Здесь также доступны переводы наших партнёров.',
+        ].join('\n')
+      : '<b>Дом Некроманта</b>\n\nПереводы, уведомления и предложения новых новелл.',
     parse_mode: 'HTML',
     reply_markup: {
       inline_keyboard: [
         [{ text: '🔔 Уведомления', callback_data: 'prop:notifications' }],
+        ...(collaborations ? [[{ text: '🤝 Сотрудничества', callback_data: 'subs:mt:partners:0' }]] : []),
         [{ text: '📚 Предложить новеллу', callback_data: 'prop:new' }],
         [{ text: '🗂 Мои заявки', callback_data: 'prop:mine' }],
         [{ text: '🌐 Сайт', url: `${base}/` }],
