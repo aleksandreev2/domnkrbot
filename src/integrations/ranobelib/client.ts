@@ -1,5 +1,6 @@
 import { buildRanobeLibBranchIdentity, normalizeRanobeLibTeamIds } from './branch-identity.js';
 import { sortChapters } from './release-detector.js';
+import { discoverTeamBooksFromHtml } from './team-discovery.js';
 import type { RanobeLibChapter, RanobeLibChapterBranch, RanobeLibTeamBookRef, RanobeLibTitle } from './types.js';
 
 export interface RanobeLibClientOptions {
@@ -61,6 +62,42 @@ export class RanobeLibClient {
     }
 
     return books;
+  }
+
+  /**
+   * Secondary discovery surface for RanobeLib team history. The target_model=team catalog can omit
+   * older/completed relations that are still present on the public team page, so callers may use
+   * these links only as candidates and verify new relations through getTeamAttributedBook().
+   */
+  async discoverTeamPageBooks(teamRef: string): Promise<RanobeLibTeamBookRef[]> {
+    const normalizedTeamRef = teamRef.trim();
+    const teamId = ranobeLibTeamIdFromRef(normalizedTeamRef);
+    if (teamId === null) throw new Error(`Invalid RanobeLib team ref: ${teamRef}`);
+
+    const response = await this.request(
+      `${this.siteBaseUrl}/ru/team/${encodeURIComponent(normalizedTeamRef)}`,
+      'text/html,application/xhtml+xml',
+    );
+    const html = await response.text();
+    return discoverTeamBooksFromHtml(html, this.siteBaseUrl);
+  }
+
+  /** Returns book metadata only when the title detail explicitly attributes this exact team. */
+  async getTeamAttributedBook(teamRef: string, bookRef: string): Promise<RanobeLibTeamBookRef | null> {
+    const normalizedTeamRef = teamRef.trim();
+    const teamId = ranobeLibTeamIdFromRef(normalizedTeamRef);
+    if (teamId === null) throw new Error(`Invalid RanobeLib team ref: ${teamRef}`);
+
+    const response = await this.getJson<ApiEnvelope<Record<string, unknown>>>(
+      `${this.apiBaseUrl}/manga/${encodeURIComponent(bookRef)}?fields[]=teams`,
+    );
+    const data = isRecord(response.data) ? response.data : {};
+    const teams = Array.isArray(data.teams) ? data.teams : [];
+    const attributed = teams.some((rawTeam) => (
+      isRecord(rawTeam) && teamRecordMatchesRef(rawTeam, normalizedTeamRef, teamId)
+    ));
+    if (!attributed) return null;
+    return normalizeTeamBook(data, this.siteBaseUrl);
   }
 
   async getTeamDisplayName(teamRef: string, bookRefs: readonly string[]): Promise<string | null> {

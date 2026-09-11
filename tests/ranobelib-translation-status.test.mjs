@@ -104,3 +104,58 @@ test('nested scanlateStatus remains authoritative when a catalog response alread
     assert.equal(books[0].translationStatusLabel, 'Продолжается');
   });
 });
+
+test('team page fallback can recover a catalog-omitted title only after exact team attribution is verified', async () => {
+  const teamRef = '64306--blinnaia-besa';
+  const bookRef = '247881--deuraegon-ttareul-kiul-su-isseul-ri-eobsjanha';
+  const teamPageUrl = `https://ranobelib.me/ru/team/${teamRef}`;
+  const detailTeamsUrl = `https://api.cdnlibs.org/api/manga/${bookRef}?fields[]=teams`;
+  const foreignRef = '999999--foreign-book';
+  const foreignDetailUrl = `https://api.cdnlibs.org/api/manga/${foreignRef}?fields[]=teams`;
+  const requests = [];
+
+  const client = new RanobeLibClient({
+    fetchImpl: async (url) => {
+      requests.push(String(url));
+      if (String(url) === teamPageUrl) {
+        return new Response(`
+          <a href="/ru/book/${bookRef}">Дракончик</a>
+          <a href="/ru/book/${foreignRef}">Посторонняя ссылка</a>
+        `, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      }
+      if (String(url) === detailTeamsUrl) {
+        return json({ data: {
+          id: 247881,
+          slug: 'deuraegon-ttareul-kiul-su-isseul-ri-eobsjanha',
+          slug_url: bookRef,
+          rus_name: 'Я ни за что не стану воспитывать дочь дракона',
+          teams: [{ id: 64306, slug: 'blinnaia-besa', slug_url: teamRef, name: 'Блинная Беса' }],
+        } });
+      }
+      if (String(url) === foreignDetailUrl) {
+        return json({ data: {
+          id: 999999,
+          slug: 'foreign-book',
+          slug_url: foreignRef,
+          rus_name: 'Чужая книга',
+          teams: [{ id: 77, slug: 'other', slug_url: '77--other', name: 'Другая команда' }],
+        } });
+      }
+      return new Response('unexpected', { status: 500 });
+    },
+  });
+
+  assert.equal(typeof client.discoverTeamPageBooks, 'function');
+  assert.equal(typeof client.getTeamAttributedBook, 'function');
+
+  const pageBooks = await client.discoverTeamPageBooks(teamRef);
+  assert.deepEqual(pageBooks.map((book) => book.ref), [bookRef, foreignRef]);
+
+  const verified = await client.getTeamAttributedBook(teamRef, bookRef);
+  assert.equal(verified?.ref, bookRef);
+  assert.equal(verified?.title, 'Я ни за что не стану воспитывать дочь дракона');
+
+  const rejected = await client.getTeamAttributedBook(teamRef, foreignRef);
+  assert.equal(rejected, null);
+  assert.deepEqual(requests, [teamPageUrl, detailTeamsUrl, foreignDetailUrl]);
+});

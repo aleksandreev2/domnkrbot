@@ -5,6 +5,14 @@ async function loadUi() {
   return import('../dist-runtime/telegram-bot-ui.js');
 }
 
+async function loadPartnerUi() {
+  return import('../dist-runtime/telegram-partner-collaboration-ux.js');
+}
+
+async function loadPartnerTeamUi() {
+  return import('../dist-runtime/telegram-partner-team-screen.js');
+}
+
 const buttons = (payload) => payload.reply_markup.inline_keyboard.flat();
 
 test('partner-aware root Telegram menu keeps Dom Nekromanta as the owner brand and exposes collaborations', async () => {
@@ -38,4 +46,65 @@ test('shared navigation primitives keep Back, Home, and destructive actions sema
   assert.deepEqual(destructiveButton('🗑 Отменить заявку', 'prop:cancel'), {
     text: '🗑 Отменить заявку', callback_data: 'prop:cancel',
   });
+});
+
+test('partner pagination requires a real ninth row before showing Next', async () => {
+  const { buildPartnerTeamList } = await loadPartnerUi();
+  const makeTeam = (index) => ({
+    id: index + 1,
+    displayName: `Team ${index + 1}`,
+    isPrimary: false,
+    followed: false,
+    activeCount: 1,
+    completedCount: 0,
+  });
+
+  const exactlyEight = buildPartnerTeamList({
+    page: 0,
+    teams: Array.from({ length: 8 }, (_, index) => makeTeam(index)),
+    origin: 'partners',
+  });
+  assert.equal(buttons(exactlyEight).some((button) => button.text === '▶️'), false);
+
+  const nineWithLookahead = buildPartnerTeamList({
+    page: 0,
+    teams: Array.from({ length: 9 }, (_, index) => makeTeam(index)),
+    origin: 'partners',
+  });
+  assert.equal(buttons(nineWithLookahead).filter((button) => button.text.startsWith('🤝 Team')).length, 8);
+  assert.equal(buttons(nineWithLookahead).some((button) => button.text === '▶️'), true);
+});
+
+test('partner team screen requires a real ninth translation before showing Next', async () => {
+  const { buildPartnerAwareTeamScreen } = await loadPartnerTeamUi();
+  const team = { id: 7, displayName: 'Блинная Беса', isPrimary: false, followed: true, activeCount: 8, completedCount: 0 };
+  const makeTranslation = (index) => ({
+    teamId: 7,
+    teamName: 'Блинная Беса',
+    teamIsPrimary: false,
+    ranobelibId: 1000 + index,
+    bookRef: `${1000 + index}--book-${index}`,
+    title: `Book ${index}`,
+    url: `https://ranobelib.me/ru/book/${1000 + index}--book-${index}`,
+    semanticStatus: 'active',
+    enabled: true,
+    enabledReason: 'team',
+  });
+
+  const exactlyEight = buildPartnerAwareTeamScreen({
+    team,
+    translations: Array.from({ length: 8 }, (_, index) => makeTranslation(index)),
+    completed: false,
+    page: 0,
+  });
+  assert.equal(buttons(exactlyEight).some((button) => button.text === '▶️'), false);
+
+  const nineWithLookahead = buildPartnerAwareTeamScreen({
+    team: { ...team, activeCount: 9 },
+    translations: Array.from({ length: 9 }, (_, index) => makeTranslation(index)),
+    completed: false,
+    page: 0,
+  });
+  assert.equal(buttons(nineWithLookahead).filter((button) => button.text.startsWith('🔔 Book')).length, 8);
+  assert.equal(buttons(nineWithLookahead).some((button) => button.text === '▶️'), true);
 });

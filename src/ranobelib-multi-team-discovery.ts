@@ -27,7 +27,7 @@ export type MultiTeamDiscoveryResult = {
 };
 
 export type TeamDiscoveryClient = Pick<RanobeLibClient, 'discoverTeamBooks'> &
-  Partial<Pick<RanobeLibClient, 'getTeamDisplayName'>>;
+  Partial<Pick<RanobeLibClient, 'getTeamDisplayName' | 'discoverTeamPageBooks' | 'getTeamAttributedBook'>>;
 
 export type MultiTeamDiscoveryOptions = {
   clientFactory?: (team: RanobeLibTeamRecord) => TeamDiscoveryClient;
@@ -44,11 +44,15 @@ export type TeamDiscoveryReconciliation = {
   unchangedActive: string[];
 };
 
+const SECONDARY_TEAM_VERIFY_LIMIT = 24;
+
 export function computeTeamDiscoveryReconciliation(
   stored: readonly StoredRelationRow[],
   discoveredRefs: readonly string[],
+  preservedRefs: readonly string[] = [],
 ): TeamDiscoveryReconciliation {
   const discovered = new Set(discoveredRefs.map(cleanRef).filter(Boolean));
+  const preserved = new Set(preservedRefs.map(cleanRef).filter(Boolean));
   const activate: string[] = [];
   const makeDormant: string[] = [];
   const unchangedActive: string[] = [];
@@ -61,7 +65,8 @@ export function computeTeamDiscoveryReconciliation(
       else activate.push(ref);
       discovered.delete(ref);
     } else if (row.presence_state === 'active') {
-      makeDormant.push(ref);
+      if (preserved.has(ref)) unchangedActive.push(ref);
+      else makeDormant.push(ref);
     }
   }
 
@@ -119,15 +124,15 @@ export async function discoverOneRegisteredTeam(
     return { teamId: team.id, discovered: 0, activated: 0, dormant: 0, created: 0 };
   }
 
-  const books = await client.discoverTeamBooks(team.ranobelibTeamRef);
+  const catalogBooks = await client.discoverTeamBooks(team.ranobelibTeamRef);
   // An empty catalog is treated as upstream/parser failure, exactly like the legacy discovery path:
   // never collapse a previously valid team because one request unexpectedly returned zero items.
-  if (books.length === 0) {
+  if (catalogBooks.length === 0) {
     throw new Error(`RanobeLib team ${team.ranobelibTeamRef} returned no book links`);
   }
 
   const upstreamDisplayName = client.getTeamDisplayName
-    ? await client.getTeamDisplayName(team.ranobelibTeamRef, books.map((book) => book.ref)).catch(() => null)
+    ? await client.getTeamDisplayName(team.ranobelibTeamRef, catalogBooks.map((book) => book.ref)).catch(() => null)
     : null;
   if (upstreamDisplayName && upstreamDisplayName !== team.displayName) {
     await env.DB.prepare(`
@@ -143,7 +148,14 @@ export async function discoverOneRegisteredTeam(
     WHERE team_id = ?
   `).bind(team.id).all<StoredRelationRow>();
   const existing = new Set(existingRows.map((row) => cleanRef(row.book_ref)).filter(Boolean));
-  const reconciliation = computeTeamDiscoveryReconciliation(existingRows, books.map((book) => book.ref));
+
+  const supplemented = await supplementPartnerHistory(team, client, catalogBooks, existingRows);
+  const books = supplemented.books;
+  const reconciliation = computeTeamDiscoveryReconciliation(
+    existingRows,
+    books.map((book) => book.ref),
+    supplemented.preservedRefs,
+  );
 
   await upsertWorkRows(env.DB, books);
   await upsertTeamTranslationRows(env.DB, team.id, books);
@@ -161,6 +173,82 @@ export async function discoverOneRegisteredTeam(
     dormant: reconciliation.makeDormant.length,
     created,
   };
+}
+
+async function supplementPartnerHistory(
+  team: RanobeLibTeamRecord,
+  client: TeamDiscoveryClient,
+  catalogBooks: readonly RanobeLibTeamBookRef[],
+  existingRows: readonly StoredRelationRow[],
+): Promise<{ books: RanobeLibTeamBookRef[]; preservedRefs: string[] }> {
+  const booksByRef = new Map(catalogBooks.map((book) => [cleanRef(book.ref), book]));
+  const preserved = new Set<string>();
+
+  // Primary-team discovery remains exactly on the established API path. The secondary source is
+  // only needed for partner history, where RanobeLib can omit older relations from target_model=team.
+  if (team.isPrimary || !client.discoverTeamPageBooks || !client.getTeamAttributedBook) {
+    return { books: [...booksByRef.values()], preservedRefs: [] };
+  }
+
+  const existingByRef = new Map(existingRows.map((row) => [cleanRef(row.book_ref), row]));
+  let pageBooks: RanobeLibTeamBookRef[];
+  try {
+    pageBooks = await client.discoverTeamPageBooks(team.ranobelibTeamRef);
+  } catch (error) {
+    // Secondary discovery is deliberately fail-open. A broken/blocked HTML page must not turn
+    // previously known partner translations dormant merely because the API catalog is incomplete.
+    for (const row of existingRows) {
+      const ref = cleanRef(row.book_ref);
+      if (ref && row.presence_state === 'active' && !booksByRef.has(ref)) preserved.add(ref);
+    }
+    console.error('RanobeLib partner history page fallback failed', team.ranobelibTeamRef, compactError(error));
+    return { books: [...booksByRef.values()], preservedRefs: [...preserved] };
+  }
+
+  const pageRefs = new Set(pageBooks.map((book) => cleanRef(book.ref)).filter(Boolean));
+  const candidates: string[] = [];
+
+  for (const pageBook of pageBooks) {
+    const ref = cleanRef(pageBook.ref);
+    if (!ref || booksByRef.has(ref)) continue;
+    const stored = existingByRef.get(ref);
+    if (stored?.presence_state === 'active') {
+      // This is already-known state and the public team page still asserts it. Avoid an N+1 detail
+      // request on every sync; exact verification is mandatory only before creating/reactivating.
+      preserved.add(ref);
+      continue;
+    }
+    candidates.push(ref);
+  }
+
+  // Existing active relations missing from both the API catalog and HTML page get one exact-detail
+  // chance before dormancy. This handles different RanobeLib views lagging each other.
+  for (const row of existingRows) {
+    const ref = cleanRef(row.book_ref);
+    if (!ref || row.presence_state !== 'active' || booksByRef.has(ref) || pageRefs.has(ref)) continue;
+    candidates.push(ref);
+  }
+
+  const uniqueCandidates = [...new Set(candidates)];
+  let verified = 0;
+  for (const ref of uniqueCandidates) {
+    if (verified >= SECONDARY_TEAM_VERIFY_LIMIT) {
+      if (existingByRef.get(ref)?.presence_state === 'active') preserved.add(ref);
+      continue;
+    }
+    verified += 1;
+    try {
+      const book = await client.getTeamAttributedBook(team.ranobelibTeamRef, ref);
+      if (book) booksByRef.set(cleanRef(book.ref), book);
+    } catch (error) {
+      // Exact lookup failures are inconclusive, not negative evidence. Preserve only existing active
+      // rows; brand-new candidates can safely wait for the next sync instead of being guessed in.
+      if (existingByRef.get(ref)?.presence_state === 'active') preserved.add(ref);
+      console.error('RanobeLib partner title attribution check failed', team.ranobelibTeamRef, ref, compactError(error));
+    }
+  }
+
+  return { books: [...booksByRef.values()], preservedRefs: [...preserved] };
 }
 
 async function upsertWorkRows(db: D1DatabaseLike, books: RanobeLibTeamBookRef[]): Promise<void> {

@@ -2,13 +2,17 @@ import type { RanobeLibTeamBookRef } from './types.js';
 
 const BOOK_PATH_RE = /(?:https?:\/\/ranobelib\.me)?\/(?:ru\/)?book\/(\d+)--([^?"'<>\s&\\}]+)/gi;
 
-export function discoverTeamBooksFromHtml(html: string): RanobeLibTeamBookRef[] {
+export function discoverTeamBooksFromHtml(
+  html: string,
+  siteBaseUrl = 'https://ranobelib.me',
+): RanobeLibTeamBookRef[] {
   const decoded = decodeHtmlEntities(html)
     .replaceAll('\\/', '/')
     .replaceAll('\\u002F', '/')
     .replaceAll('\\u002f', '/');
   const seen = new Set<string>();
   const books: RanobeLibTeamBookRef[] = [];
+  const base = siteBaseUrl.replace(/\/+$/, '');
 
   for (const match of decoded.matchAll(BOOK_PATH_RE)) {
     const idText = match[1];
@@ -23,7 +27,7 @@ export function discoverTeamBooksFromHtml(html: string): RanobeLibTeamBookRef[] 
       id: Number(idText),
       slug,
       ref,
-      url: `https://ranobelib.me/ru/book/${ref}`,
+      url: `${base}/ru/book/${ref}`,
     });
   }
 

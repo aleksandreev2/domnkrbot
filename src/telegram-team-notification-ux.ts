@@ -55,7 +55,7 @@ export function buildTeamListScreen(input: {
     text: `${team.isPrimary ? '⭐ ' : ''}${truncate(team.displayName, 31)} · ${nonNegative(team.activeCount)}`,
     callback_data: `subs:mt:team:${team.id}:active:${page}`,
   }]);
-  const pager = pageButtons(page, input.teams.length >= 8, (target) => `subs:mt:teams:${input.kind}:${target}`);
+  const pager = pageButtons(page, input.teams.length > 8, (target) => `subs:mt:teams:${input.kind}:${target}`);
   if (pager) rows.push(pager);
   rows.push([{ text: '↩️ К уведомлениям', callback_data: 'subs:mt:home' }], [mainMenuButton()]);
   const heading = input.kind === 'mine' ? 'Мои команды' : 'Все команды';
@@ -82,7 +82,7 @@ export function buildTeamTranslationsScreen(input: {
     text: `${input.completed ? '✅' : translation.enabled ? '🔔' : '📚'} ${truncate(translation.title, 42)}`,
     callback_data: titleCallback(translation, origin, page),
   }]);
-  const pager = pageButtons(page, input.translations.length >= 8, (target) => `subs:mt:team:${input.team.id}:${status}:${target}`);
+  const pager = pageButtons(page, input.translations.length > 8, (target) => `subs:mt:team:${input.team.id}:${status}:${target}`);
   if (pager) rows.push(pager);
   if (!input.completed && input.team.completedCount > 0) {
     rows.push([{ text: `✅ Завершённые (${nonNegative(input.team.completedCount)})`, callback_data: `subs:mt:team:${input.team.id}:completed:0` }]);
@@ -115,7 +115,7 @@ export function buildManualTeamTitlesScreen(input: { translations: TeamCatalogTr
     text: `${translation.semanticStatus === 'completed' ? '✅' : '📚'} ${truncate(translation.title, 33)} · ${truncate(translation.teamName, 16)}`,
     callback_data: titleCallback(translation, 'mine', page),
   }]);
-  const pager = pageButtons(page, input.translations.length >= 8, (target) => `subs:mt:titles:${target}`);
+  const pager = pageButtons(page, input.translations.length > 8, (target) => `subs:mt:titles:${target}`);
   if (pager) rows.push(pager);
   rows.push([{ text: '🔎 Найти новеллу', callback_data: 'subs:mt:search:start' }]);
   rows.push([{ text: '↩️ К уведомлениям', callback_data: 'subs:mt:home' }], [mainMenuButton()]);
