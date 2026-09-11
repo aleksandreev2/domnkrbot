@@ -384,6 +384,7 @@ async function persistBranchSnapshot(
     SELECT ?, chapter_id, branch_key, native_branch_id, identity_confidence,
            volume, number, name, released_at, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
     FROM incoming
+    WHERE 1 = 1
     ON CONFLICT(book_ref, chapter_id, branch_key) DO UPDATE SET
       native_branch_id = COALESCE(excluded.native_branch_id, ranobelib_chapter_branches.native_branch_id),
       identity_confidence = excluded.identity_confidence,
