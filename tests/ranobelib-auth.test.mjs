@@ -20,8 +20,9 @@ function memoryDb() {
         async run() {
           if (/DELETE FROM ranobelib_auth_credentials/i.test(sql)) row = null;
           else if (/INSERT INTO ranobelib_auth_credentials/i.test(sql)) {
+            const keyVersion = Number(/VALUES\s*\(1\s*,\s*\?\s*,\s*\?\s*,\s*(\d+)/i.exec(sql)?.[1] ?? 1);
             row = {
-              singleton_id: 1, ciphertext: values[0], iv: values[1], key_version: 1,
+              singleton_id: 1, ciphertext: values[0], iv: values[1], key_version: keyVersion,
               access_expires_at: values[2], state: values[3], last_validated_at: values[4],
               last_refreshed_at: values[5], last_error: values[6], updated_at: NOW.toISOString(),
             };
@@ -129,6 +130,8 @@ test('existing Telegram bot secret can encrypt credentials when the dedicated Ra
   const bundle = { accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T13:00:00.000Z' };
   await auth.store(bundle);
   assert.ok(db.row?.ciphertext);
+  assert.equal(db.row?.key_version, 2);
   assert.doesNotMatch(JSON.stringify(db.row), new RegExp(`${ACCESS}|${REFRESH}`));
+  assert.deepEqual(await auth.load(), bundle);
   assert.equal((await auth.health()).state, 'active');
 });
