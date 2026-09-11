@@ -1,6 +1,7 @@
 import previous from './live-entry-v2.js';
 import { runChannelMembershipMaintenance } from './channel-membership-access.js';
 import { getMultiTeamRollout } from './multi-team-rollout.js';
+import { checkRanobeLibAuthAdminAlert } from './ranobelib-auth-alerts.js';
 import { DELIVERY_BATCH_LIMIT } from './telegram-notification-delivery.js';
 import { drainMultiTeamNotificationOutbox } from './telegram-multi-team-delivery.js';
 import { handleTelegramMultiTeamGateway, type TelegramMultiTeamGatewayEnv } from './telegram-multi-team-gateway.js';
@@ -11,6 +12,7 @@ type FetchContext = Parameters<typeof previous.fetch>[2];
 type ScheduledController = Parameters<typeof previous.scheduled>[0];
 type QueueBatch = Parameters<typeof previous.queue>[0];
 
+const FAST_SCAN_CRON = '* * * * *';
 const FALLBACK_DELIVERY_CRON = '*/5 * * * *';
 
 type NotificationWakeup = { kind: 'drain' };
@@ -23,6 +25,15 @@ export default {
   },
 
   async scheduled(controller: ScheduledController, env: Env, ctx: FetchContext): Promise<void> {
+    if (controller.cron === FAST_SCAN_CRON) {
+      try {
+        const authAlert = await checkRanobeLibAuthAdminAlert(env);
+        if (authAlert.alerted) console.warn('RanobeLib auth admin alert sent', authAlert.reason);
+      } catch (error) {
+        console.error('RanobeLib auth health check failed', error);
+      }
+    }
+
     if (controller.cron !== FALLBACK_DELIVERY_CRON) {
       return previous.scheduled(controller, env, ctx);
     }
