@@ -60,16 +60,20 @@ export async function loadTeamAdminNotificationPreview(
   }
 
   let winner: PreviewCandidate | null = null;
-  for (let candidateOrder = 0; candidateOrder < results.length; candidateOrder += 1) {
-    const row = results[candidateOrder];
+  let candidateOrder = 0;
+  for (const row of results) {
     let branches: RanobeLibChapterBranch[];
     try {
       branches = await client.getChapterBranches(row.book_ref);
     } catch {
+      candidateOrder += 1;
       continue;
     }
     const matching = branches.filter((branch) => branch.teamIds.includes(team.ranobelibTeamId));
-    if (matching.length === 0) continue;
+    if (matching.length === 0) {
+      candidateOrder += 1;
+      continue;
+    }
 
     // getChapterBranches() is stable-sorted by chapter position. If upstream omitted created_at,
     // the last matching chapter is the safest real preview for that work.
@@ -87,6 +91,7 @@ export async function loadTeamAdminNotificationPreview(
       candidateOrder,
     };
     if (!winner || previewCandidateIsNewer(candidate, winner)) winner = candidate;
+    candidateOrder += 1;
   }
 
   if (!winner) {
