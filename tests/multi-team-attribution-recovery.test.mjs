@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { classifyUnattributedTeamPayload } from '../dist-runtime/ranobelib-multi-team-scanner.js';
+import {
+  classifyUnattributedTeamPayload,
+  withOneTransientD1Retry,
+} from '../dist-runtime/ranobelib-multi-team-scanner.js';
 
 const translation = (baselineReady, completionPending = false) => ({
   baselineReady,
@@ -61,4 +64,30 @@ test('any attributable team branch makes the payload normal', () => {
     }),
     'ok',
   );
+});
+
+test('transient D1 object reset is retried exactly once', async () => {
+  let attempts = 0;
+  const result = await withOneTransientD1Retry(async () => {
+    attempts += 1;
+    if (attempts === 1) {
+      throw new Error('D1_ERROR: Internal error in D1 DB storage caused object to be reset; reference = test');
+    }
+    return 'ok';
+  });
+
+  assert.equal(result, 'ok');
+  assert.equal(attempts, 2);
+});
+
+test('ordinary scan failures are not retried by the D1 reset guard', async () => {
+  let attempts = 0;
+  await assert.rejects(
+    () => withOneTransientD1Retry(async () => {
+      attempts += 1;
+      throw new Error('RanobeLib returned malformed payload');
+    }),
+    /malformed payload/,
+  );
+  assert.equal(attempts, 1);
 });
