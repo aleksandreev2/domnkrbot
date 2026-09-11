@@ -66,63 +66,98 @@ export function notificationGroupReady(
 }
 
 export function aggregateClaimedDeliveryRows<T extends ClaimedDeliveryRowLike>(rows: T[]): DeliveryGroup<T>[] {
-  const groups = new Map<string, DeliveryGroup<T>>();
+  const buckets = new Map<string, { deliveryScopeKey: string | null; rows: T[] }>();
 
   for (const row of rows) {
     const userTelegramId = String(row.user_telegram_id);
     const bookRef = String(row.book_ref);
     const deliveryScopeKey = normalizedToken(row.delivery_scope_key);
     const key = `${userTelegramId}\u0000${bookRef}\u0000${deliveryScopeKey ?? ''}`;
+    const existing = buckets.get(key);
+    if (existing) existing.rows.push(row);
+    else buckets.set(key, { deliveryScopeKey, rows: [row] });
+  }
+
+  const result: DeliveryGroup<T>[] = [];
+  for (const bucket of buckets.values()) {
+    const segments: T[][] = [];
+    const completions: T[] = [];
+
+    for (const row of bucket.rows) {
+      if (row.release_kind === 'translation_completed') {
+        completions.push(row);
+        continue;
+      }
+
+      const last = segments[segments.length - 1];
+      if (!last || !hasSafeContiguousRange([...last, row])) segments.push([row]);
+      else last.push(row);
+    }
+
+    // Completion closes the latest contiguous pending sequence. This preserves the existing
+    // "flush the final partial stack" behavior without allowing a completion event to bridge two
+    // unrelated/gapped chapter ranges.
+    if (completions.length > 0) {
+      const target = segments[segments.length - 1];
+      if (target) target.push(...completions);
+      else segments.push([...completions]);
+    }
+
+    for (const segment of segments) {
+      result.push(buildDeliveryGroup(segment, bucket.deliveryScopeKey));
+    }
+  }
+
+  return result;
+}
+
+function buildDeliveryGroup<T extends ClaimedDeliveryRowLike>(
+  rows: T[],
+  deliveryScopeKey: string | null,
+): DeliveryGroup<T> {
+  const first = rows[0]!;
+  const group: DeliveryGroup<T> = {
+    userTelegramId: String(first.user_telegram_id),
+    bookRef: String(first.book_ref),
+    deliveryScopeKey,
+    titleId: first.ranobelib_id,
+    title: first.title,
+    titleUrl: first.url,
+    teamNames: [],
+    members: [],
+    chapterCount: 0,
+    firstVolume: null,
+    firstNumber: null,
+    lastVolume: null,
+    lastNumber: null,
+    summary: '',
+    translationCompleted: false,
+  };
+
+  for (const row of rows) {
     const isCompletion = row.release_kind === 'translation_completed';
-    const chapterCount = isCompletion ? 0 : nonNegativeInteger(row.chapter_count);
-    const rowTeams = parseTeamNames(row.team_names_json);
-    const existing = groups.get(key);
+    group.members.push(row);
+    mergeTeamNames(group.teamNames, parseTeamNames(row.team_names_json));
+    group.translationCompleted ||= isCompletion;
+    if (isCompletion) continue;
 
-    if (!existing) {
-      groups.set(key, {
-        userTelegramId,
-        bookRef,
-        deliveryScopeKey,
-        titleId: row.ranobelib_id,
-        title: row.title,
-        titleUrl: row.url,
-        teamNames: rowTeams,
-        members: [row],
-        chapterCount,
-        firstVolume: isCompletion ? null : (row.first_volume ?? null),
-        firstNumber: isCompletion ? null : (row.first_number ?? null),
-        lastVolume: isCompletion ? null : (row.last_volume ?? row.first_volume ?? null),
-        lastNumber: isCompletion ? null : (row.last_number ?? row.first_number ?? null),
-        summary: isCompletion ? '' : row.summary,
-        translationCompleted: isCompletion,
-      });
-      continue;
-    }
-
-    existing.members.push(row);
-    mergeTeamNames(existing.teamNames, rowTeams);
-    existing.translationCompleted ||= isCompletion;
-    if (!isCompletion) {
-      existing.chapterCount += chapterCount;
-      if (existing.firstVolume === null) existing.firstVolume = row.first_volume ?? null;
-      if (existing.firstNumber === null) existing.firstNumber = row.first_number ?? null;
-      existing.lastVolume = row.last_volume ?? row.first_volume ?? existing.lastVolume;
-      existing.lastNumber = row.last_number ?? row.first_number ?? existing.lastNumber;
-      if (row.summary) existing.summary = existing.summary ? `${existing.summary}; ${row.summary}` : row.summary;
-    }
+    const chapterCount = nonNegativeInteger(row.chapter_count);
+    group.chapterCount += chapterCount;
+    if (group.firstVolume === null) group.firstVolume = row.first_volume ?? null;
+    if (group.firstNumber === null) group.firstNumber = row.first_number ?? null;
+    group.lastVolume = row.last_volume ?? row.first_volume ?? group.lastVolume;
+    group.lastNumber = row.last_number ?? row.first_number ?? group.lastNumber;
+    if (row.summary) group.summary = group.summary ? `${group.summary}; ${row.summary}` : row.summary;
   }
 
-  for (const group of groups.values()) {
-    const chapterRows = group.members.filter((row) => row.release_kind !== 'translation_completed');
-    if (group.chapterCount > 1 && !hasSafeContiguousRange(chapterRows)) {
-      group.firstVolume = null;
-      group.firstNumber = null;
-      group.lastVolume = null;
-      group.lastNumber = null;
-    }
+  const chapterRows = group.members.filter((row) => row.release_kind !== 'translation_completed');
+  if (group.chapterCount > 1 && !hasSafeContiguousRange(chapterRows)) {
+    group.firstVolume = null;
+    group.firstNumber = null;
+    group.lastVolume = null;
+    group.lastNumber = null;
   }
-
-  return [...groups.values()];
+  return group;
 }
 
 function parseTeamNames(value: unknown): string[] {
