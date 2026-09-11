@@ -80,6 +80,21 @@ test('team discovery reconciliation only changes relationships in the team being
   assert.deepEqual(result.activate, ['12--returning', '13--new']);
 });
 
+test('team discovery preserves a catalog-omitted relation confirmed by secondary RanobeLib evidence', async () => {
+  const { computeTeamDiscoveryReconciliation } = await discovery();
+  const ref = '247881--deuraegon-ttareul-kiul-su-isseul-ri-eobsjanha';
+
+  const result = computeTeamDiscoveryReconciliation(
+    [{ book_ref: ref, presence_state: 'active' }],
+    [],
+    [ref],
+  );
+
+  assert.deepEqual(result.unchangedActive, [ref]);
+  assert.deepEqual(result.makeDormant, []);
+  assert.deepEqual(result.activate, []);
+});
+
 test('team discovery treats current catalog membership as active while preserving confirmed completion', async () => {
   const source = await readFile(new URL('../src/ranobelib-multi-team-discovery.ts', import.meta.url), 'utf8');
 
