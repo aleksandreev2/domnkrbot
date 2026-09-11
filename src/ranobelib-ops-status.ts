@@ -6,6 +6,7 @@ type TitleRow = {
   ranobelib_id: number | string | null;
   title: string | null;
   chapter_count: number | string;
+  work_notification_demand: number | string | null;
   latest_volume: string | null;
   latest_number: string | null;
   latest_name: string | null;
@@ -22,7 +23,6 @@ type TeamRow = {
   presence_state: string;
   semantic_status: string;
   baseline_ready: number | string;
-  notification_subscriber_count: number | string;
   last_synced_at: string | null;
   sync_error: string | null;
 };
@@ -56,7 +56,7 @@ export async function renderRanobeLibOperationalStatus(
     env.DB.prepare(`
       SELECT team.display_name, team.ranobelib_team_id, team.lifecycle_state,
         tt.presence_state, tt.semantic_status, tt.baseline_ready,
-        tt.notification_subscriber_count, tt.last_synced_at, tt.sync_error
+        tt.last_synced_at, tt.sync_error
       FROM ranobelib_team_translations tt
       JOIN ranobelib_teams team ON team.id=tt.team_id
       WHERE tt.book_ref=?
@@ -94,6 +94,7 @@ export async function renderRanobeLibOperationalStatus(
     `<b>${escapeHtml(title.title || title.book_ref)}</b>`,
     `ID: <code>${escapeHtml(String(title.ranobelib_id ?? '—'))}</code> · ref: <code>${escapeHtml(title.book_ref)}</code>`,
     `Глав в snapshot: <b>${n(title.chapter_count)}</b>`,
+    `Work demand (hot-scan): <b>${n(title.work_notification_demand)}</b>`,
     `Последняя известная глава: <b>${escapeHtml(formatChapter(title.latest_volume, title.latest_number, title.latest_name))}</b>`,
     `Последняя синхронизация: ${formatDate(title.last_synced_at)}`,
     `Следующая проверка: ${formatDate(title.next_check_at)}`,
@@ -106,7 +107,7 @@ export async function renderRanobeLibOperationalStatus(
     `Last refresh failure: ${formatDate(auth.lastRefreshFailureAt)}`,
     ...(auth.lastError ? [`Auth error: <code>${escapeHtml(clip(auth.lastError, 140))}</code>`] : []),
     '',
-    '<b>Команды / baseline / demand</b>',
+    '<b>Команды / baseline</b>',
     ...(teams.length ? teams.map(renderTeam) : ['Нет team-scoped связей.']),
     '',
     '<b>Последний release</b>',
@@ -122,21 +123,22 @@ export async function renderRanobeLibOperationalStatus(
 async function findTitle(db: D1DatabaseLike, target: string): Promise<TitleRow | null> {
   const numeric = /^\d+$/.test(target) ? target : '';
   return db.prepare(`
-    SELECT book_ref, ranobelib_id, title, chapter_count,
-      latest_volume, latest_number, latest_name, last_synced_at, next_check_at,
-      sync_error, consecutive_failures
-    FROM ranobelib_titles
-    WHERE book_ref=?
-       OR (?<>'' AND CAST(ranobelib_id AS TEXT)=?)
-       OR (?<>'' AND substr(book_ref,1,length(?)+2)=? || '--')
-    ORDER BY CASE WHEN book_ref=? THEN 0 WHEN CAST(ranobelib_id AS TEXT)=? THEN 1 ELSE 2 END
+    SELECT t.book_ref, t.ranobelib_id, t.title, t.chapter_count,
+      t.notification_subscriber_count AS work_notification_demand,
+      t.latest_volume, t.latest_number, t.latest_name, t.last_synced_at, t.next_check_at,
+      t.sync_error, t.consecutive_failures
+    FROM ranobelib_titles t
+    WHERE t.book_ref=?
+       OR (?<>'' AND CAST(t.ranobelib_id AS TEXT)=?)
+       OR (?<>'' AND substr(t.book_ref,1,length(?)+2)=? || '--')
+    ORDER BY CASE WHEN t.book_ref=? THEN 0 WHEN CAST(t.ranobelib_id AS TEXT)=? THEN 1 ELSE 2 END
     LIMIT 1
   `).bind(target, numeric, numeric, numeric, numeric, numeric, target, numeric).first<TitleRow>();
 }
 
 function renderTeam(team: TeamRow): string {
   const error = team.sync_error ? ` · error <code>${escapeHtml(clip(team.sync_error, 90))}</code>` : '';
-  return `• <b>${escapeHtml(team.display_name)}</b> (${escapeHtml(String(team.ranobelib_team_id))}) · ${escapeHtml(team.lifecycle_state)}/${escapeHtml(team.presence_state)}/${escapeHtml(team.semantic_status)} · baseline <b>${n(team.baseline_ready) ? 'ready' : 'no'}</b> · demand <b>${n(team.notification_subscriber_count)}</b> · sync ${formatDate(team.last_synced_at)}${error}`;
+  return `• <b>${escapeHtml(team.display_name)}</b> (${escapeHtml(String(team.ranobelib_team_id))}) · ${escapeHtml(team.lifecycle_state)}/${escapeHtml(team.presence_state)}/${escapeHtml(team.semantic_status)} · baseline <b>${n(team.baseline_ready) ? 'ready' : 'no'}</b> · sync ${formatDate(team.last_synced_at)}${error}`;
 }
 
 function renderRelease(release: ReleaseRow): string {
