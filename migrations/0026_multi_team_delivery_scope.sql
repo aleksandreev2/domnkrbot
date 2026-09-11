@@ -6,6 +6,7 @@ ALTER TABLE ranobelib_releases
 
 -- Multi-team release ids already encode the stable branch key before the final chapter-id suffix.
 -- Backfill any rows created during a deployment overlap without rewriting legacy release identity.
+-- Use exact prefix equality instead of LIKE so stored book_ref data can never hit SQLite's LIKE pattern limit.
 UPDATE ranobelib_releases
 SET delivery_scope_key = substr(
   substr(id, length('branch-release:v1:' || book_ref || ':') + 1),
