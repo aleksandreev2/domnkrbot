@@ -19,6 +19,8 @@ export interface RanobeLibTranslationStatus {
   label: string | null;
 }
 
+const TEAM_CHAPTER_HISTORY_PAGE_LIMIT = 30;
+
 export class RanobeLibClient {
   private readonly apiBaseUrl: string;
   private readonly siteBaseUrl: string;
@@ -80,6 +82,44 @@ export class RanobeLibClient {
     );
     const html = await response.text();
     return discoverTeamBooksFromHtml(html, this.siteBaseUrl);
+  }
+
+  /**
+   * Discovers titles from the public team chapter history. Unlike target_model=team and the
+   * anonymous team page, this endpoint includes some titles hidden from signed-out catalogs.
+   * Every result is accepted only when the history row explicitly attributes the requested team.
+   */
+  async discoverTeamHistoryBooks(teamRef: string): Promise<RanobeLibTeamBookRef[]> {
+    const normalizedTeamRef = teamRef.trim();
+    const teamId = ranobeLibTeamIdFromRef(normalizedTeamRef);
+    if (teamId === null) throw new Error(`Invalid RanobeLib team ref: ${teamRef}`);
+
+    const books: RanobeLibTeamBookRef[] = [];
+    const seen = new Set<string>();
+
+    for (let page = 1; page <= TEAM_CHAPTER_HISTORY_PAGE_LIMIT; page += 1) {
+      const response = await this.getJson<ApiEnvelope<unknown[]>>(
+        `${this.apiBaseUrl}/teams/${teamId}/chapters?page=${page}`,
+      );
+
+      for (const raw of Array.isArray(response.data) ? response.data : []) {
+        if (!isRecord(raw)) continue;
+        const teams = Array.isArray(raw.teams) ? raw.teams : [];
+        if (!teams.some((rawTeam) => (
+          isRecord(rawTeam) && teamRecordMatchesRef(rawTeam, normalizedTeamRef, teamId)
+        ))) continue;
+
+        const media = isRecord(raw.manga) ? raw.manga : (isRecord(raw.media) ? raw.media : null);
+        const book = normalizeTeamBook(media, this.siteBaseUrl);
+        if (!book || seen.has(book.ref)) continue;
+        seen.add(book.ref);
+        books.push(book);
+      }
+
+      if (response.meta?.has_next_page !== true) break;
+    }
+
+    return books;
   }
 
   /** Returns book metadata only when the title detail explicitly attributes this exact team. */

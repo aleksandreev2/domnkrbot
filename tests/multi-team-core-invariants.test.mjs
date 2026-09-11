@@ -95,6 +95,32 @@ test('team discovery preserves a catalog-omitted relation confirmed by secondary
   assert.deepEqual(result.activate, []);
 });
 
+test('partner discovery directly merges titles exactly attributed by team chapter history', async () => {
+  const { supplementPartnerHistory } = await discovery();
+  const catalogRef = '215088--i-kidnapped-the-heros-women';
+  const hiddenRef = '247881--deuraegon-ttareul-kiul-su-isseul-ri-eobsjanha';
+  const book = (id, ref, title) => ({
+    id,
+    ref,
+    slug: ref.split('--').slice(1).join('--'),
+    url: `https://ranobelib.me/ru/book/${ref}`,
+    title,
+  });
+
+  const result = await supplementPartnerHistory(
+    { isPrimary: false, ranobelibTeamRef: '64306--blinnaia-besa' },
+    {
+      discoverTeamBooks: async () => [book(215088, catalogRef, 'Я похитил девушек героя')],
+      discoverTeamHistoryBooks: async () => [book(247881, hiddenRef, 'Я ни за что не стану воспитывать дочь дракона')],
+    },
+    [book(215088, catalogRef, 'Я похитил девушек героя')],
+    [],
+  );
+
+  assert.deepEqual(result.books.map((value) => value.ref).sort(), [catalogRef, hiddenRef].sort());
+  assert.deepEqual(result.preservedRefs, []);
+});
+
 test('team discovery treats current catalog membership as active while preserving confirmed completion', async () => {
   const source = await readFile(new URL('../src/ranobelib-multi-team-discovery.ts', import.meta.url), 'utf8');
 

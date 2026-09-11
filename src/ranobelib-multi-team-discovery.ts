@@ -27,13 +27,15 @@ export type MultiTeamDiscoveryResult = {
 };
 
 export type TeamDiscoveryClient = Pick<RanobeLibClient, 'discoverTeamBooks'> &
-  Partial<Pick<RanobeLibClient, 'getTeamDisplayName' | 'discoverTeamPageBooks' | 'getTeamAttributedBook'>>;
+  Partial<Pick<RanobeLibClient,
+    'getTeamDisplayName' | 'discoverTeamHistoryBooks' | 'discoverTeamPageBooks' | 'getTeamAttributedBook'
+  >>;
 
 export type MultiTeamDiscoveryOptions = {
   clientFactory?: (team: RanobeLibTeamRecord) => TeamDiscoveryClient;
 };
 
-type StoredRelationRow = {
+export type StoredRelationRow = {
   book_ref: string;
   presence_state: 'active' | 'dormant';
 };
@@ -175,7 +177,7 @@ export async function discoverOneRegisteredTeam(
   };
 }
 
-async function supplementPartnerHistory(
+export async function supplementPartnerHistory(
   team: RanobeLibTeamRecord,
   client: TeamDiscoveryClient,
   catalogBooks: readonly RanobeLibTeamBookRef[],
@@ -186,7 +188,22 @@ async function supplementPartnerHistory(
 
   // Primary-team discovery remains exactly on the established API path. The secondary source is
   // only needed for partner history, where RanobeLib can omit older relations from target_model=team.
-  if (team.isPrimary || !client.discoverTeamPageBooks || !client.getTeamAttributedBook) {
+  if (team.isPrimary) {
+    return { books: [...booksByRef.values()], preservedRefs: [] };
+  }
+
+  if (client.discoverTeamHistoryBooks) {
+    try {
+      const historyBooks = await client.discoverTeamHistoryBooks(team.ranobelibTeamRef);
+      // History rows already carry an explicit teams[] attribution checked by the client, so they
+      // remain authoritative even when the anonymous title detail endpoint returns 404.
+      for (const book of historyBooks) booksByRef.set(cleanRef(book.ref), book);
+    } catch (error) {
+      console.error('RanobeLib partner chapter history fallback failed', team.ranobelibTeamRef, compactError(error));
+    }
+  }
+
+  if (!client.discoverTeamPageBooks || !client.getTeamAttributedBook) {
     return { books: [...booksByRef.values()], preservedRefs: [] };
   }
 

@@ -159,3 +159,50 @@ test('team page fallback can recover a catalog-omitted title only after exact te
   assert.equal(rejected, null);
   assert.deepEqual(requests, [teamPageUrl, detailTeamsUrl, foreignDetailUrl]);
 });
+
+test('team chapter history discovers auth-hidden titles with exact team attribution across pages', async () => {
+  const teamRef = '64306--blinnaia-besa';
+  const hiddenRef = '247881--deuraegon-ttareul-kiul-su-isseul-ri-eobsjanha';
+  const secondRef = '258579--ropaneul-dakfantajiro-chacgakhassda';
+  const firstPageUrl = 'https://api.cdnlibs.org/api/teams/64306/chapters?page=1';
+  const secondPageUrl = 'https://api.cdnlibs.org/api/teams/64306/chapters?page=2';
+  const requests = [];
+
+  const chapter = (id, ref, title, teamId = 64306) => ({
+    teams: [{ id: teamId, slug_url: teamId === 64306 ? teamRef : `${teamId}--other-team` }],
+    manga: {
+      id,
+      slug_url: ref,
+      slug: ref.split('--').slice(1).join('--'),
+      rus_name: title,
+    },
+  });
+
+  const client = new RanobeLibClient({
+    fetchImpl: async (url) => {
+      requests.push(String(url));
+      if (String(url) === firstPageUrl) {
+        return json({
+          data: [
+            chapter(247881, hiddenRef, 'Я ни за что не стану воспитывать дочь дракона'),
+            chapter(247881, hiddenRef, 'Дубликат той же главы'),
+            chapter(999999, '999999--foreign-book', 'Чужая книга', 77),
+          ],
+          meta: { current_page: 1, has_next_page: true },
+        });
+      }
+      if (String(url) === secondPageUrl) {
+        return json({
+          data: [chapter(258579, secondRef, 'Я перепутал романтическое фэнтези с тёмным фэнтези')],
+          meta: { current_page: 2, has_next_page: false },
+        });
+      }
+      return new Response('unexpected', { status: 500 });
+    },
+  });
+
+  const books = await client.discoverTeamHistoryBooks(teamRef);
+  assert.deepEqual(books.map((book) => book.ref), [hiddenRef, secondRef]);
+  assert.equal(books[0].title, 'Я ни за что не стану воспитывать дочь дракона');
+  assert.deepEqual(requests, [firstPageUrl, secondPageUrl]);
+});
