@@ -396,6 +396,8 @@ function normalizeChapterBranches(raw: unknown, bookRef: string, nowMs: number):
       identityConfidence: identity.confidence,
       teamIds,
       releasedAt,
+      stableBranchRef,
+      branchOrdinal: index,
     });
   }
 
