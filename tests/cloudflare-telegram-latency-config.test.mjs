@@ -21,9 +21,10 @@ test('Workers Paid subrequest budget is explicit in the deployment source of tru
   );
 });
 
-test('production declares the RanobeLib encryption key as a required Worker secret', async () => {
+test('RanobeLib encryption key stays secret-only without blocking anonymous fallback deploys', async () => {
   const source = await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const wrangler = JSON.parse(source);
-  assert.ok(wrangler.secrets?.required?.includes('RANOBELIB_TOKEN_ENCRYPTION_KEY'));
+  assert.ok(wrangler.secrets?.required?.includes('TELEGRAM_BOT_TOKEN'));
+  assert.ok(!wrangler.secrets?.required?.includes('RANOBELIB_TOKEN_ENCRYPTION_KEY'));
   assert.equal(wrangler.vars?.RANOBELIB_TOKEN_ENCRYPTION_KEY, undefined);
 });
