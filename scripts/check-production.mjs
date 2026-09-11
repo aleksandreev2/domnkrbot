@@ -1,7 +1,13 @@
 const origin = (process.env.PRODUCTION_URL || 'https://domnkrbot.sashahumortele2.workers.dev').replace(/\/+$/, '');
-const marker = process.env.EXPECTED_MARKER || 'domnkr-build-20260820-file-cache1';
-const attempts = Number(process.env.ATTEMPTS || 6);
+const marker = String(process.env.EXPECTED_MARKER || '').trim();
+const expectedRevision = String(process.env.EXPECTED_REVISION || process.env.GITHUB_SHA || '').trim().toLowerCase();
+const attempts = Number(process.env.ATTEMPTS || 30);
 const delayMs = Number(process.env.DELAY_MS || 10000);
+
+if (!/^[0-9a-f]{40}$/.test(expectedRevision)) {
+  console.error('FAIL: EXPECTED_REVISION or GITHUB_SHA must contain the exact 40-character git SHA.');
+  process.exit(2);
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const fetchText = async (path) => {
@@ -28,6 +34,7 @@ const fetchUnauthedRawInit = async () => {
 let last = null;
 for (let attempt = 1; attempt <= attempts; attempt += 1) {
   try {
+    const revision = await fetchText('/deploy-revision.txt');
     const build = await fetchText('/build.txt');
     const shell = await fetchText('/');
     const site = await fetchText('/site.js?v=20260820-reader2');
@@ -57,8 +64,12 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const adminCockpitCss = await fetchText('/admin/admin-cockpit.css?v=20260819-cockpit1');
     const publishEditor = await fetchText('/admin/publish-editor.js?v=20260819-publish1');
     const health = await fetchText('/api/health');
+    const deployedRevision = revision.text.trim().toLowerCase();
 
     last = {
+      revision: revision.response.status,
+      expectedRevision,
+      deployedRevision,
       build: build.response.status, shell: shell.response.status, site: site.response.status,
       propose: propose.response.status, proposeJs: proposeJs.response.status,
       title: title.response.status, titleJs: titleJs.response.status,
@@ -79,7 +90,8 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
       membershipAccessReady: health.text.includes('"membershipAccessReady":true'),
     };
 
-    const ok = build.response.ok && build.text.includes(marker)
+    const ok = revision.response.ok && revision.text.trim().toLowerCase() === expectedRevision
+      && build.response.ok && (!marker || build.text.includes(marker))
       && shell.response.ok && shell.text.includes('Последние обновления') && shell.text.includes('Наши переводы')
       && shell.text.includes('id="adminLink" class="admin-entry hidden"')
       && shell.text.includes('/ui-icons.js?v=20260820-icons3') && shell.text.includes('/site.js?v=20260820-reader2')
@@ -135,16 +147,16 @@ for (let attempt = 1; attempt <= attempts; attempt += 1) {
 
     console.log(`production smoke attempt ${attempt}/${attempts}:`, JSON.stringify(last));
     if (ok) {
-      console.log(`PASS: Telegram file-cache hardening, release analytics and existing production services are ready (${marker})`);
+      console.log(`PASS: production serves exact revision ${expectedRevision}${marker ? ` (${marker})` : ''}`);
       process.exit(0);
     }
   } catch (error) {
-    last = { error: error instanceof Error ? error.message : String(error) };
+    last = { error: error instanceof Error ? error.message : String(error), expectedRevision };
     console.log(`production smoke attempt ${attempt}/${attempts} failed: ${last.error}`);
   }
   if (attempt < attempts) await sleep(delayMs);
 }
 
-console.error('FAIL: Telegram file-cache build is stale or existing production services regressed.');
+console.error('FAIL: production is stale or existing production services regressed.');
 console.error(JSON.stringify(last, null, 2));
 process.exit(1);
