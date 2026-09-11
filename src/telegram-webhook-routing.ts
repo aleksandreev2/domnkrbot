@@ -6,6 +6,7 @@ export type TelegramWebhookRoute =
   | 'membership-appeal'
   | 'notifications'
   | 'admin-stats'
+  | 'ranobelib-auth'
   | 'proposal'
   | 'generic-private-text'
   | 'compat';
@@ -30,6 +31,18 @@ function isDownloadStart(text: string): boolean {
   return /^\/start(?:@[A-Za-z0-9_]+)?\s+dl_\d+\s*$/i.test(text.trim());
 }
 
+function isRanobeLibOAuthCallback(text: string): boolean {
+  try {
+    const url = new URL(text.trim());
+    return url.origin === 'https://ranobelib.me'
+      && url.pathname.replace(/\/+$/g, '') === '/ru/front/auth/oauth/callback'
+      && Boolean(url.searchParams.get('code')?.trim())
+      && Boolean(url.searchParams.get('state')?.trim());
+  } catch {
+    return false;
+  }
+}
+
 export function classifyTelegramWebhookUpdate(update: TelegramWebhookUpdateLike): TelegramWebhookRoute {
   if (update.chat_member) return 'chat-member';
 
@@ -48,6 +61,7 @@ export function classifyTelegramWebhookUpdate(update: TelegramWebhookUpdateLike)
   if (message?.chat?.type === 'private') {
     if (isCommand(text, 'notifications') || isCommand(text, 'subscriptions')) return 'notifications';
     if (isCommand(text, 'stats')) return 'admin-stats';
+    if (isCommand(text, 'ranobelib_auth') || isRanobeLibOAuthCallback(text)) return 'ranobelib-auth';
     if (isCommand(text, 'start') || isCommand(text, 'propose')) return 'proposal';
     if (text && !text.startsWith('/')) return 'generic-private-text';
   }
