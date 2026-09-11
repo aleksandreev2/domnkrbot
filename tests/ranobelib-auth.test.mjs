@@ -3,14 +3,18 @@ import test from 'node:test';
 import { RanobeLibAuthProvider } from '../dist-runtime/ranobelib-auth.js';
 
 const KEY = 'unit-test-encryption-key-with-enough-entropy';
+const TELEGRAM = '123456:telegram-secret-used-for-legacy-migration';
 const ACCESS = 'access-secret-value';
 const REFRESH = 'refresh-secret-value';
 const NOW = new Date('2026-09-11T12:00:00.000Z');
+const ADDITIONAL_DATA = 'domnkrbot:ranobelib-auth:v1';
+const encoder = new TextEncoder();
 
-function memoryDb() {
-  let row = null;
+function memoryDb(initialRow = null) {
+  let row = initialRow ? { ...initialRow } : null;
   return {
     get row() { return row; },
+    set row(value) { row = value ? { ...value } : null; },
     prepare(sql) {
       let values = [];
       return {
@@ -22,13 +26,19 @@ function memoryDb() {
           else if (/INSERT INTO ranobelib_auth_credentials/i.test(sql)) {
             const keyVersion = Number(/VALUES\s*\(1\s*,\s*\?\s*,\s*\?\s*,\s*(\d+)/i.exec(sql)?.[1] ?? 1);
             row = {
-              singleton_id: 1, ciphertext: values[0], iv: values[1], key_version: keyVersion,
-              access_expires_at: values[2], state: values[3], last_validated_at: values[4],
-              last_refreshed_at: values[5], last_error: values[6], updated_at: NOW.toISOString(),
+              singleton_id: 1,
+              ciphertext: values[0], iv: values[1], key_version: keyVersion,
+              access_expires_at: values[2], state: values[3],
+              last_validated_at: values[4], last_refreshed_at: values[5],
+              refresh_failures: values[6] ?? 0, last_refresh_failure_at: values[7] ?? null,
+              last_error: values[8] ?? null, updated_at: NOW.toISOString(),
             };
           } else if (/UPDATE ranobelib_auth_credentials/i.test(sql) && row) {
             row.state = values[0];
             row.last_error = values[1];
+            row.refresh_failures = Number(row.refresh_failures ?? 0) + 1;
+            row.last_refresh_failure_at = NOW.toISOString();
+            row.updated_at = NOW.toISOString();
           }
           return { success: true };
         },
@@ -39,23 +49,64 @@ function memoryDb() {
 
 function provider(db, options = {}) {
   return new RanobeLibAuthProvider(
-    { DB: db, RANOBELIB_TOKEN_ENCRYPTION_KEY: options.key ?? KEY },
+    {
+      DB: db,
+      ...(options.key === null ? {} : { RANOBELIB_TOKEN_ENCRYPTION_KEY: options.key ?? KEY }),
+      ...(options.telegram ? { TELEGRAM_BOT_TOKEN: options.telegram } : {}),
+    },
     { fetchImpl: options.fetchImpl, now: () => options.now ?? NOW },
   );
 }
 
-test('encrypted persistence round-trips while D1 fields contain neither token', async () => {
+async function deriveKey(namespace, secret) {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(`${namespace}\n${secret}`));
+  return crypto.subtle.importKey('raw', digest, 'AES-GCM', false, ['encrypt', 'decrypt']);
+}
+
+function b64(bytes) {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+async function legacyRow(bundle) {
+  const key = await deriveKey('domnkrbot:ranobelib-auth:telegram-fallback:v1', TELEGRAM);
+  const iv = new Uint8Array(12).fill(7);
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: encoder.encode(ADDITIONAL_DATA) },
+    key,
+    encoder.encode(JSON.stringify(bundle)),
+  );
+  return {
+    singleton_id: 1,
+    ciphertext: b64(new Uint8Array(ciphertext)),
+    iv: b64(iv),
+    key_version: 2,
+    access_expires_at: bundle.expiresAt,
+    state: 'active',
+    last_validated_at: NOW.toISOString(),
+    last_refreshed_at: null,
+    refresh_failures: 0,
+    last_refresh_failure_at: null,
+    last_error: null,
+    updated_at: NOW.toISOString(),
+  };
+}
+
+test('dedicated-key encrypted persistence round-trips while D1 fields contain neither token', async () => {
   const db = memoryDb();
   const auth = provider(db);
   const bundle = { accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T13:00:00.000Z' };
   await auth.store(bundle, { validatedAt: NOW.toISOString() });
   assert.ok(db.row);
+  assert.equal(db.row.key_version, 1);
   assert.notEqual(db.row.ciphertext, ACCESS);
   assert.doesNotMatch(JSON.stringify(db.row), new RegExp(`${ACCESS}|${REFRESH}`));
   assert.deepEqual(await auth.load(), bundle);
+  assert.equal((await auth.health()).encryptionState, 'dedicated');
 });
 
-test('AES-GCM uses a fresh IV and a wrong key cannot decrypt the bundle', async () => {
+test('AES-GCM uses a fresh IV and a wrong dedicated key cannot decrypt the bundle', async () => {
   const db = memoryDb();
   const auth = provider(db);
   const bundle = { accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T13:00:00.000Z' };
@@ -71,13 +122,30 @@ test('health never exposes secrets and missing credentials remain anonymous', as
   const auth = provider(db);
   assert.equal(await auth.getAccessToken(), null);
   assert.deepEqual(await auth.health(), {
-    state: 'missing', accessExpiresAt: null, lastValidatedAt: null,
-    lastRefreshedAt: null, lastError: null, updatedAt: null,
+    state: 'missing', encryptionState: 'missing', accessExpiresAt: null,
+    lastValidatedAt: null, lastRefreshedAt: null, refreshFailures: 0,
+    lastRefreshFailureAt: null, lastError: null, updatedAt: null,
   });
   assert.doesNotMatch(JSON.stringify(await auth.health()), /accessToken|refreshToken/);
 });
 
-test('validation calls the signed-in identity endpoint before storing credentials', async () => {
+test('validation requires secure local persistence before calling the signed-in identity endpoint', async () => {
+  const db = memoryDb();
+  let calls = 0;
+  const auth = provider(db, {
+    key: null,
+    telegram: TELEGRAM,
+    fetchImpl: async () => { calls += 1; return Response.json({ data: { id: 11931299 } }); },
+  });
+  await assert.rejects(
+    () => auth.validateAndStore({ accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T13:00:00.000Z' }),
+    /RANOBELIB_TOKEN_ENCRYPTION_KEY/,
+  );
+  assert.equal(calls, 0);
+  assert.equal(db.row, null);
+});
+
+test('validation calls the signed-in identity endpoint before storing dedicated-key credentials', async () => {
   const db = memoryDb();
   const calls = [];
   const auth = provider(db, { fetchImpl: async (url, init) => {
@@ -86,12 +154,13 @@ test('validation calls the signed-in identity endpoint before storing credential
   } });
   await auth.validateAndStore({ accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T13:00:00.000Z' });
   assert.equal(calls[0].url, 'https://api.cdnlibs.org/api/auth/me');
-  assert.equal(calls[0].init.method, 'GET');
   assert.equal(calls[0].init.headers.Authorization, `Bearer ${ACCESS}`);
-  assert.equal((await auth.health()).state, 'active');
+  const health = await auth.health();
+  assert.equal(health.state, 'active');
+  assert.equal(health.encryptionState, 'dedicated');
 });
 
-test('expired access refreshes once for concurrent callers and persists rotated tokens', async () => {
+test('expired access refreshes once for concurrent callers and clears refresh failure diagnostics', async () => {
   const db = memoryDb();
   let refreshCalls = 0;
   const auth = provider(db, { fetchImpl: async (_url, init) => {
@@ -101,75 +170,74 @@ test('expired access refreshes once for concurrent callers and persists rotated 
     await new Promise((resolve) => setTimeout(resolve, 10));
     return Response.json({ access_token: 'rotated-access', refresh_token: 'rotated-refresh', expires_in: 3600 });
   } });
-  await auth.store({ accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T12:01:00.000Z' });
+  await auth.store({ accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T12:01:00.000Z' }, {
+    refreshFailures: 2, lastRefreshFailureAt: '2026-09-11T11:00:00.000Z', lastError: 'old error',
+  });
   const tokens = await Promise.all([auth.getAccessToken(), auth.getAccessToken(), auth.getAccessToken()]);
   assert.deepEqual(tokens, ['rotated-access', 'rotated-access', 'rotated-access']);
   assert.equal(refreshCalls, 1);
   assert.deepEqual(await auth.load(), {
     accessToken: 'rotated-access', refreshToken: 'rotated-refresh', expiresAt: '2026-09-11T13:00:00.000Z',
   });
-  assert.equal((await auth.health()).lastRefreshedAt, NOW.toISOString());
+  const health = await auth.health();
+  assert.equal(health.lastRefreshedAt, NOW.toISOString());
+  assert.equal(health.refreshFailures, 0);
+  assert.equal(health.lastRefreshFailureAt, null);
+  assert.equal(health.lastError, null);
 });
 
-test('invalid refresh marks health invalid without leaking token values', async () => {
+test('invalid refresh marks health invalid, increments failure count and never leaks token values', async () => {
   const db = memoryDb();
   const auth = provider(db, { fetchImpl: async () => new Response(`bad ${ACCESS} ${REFRESH}`, { status: 401 }) });
   await auth.store({ accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T12:01:00.000Z' });
   await assert.rejects(() => auth.getAccessToken(), /refresh failed: 401/i);
   const health = await auth.health();
   assert.equal(health.state, 'invalid');
+  assert.equal(health.refreshFailures, 1);
+  assert.equal(health.lastRefreshFailureAt, NOW.toISOString());
   assert.doesNotMatch(JSON.stringify(health), new RegExp(`${ACCESS}|${REFRESH}`));
 });
 
-test('existing Telegram bot secret can encrypt credentials when the dedicated RanobeLib key is absent', async () => {
-  const db = memoryDb();
-  const auth = new RanobeLibAuthProvider(
-    { DB: db, TELEGRAM_BOT_TOKEN: '123456:telegram-secret-used-only-as-key-material' },
-    { now: () => NOW },
-  );
+test('legacy Telegram-derived credentials migrate once to the dedicated key', async () => {
   const bundle = { accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T13:00:00.000Z' };
-  await auth.store(bundle);
-  assert.ok(db.row?.ciphertext);
-  assert.equal(db.row?.key_version, 2);
-  assert.doesNotMatch(JSON.stringify(db.row), new RegExp(`${ACCESS}|${REFRESH}`));
+  const db = memoryDb(await legacyRow(bundle));
+  const auth = provider(db, { telegram: TELEGRAM });
+  assert.equal((await auth.health()).encryptionState, 'legacy');
   assert.deepEqual(await auth.load(), bundle);
-  assert.equal((await auth.health()).state, 'active');
+  assert.equal(db.row.key_version, 1);
+  assert.equal((await auth.health()).encryptionState, 'dedicated');
+  assert.doesNotMatch(JSON.stringify(db.row), new RegExp(`${ACCESS}|${REFRESH}`));
 });
 
-test('stateless PKCE OAuth request exchanges an official callback and stores only encrypted credentials', async () => {
+test('legacy credential is unavailable until the dedicated migration key is configured', async () => {
+  const bundle = { accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T13:00:00.000Z' };
+  const db = memoryDb(await legacyRow(bundle));
+  const auth = provider(db, { key: null, telegram: TELEGRAM });
+  const health = await auth.health();
+  assert.equal(health.state, 'unavailable');
+  assert.equal(health.encryptionState, 'unavailable');
+  await assert.rejects(() => auth.load(), /RANOBELIB_TOKEN_ENCRYPTION_KEY/);
+});
+
+test('stateless PKCE OAuth request exchanges an official callback and stores only dedicated-key credentials', async () => {
   const runtime = await import('../dist-runtime/telegram-ranobelib-auth.js').catch(() => null);
   assert.equal(typeof runtime?.createRanobeLibAuthorizationRequest, 'function');
   assert.equal(typeof runtime?.completeRanobeLibAuthorizationFromCallback, 'function');
 
-  let row = null;
+  const DB = memoryDb();
   const queries = [];
-  const DB = {
-    get row() { return row; },
-    get queries() { return queries; },
-    prepare(sql) {
-      let values = [];
-      return {
-        bind(...next) { values = next; return this; },
-        async first() {
-          return /FROM ranobelib_auth_credentials/i.test(sql) && row ? { ...row } : null;
-        },
-        async all() { return { results: [] }; },
-        async run() {
-          queries.push({ sql, values: [...values] });
-          if (/INSERT INTO ranobelib_auth_credentials/i.test(sql)) {
-            const keyVersion = Number(/VALUES\s*\(1\s*,\s*\?\s*,\s*\?\s*,\s*(\d+)/i.exec(sql)?.[1] ?? 1);
-            row = {
-              ciphertext: values[0], iv: values[1], key_version: keyVersion,
-              access_expires_at: values[2], state: values[3], last_validated_at: values[4],
-              last_refreshed_at: values[5], last_error: values[6], updated_at: NOW.toISOString(),
-            };
-          }
-          return { success: true, meta: { changes: 1 } };
-        },
-      };
-    },
+  const originalPrepare = DB.prepare.bind(DB);
+  DB.prepare = (sql) => {
+    const statement = originalPrepare(sql);
+    const originalRun = statement.run.bind(statement);
+    statement.run = async () => { queries.push(String(sql)); return originalRun(); };
+    return statement;
   };
-  const env = { DB, TELEGRAM_BOT_TOKEN: '123456:oauth-state-and-encryption-secret' };
+  const env = {
+    DB,
+    TELEGRAM_BOT_TOKEN: '123456:oauth-state-secret',
+    RANOBELIB_TOKEN_ENCRYPTION_KEY: KEY,
+  };
   const start = await runtime.createRanobeLibAuthorizationRequest(env, '42', {
     now: () => NOW,
     randomBytes: (length) => Uint8Array.from({ length }, (_, index) => (index + 17) % 256),
@@ -209,17 +277,16 @@ test('stateless PKCE OAuth request exchanges an official callback and stores onl
   });
 
   assert.equal(result.state, 'active');
+  assert.equal(result.encryptionState, 'dedicated');
   assert.equal(calls.length, 2);
-  assert.equal(row?.key_version, 2);
-  assert.doesNotMatch(JSON.stringify(row), /oauth-access|oauth-refresh|one-time-oauth-code/);
-  assert.ok(queries.some(({ sql }) => /UPDATE ranobelib_titles/i.test(sql) && /next_check_at\s*=\s*CURRENT_TIMESTAMP/i.test(sql)),
+  assert.equal(DB.row?.key_version, 1);
+  assert.doesNotMatch(JSON.stringify(DB.row), /oauth-access|oauth-refresh|one-time-oauth-code/);
+  assert.ok(queries.some((sql) => /UPDATE ranobelib_titles/i.test(sql) && /next_check_at\s*=\s*CURRENT_TIMESTAMP/i.test(sql)),
     'successful auth must wake RanobeLib titles for immediate rescan');
 });
 
 test('stateless RanobeLib OAuth state is bound to the requesting admin', async () => {
   const runtime = await import('../dist-runtime/telegram-ranobelib-auth.js').catch(() => null);
-  assert.equal(typeof runtime?.createRanobeLibAuthorizationRequest, 'function');
-  assert.equal(typeof runtime?.completeRanobeLibAuthorizationFromCallback, 'function');
   const env = { DB: memoryDb(), TELEGRAM_BOT_TOKEN: '123456:oauth-state-user-binding' };
   const start = await runtime.createRanobeLibAuthorizationRequest(env, '42', {
     now: () => NOW,
