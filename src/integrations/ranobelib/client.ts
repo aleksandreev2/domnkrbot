@@ -63,6 +63,32 @@ export class RanobeLibClient {
     return books;
   }
 
+  async getTeamDisplayName(teamRef: string, bookRefs: readonly string[]): Promise<string | null> {
+    const normalizedTeamRef = teamRef.trim();
+    const teamId = ranobeLibTeamIdFromRef(normalizedTeamRef);
+    if (teamId === null) throw new Error(`Invalid RanobeLib team ref: ${teamRef}`);
+
+    const refs = [...new Set(bookRefs.map((value) => String(value ?? '').trim()).filter(Boolean))].slice(0, 3);
+    for (const bookRef of refs) {
+      try {
+        const response = await this.getJson<ApiEnvelope<Record<string, unknown>>>(
+          `${this.apiBaseUrl}/manga/${encodeURIComponent(bookRef)}?fields[]=teams`,
+        );
+        const data = isRecord(response.data) ? response.data : {};
+        const teams = Array.isArray(data.teams) ? data.teams : [];
+        for (const rawTeam of teams) {
+          if (!isRecord(rawTeam) || !teamRecordMatchesRef(rawTeam, normalizedTeamRef, teamId)) continue;
+          const name = stringOrNull(rawTeam.name);
+          if (name) return name;
+        }
+      } catch {
+        // Team display metadata is best-effort. Catalog discovery must keep working even if one
+        // title detail request is temporarily unavailable.
+      }
+    }
+    return null;
+  }
+
   async getTranslationStatus(bookRef: string): Promise<RanobeLibTranslationStatus> {
     const response = await this.getJson<ApiEnvelope<Record<string, unknown>>>(
       `${this.apiBaseUrl}/manga/${encodeURIComponent(bookRef)}?fields[]=status_id`,
@@ -295,6 +321,14 @@ function branchHasTeam(branch: Record<string, unknown>, teamRef: string): boolea
     const refs = [team.slug_url, team.slug, team.ref].map(stringOrNull).filter((value): value is string => Boolean(value));
     return refs.some((value) => value === teamRef || `${teamId ?? ''}--${value}` === teamRef);
   });
+}
+
+function teamRecordMatchesRef(team: Record<string, unknown>, teamRef: string, teamId: number): boolean {
+  if (numberOrNull(team.id) === teamId) return true;
+  const refs = [team.slug_url, team.ref].map(stringOrNull).filter((value): value is string => Boolean(value));
+  if (refs.includes(teamRef)) return true;
+  const slug = stringOrNull(team.slug);
+  return Boolean(slug && `${teamId}--${slug}` === teamRef);
 }
 
 function branchTeamIds(branch: Record<string, unknown>): number[] {
