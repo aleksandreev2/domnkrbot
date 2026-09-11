@@ -135,3 +135,106 @@ test('existing Telegram bot secret can encrypt credentials when the dedicated Ra
   assert.deepEqual(await auth.load(), bundle);
   assert.equal((await auth.health()).state, 'active');
 });
+
+test('stateless PKCE OAuth request exchanges an official callback and stores only encrypted credentials', async () => {
+  const runtime = await import('../dist-runtime/telegram-ranobelib-auth.js').catch(() => null);
+  assert.equal(typeof runtime?.createRanobeLibAuthorizationRequest, 'function');
+  assert.equal(typeof runtime?.completeRanobeLibAuthorizationFromCallback, 'function');
+
+  let row = null;
+  const queries = [];
+  const DB = {
+    get row() { return row; },
+    get queries() { return queries; },
+    prepare(sql) {
+      let values = [];
+      return {
+        bind(...next) { values = next; return this; },
+        async first() {
+          return /FROM ranobelib_auth_credentials/i.test(sql) && row ? { ...row } : null;
+        },
+        async all() { return { results: [] }; },
+        async run() {
+          queries.push({ sql, values: [...values] });
+          if (/INSERT INTO ranobelib_auth_credentials/i.test(sql)) {
+            const keyVersion = Number(/VALUES\s*\(1\s*,\s*\?\s*,\s*\?\s*,\s*(\d+)/i.exec(sql)?.[1] ?? 1);
+            row = {
+              ciphertext: values[0], iv: values[1], key_version: keyVersion,
+              access_expires_at: values[2], state: values[3], last_validated_at: values[4],
+              last_refreshed_at: values[5], last_error: values[6], updated_at: NOW.toISOString(),
+            };
+          }
+          return { success: true, meta: { changes: 1 } };
+        },
+      };
+    },
+  };
+  const env = { DB, TELEGRAM_BOT_TOKEN: '123456:oauth-state-and-encryption-secret' };
+  const start = await runtime.createRanobeLibAuthorizationRequest(env, '42', {
+    now: () => NOW,
+    randomBytes: (length) => Uint8Array.from({ length }, (_, index) => (index + 17) % 256),
+  });
+  const authorize = new URL(start.authorizeUrl);
+  assert.equal(authorize.origin, 'https://auth.lib.social');
+  assert.equal(authorize.pathname, '/auth/oauth/authorize');
+  assert.equal(authorize.searchParams.get('client_id'), '1');
+  assert.equal(authorize.searchParams.get('response_type'), 'code');
+  assert.equal(authorize.searchParams.get('redirect_uri'), 'https://ranobelib.me/ru/front/auth/oauth/callback');
+  assert.equal(authorize.searchParams.get('code_challenge_method'), 'S256');
+  assert.match(authorize.searchParams.get('code_challenge') ?? '', /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(authorize.searchParams.get('state'), start.state);
+  assert.doesNotMatch(start.authorizeUrl, /code_verifier/i);
+
+  const callback = new URL('https://ranobelib.me/ru/front/auth/oauth/callback');
+  callback.searchParams.set('code', 'one-time-oauth-code');
+  callback.searchParams.set('state', start.state);
+  const calls = [];
+  const result = await runtime.completeRanobeLibAuthorizationFromCallback(env, '42', callback.toString(), {
+    now: () => NOW,
+    fetchImpl: async (url, init = {}) => {
+      calls.push({ url: String(url), init });
+      if (String(url).endsWith('/api/auth/oauth/token')) {
+        const body = JSON.parse(String(init.body));
+        assert.equal(body.grant_type, 'authorization_code');
+        assert.equal(body.client_id, 1);
+        assert.equal(body.redirect_uri, 'https://ranobelib.me/ru/front/auth/oauth/callback');
+        assert.equal(body.code, 'one-time-oauth-code');
+        assert.match(body.code_verifier, /^[A-Za-z0-9_-]{43,128}$/);
+        return Response.json({ access_token: 'oauth-access', refresh_token: 'oauth-refresh', expires_in: 3600 });
+      }
+      assert.equal(String(url), 'https://api.cdnlibs.org/api/auth/me');
+      assert.equal(init.headers.Authorization, 'Bearer oauth-access');
+      return Response.json({ data: { id: 777 } });
+    },
+  });
+
+  assert.equal(result.state, 'active');
+  assert.equal(calls.length, 2);
+  assert.equal(row?.key_version, 2);
+  assert.doesNotMatch(JSON.stringify(row), /oauth-access|oauth-refresh|one-time-oauth-code/);
+  assert.ok(queries.some(({ sql }) => /UPDATE ranobelib_titles/i.test(sql) && /next_check_at\s*=\s*CURRENT_TIMESTAMP/i.test(sql)),
+    'successful auth must wake RanobeLib titles for immediate rescan');
+});
+
+test('stateless RanobeLib OAuth state is bound to the requesting admin', async () => {
+  const runtime = await import('../dist-runtime/telegram-ranobelib-auth.js').catch(() => null);
+  assert.equal(typeof runtime?.createRanobeLibAuthorizationRequest, 'function');
+  assert.equal(typeof runtime?.completeRanobeLibAuthorizationFromCallback, 'function');
+  const env = { DB: memoryDb(), TELEGRAM_BOT_TOKEN: '123456:oauth-state-user-binding' };
+  const start = await runtime.createRanobeLibAuthorizationRequest(env, '42', {
+    now: () => NOW,
+    randomBytes: (length) => new Uint8Array(length).fill(7),
+  });
+  const callback = new URL('https://ranobelib.me/ru/front/auth/oauth/callback');
+  callback.searchParams.set('code', 'unused-code');
+  callback.searchParams.set('state', start.state);
+  let fetches = 0;
+  await assert.rejects(
+    () => runtime.completeRanobeLibAuthorizationFromCallback(env, '99', callback.toString(), {
+      now: () => NOW,
+      fetchImpl: async () => { fetches += 1; return Response.json({}); },
+    }),
+    /state|admin|user/i,
+  );
+  assert.equal(fetches, 0);
+});
