@@ -1,5 +1,9 @@
 import { getMultiTeamRollout } from './multi-team-rollout.js';
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
+import {
+  handleTelegramPartnerCollaboration,
+  sendPartnerAwareMainMenu,
+} from './telegram-partner-collaboration-runtime.js';
 import { handleTelegramTeamAdmin, type TelegramTeamAdminEnv } from './telegram-team-admin.js';
 import {
   handleTelegramTeamNotification,
@@ -56,9 +60,14 @@ export async function handleTelegramMultiTeamGateway(
       await upsertMultiTeamTelegramUser(env, message.from);
       if (await maybeSendTeamOnboarding(env, message.from, message.chat.id, rollout.ui)) return ok();
     }
-    return null;
+    // Once multi-team UI is enabled, /start must visibly keep Дом Некроманта as the owner while
+    // exposing partner collaborations. The legacy main menu remains the fallback while UI is off.
+    if (await sendPartnerAwareMainMenu(update, env, url.origin, ctx)) return ok();
   }
 
+  // Collaboration navigation owns the high-level notification/catalog/team screens. Deep title
+  // search/settings flows continue through the established multi-team runtime below.
+  if (await handleTelegramPartnerCollaboration(update, env, url.origin, ctx)) return ok();
   if (await handleTelegramTeamNotification(update, env, ctx)) return ok();
   return null;
 }
