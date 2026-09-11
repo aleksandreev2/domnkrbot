@@ -15,7 +15,8 @@ function memoryDb() {
         row = {
           ciphertext: values[0], iv: values[1], key_version: keyVersion, access_expires_at: values[2],
           state: values[3], last_validated_at: values[4], last_refreshed_at: values[5],
-          last_error: values[6], updated_at: '2026-09-11T12:00:00.000Z',
+          refresh_failures: values[6] ?? 0, last_refresh_failure_at: values[7] ?? null,
+          last_error: values[8] ?? null, updated_at: '2026-09-11T12:00:00.000Z',
         };
       }
       return { success: true };
@@ -23,7 +24,7 @@ function memoryDb() {
   }; } };
 }
 
-test('environment-aware client authenticates restricted API reads from encrypted D1 credentials', async () => {
+test('environment-aware client authenticates restricted API reads from dedicated-key encrypted D1 credentials', async () => {
   const DB = memoryDb();
   const env = { DB, RANOBELIB_TOKEN_ENCRYPTION_KEY: 'factory-test-key' };
   await new RanobeLibAuthProvider(env).store({
@@ -40,21 +41,20 @@ test('environment-aware client authenticates restricted API reads from encrypted
   assert.equal(headers[0].Authorization, 'Bearer factory-access');
 });
 
-test('environment-aware client authenticates scanner reads when Telegram bot secret is the encryption fallback', async () => {
-  const DB = memoryDb();
-  const env = { DB, TELEGRAM_BOT_TOKEN: '123456:factory-telegram-secret' };
-  await new RanobeLibAuthProvider(env).store({
-    accessToken: 'fallback-access', refreshToken: 'fallback-refresh', expiresAt: '2099-01-01T00:00:00.000Z',
-  });
+test('Telegram bot secret alone never enables RanobeLib authenticated reads', async () => {
   const headers = [];
+  const env = {
+    DB: { prepare() { throw new Error('Telegram-only factory must not read encrypted credentials'); } },
+    TELEGRAM_BOT_TOKEN: '123456:factory-telegram-secret',
+  };
   const client = createRanobeLibClient(env, { fetchImpl: async (_url, init) => {
     headers.push(init.headers);
     return Response.json({ data: { scanlateStatus: { id: 1, label: 'В работе' } } });
   } });
 
-  await client.getTranslationStatus('247881--restricted');
+  await client.getTranslationStatus('247881--public');
 
-  assert.equal(headers[0].Authorization, 'Bearer fallback-access');
+  assert.equal(headers[0].Authorization, undefined);
 });
 
 test('environment-aware client keeps anonymous reads working when no key is configured', async () => {
