@@ -119,3 +119,16 @@ test('invalid refresh marks health invalid without leaking token values', async 
   assert.equal(health.state, 'invalid');
   assert.doesNotMatch(JSON.stringify(health), new RegExp(`${ACCESS}|${REFRESH}`));
 });
+
+test('existing Telegram bot secret can encrypt credentials when the dedicated RanobeLib key is absent', async () => {
+  const db = memoryDb();
+  const auth = new RanobeLibAuthProvider(
+    { DB: db, TELEGRAM_BOT_TOKEN: '123456:telegram-secret-used-only-as-key-material' },
+    { now: () => NOW },
+  );
+  const bundle = { accessToken: ACCESS, refreshToken: REFRESH, expiresAt: '2026-09-11T13:00:00.000Z' };
+  await auth.store(bundle);
+  assert.ok(db.row?.ciphertext);
+  assert.doesNotMatch(JSON.stringify(db.row), new RegExp(`${ACCESS}|${REFRESH}`));
+  assert.equal((await auth.health()).state, 'active');
+});
