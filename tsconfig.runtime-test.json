@@ -48,6 +48,7 @@
     "src/telegram-admin-stats.ts",
     "src/telegram-subscription-webhook.ts",
     "src/telegram-webhook-routing.ts",
+    "src/telegram-ranobelib-auth.ts",
     "src/telegram-fast-ack.ts",
     "src/telegram-screen-renderer.ts",
     "src/telegram-migration-trust.ts",
