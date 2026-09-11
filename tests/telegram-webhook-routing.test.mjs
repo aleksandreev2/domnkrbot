@@ -40,6 +40,9 @@ test('classifies explicit Telegram update families without DB or network state',
     [privateMessage('/stats'), 'admin-stats'],
     [privateMessage('/stats@domnekromanta_bot'), 'admin-stats'],
     [callback('stats:users'), 'admin-stats'],
+    [privateMessage('/ranobelib_auth'), 'ranobelib-auth'],
+    [privateMessage('/ranobelib_auth@domnekromanta_bot'), 'ranobelib-auth'],
+    [privateMessage('https://ranobelib.me/ru/front/auth/oauth/callback?code=abc&state=def'), 'ranobelib-auth'],
     [callback('prop:new'), 'proposal'],
     [callback('prop:view:abc'), 'proposal'],
     [privateMessage('/start'), 'proposal'],
@@ -78,6 +81,7 @@ test('production entry validates once and directly dispatches classified Telegra
   assert.match(source, /case 'membership-appeal'[\s\S]*handleChannelMembershipAppealWebhook/);
   assert.match(source, /case 'notifications'[\s\S]*handleTelegramSubscriptionWebhookRequest/);
   assert.match(source, /case 'admin-stats'[\s\S]*handleTelegramAdminStatsWebhook/);
+  assert.match(source, /case 'ranobelib-auth'[\s\S]*handleTelegramRanobeLibAuthWebhook/);
   assert.match(source, /case 'proposal'[\s\S]*withTrustedTelegramMigrations\(env\)[\s\S]*appEntry\.fetch\(request, trustedEnv[^\n]*ctx/);
   assert.match(source, /case 'generic-private-text'[\s\S]*handleChannelMembershipAppealWebhook[\s\S]*withTrustedTelegramMigrations\(env\)[\s\S]*appEntry\.fetch\(request, trustedEnv[^\n]*ctx/);
   assert.match(source, /Telegram webhook latency v2/);
