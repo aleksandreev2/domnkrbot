@@ -79,6 +79,16 @@ test('validated import returns health metadata without echoing token values', as
   assert.equal(JSON.parse(text).auth.state, 'active');
 });
 
+test('validated import uses Telegram bot secret when dedicated encryption key is absent', async () => {
+  const env = baseEnv(db());
+  delete env.RANOBELIB_TOKEN_ENCRYPTION_KEY;
+  const response = await handleRanobeLibAuthAdmin(await request('PUT', TOKEN_BUNDLE), env, {
+    fetchImpl: async () => Response.json({ data: { id: 11931299 } }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).auth.state, 'active');
+});
+
 test('malformed bundles fail without storing or exposing submitted secrets', async () => {
   const env = baseEnv(db());
   const response = await handleRanobeLibAuthAdmin(await request('PUT', {
