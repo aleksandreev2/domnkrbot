@@ -21,12 +21,14 @@ test('Workers Paid subrequest budget is explicit in the deployment source of tru
   );
 });
 
-test('RanobeLib encryption key stays secret-only without blocking anonymous fallback deploys', async () => {
+test('RanobeLib encryption key is a required secret and is never exposed as a public Worker var', async () => {
   const source = await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
   const wrangler = JSON.parse(source);
   assert.ok(wrangler.secrets?.required?.includes('TELEGRAM_BOT_TOKEN'));
-  assert.ok(!wrangler.secrets?.required?.includes('RANOBELIB_TOKEN_ENCRYPTION_KEY'));
+  assert.ok(wrangler.secrets?.required?.includes('RANOBELIB_TOKEN_ENCRYPTION_KEY'));
   assert.equal(wrangler.vars?.RANOBELIB_TOKEN_ENCRYPTION_KEY, undefined);
+  assert.match(String(wrangler.build?.command ?? ''), /npm run typecheck/);
+  assert.match(String(wrangler.build?.command ?? ''), /npm test/);
 });
 
 test('production smoke is pinned to the exact Workers Builds git revision', async () => {
