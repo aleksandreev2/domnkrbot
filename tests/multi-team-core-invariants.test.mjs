@@ -63,6 +63,57 @@ test('branch release identity is deterministic and branch-sensitive', async () =
   assert.match(a, /^branch-release:v1:/);
 });
 
+test('new team baseline does not suppress a fresh release for an already-baselined team', async () => {
+  const { computeTeamScopedScanPlan } = await scanner();
+  assert.equal(typeof computeTeamScopedScanPlan, 'function');
+
+  const plan = computeTeamScopedScanPlan({
+    translations: [
+      { teamId: 1, baselineReady: true },
+      { teamId: 2, baselineReady: false },
+    ],
+    branches: [
+      { chapterId: 542, branchKey: 'native:10', teamIds: [1] },
+      { chapterId: 100, branchKey: 'native:20', teamIds: [2] },
+      { chapterId: 543, branchKey: 'native:30', teamIds: [1, 2] },
+    ],
+    storedBranchKeys: [],
+    fetchedBranchCount: 3,
+  });
+
+  assert.deepEqual(plan.teamIdsToBaseline, [2]);
+  assert.deepEqual(plan.releasableBranches, [
+    { chapterId: 542, branchKey: 'native:10', teamIds: [1] },
+    { chapterId: 543, branchKey: 'native:30', teamIds: [1] },
+  ]);
+});
+
+test('unattributed non-empty chapter payload cannot complete a team baseline', async () => {
+  const { computeTeamScopedScanPlan } = await scanner();
+  const plan = computeTeamScopedScanPlan({
+    translations: [{ teamId: 2, baselineReady: false }],
+    branches: [],
+    storedBranchKeys: [],
+    fetchedBranchCount: 12,
+  });
+
+  assert.deepEqual(plan.teamIdsToBaseline, []);
+  assert.deepEqual(plan.releasableBranches, []);
+});
+
+test('genuinely empty title can complete an empty silent baseline', async () => {
+  const { computeTeamScopedScanPlan } = await scanner();
+  const plan = computeTeamScopedScanPlan({
+    translations: [{ teamId: 2, baselineReady: false }],
+    branches: [],
+    storedBranchKeys: [],
+    fetchedBranchCount: 0,
+  });
+
+  assert.deepEqual(plan.teamIdsToBaseline, [2]);
+  assert.deepEqual(plan.releasableBranches, []);
+});
+
 test('team discovery reconciliation only changes relationships in the team being reconciled', async () => {
   const { computeTeamDiscoveryReconciliation } = await discovery();
 
@@ -160,7 +211,8 @@ test('team discovery treats current catalog membership as active while preservin
 test('scanner keeps baseline and shadow non-delivering and uses branch-aware team mappings', async () => {
   const source = await readFile(new URL('../src/ranobelib-multi-team-scanner.ts', import.meta.url), 'utf8');
 
-  assert.match(source, /mode === 'live' && !baselineNeeded/);
+  assert.doesNotMatch(source, /const baselineNeeded = translations\.some/);
+  assert.match(source, /computeTeamScopedScanPlan/);
   assert.match(source, /getChapterBranches\(work\.book_ref\)/);
   assert.match(source, /INSERT OR IGNORE INTO ranobelib_release_teams/);
   assert.match(source, /reconcileReleaseOutboxRecipients\(env, releaseId\)/);
@@ -169,6 +221,18 @@ test('scanner keeps baseline and shadow non-delivering and uses branch-aware tea
     source,
     /FROM incoming\s+WHERE 1 = 1\s+ON CONFLICT\(book_ref, chapter_id, branch_key\) DO UPDATE SET/i,
   );
+});
+
+test('all effective-demand mutation paths refresh authoritative work demand', async () => {
+  const [onboarding, discoverySource, registry] = await Promise.all([
+    readFile(new URL('../src/telegram-team-onboarding.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/ranobelib-multi-team-discovery.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/ranobelib-team-registry.ts', import.meta.url), 'utf8'),
+  ]);
+
+  assert.match(onboarding, /refreshAllWorkNotificationDemand/);
+  assert.match(discoverySource, /refreshAllWorkNotificationDemand/);
+  assert.match(registry, /refreshAllWorkNotificationDemand/);
 });
 
 test('team-aware demand unions eligible users and preserves delivered history during reconciliation', async () => {
