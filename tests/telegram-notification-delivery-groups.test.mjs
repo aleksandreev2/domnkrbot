@@ -89,7 +89,7 @@ test('claimed release rows aggregate by user and title and sum chapter counts', 
   assert.equal(book.lastNumber, '13');
 });
 
-test('aggregated range is hidden when chapter continuity cannot be proven', async () => {
+test('non-contiguous chapter ranges are split instead of being presented as one aggregate', async () => {
   const delivery = await loadDelivery();
   const rows = [
     {
@@ -104,11 +104,13 @@ test('aggregated range is hidden when chapter continuity cannot be proven', asyn
     },
   ];
 
-  const [group] = delivery.aggregateClaimedDeliveryRows(rows);
-  assert.ok(group);
-  assert.equal(group.chapterCount, 5);
-  assert.equal(group.firstNumber, null);
-  assert.equal(group.lastNumber, null);
+  const groups = delivery.aggregateClaimedDeliveryRows(rows);
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map((group) => group.chapterCount), [3, 2]);
+  assert.equal(groups[0].firstNumber, '101');
+  assert.equal(groups[0].lastNumber, '103');
+  assert.equal(groups[1].firstNumber, '105');
+  assert.equal(groups[1].lastNumber, '106');
 });
 
 test('delivery claim SQL limits ready user-title groups instead of individual outbox rows', () => {
