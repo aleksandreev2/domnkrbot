@@ -7,9 +7,9 @@ async function loadUi() {
 
 const buttons = (payload) => payload.reply_markup.inline_keyboard.flat();
 
-test('root Telegram menu keeps Dom Nekromanta as the owner brand and exposes collaborations', async () => {
+test('partner-aware root Telegram menu keeps Dom Nekromanta as the owner brand and exposes collaborations', async () => {
   const { buildMainMenu } = await loadUi();
-  const payload = buildMainMenu('https://bot.example/');
+  const payload = buildMainMenu('https://bot.example/', { collaborations: true });
   assert.match(payload.text, /<b>Дом Некроманта<\/b>/);
   assert.match(payload.text, /Официальный бот команды «Дом Некроманта»/);
   assert.match(payload.text, /Переводы, уведомления и предложения новых новелл/);
@@ -21,6 +21,13 @@ test('root Telegram menu keeps Dom Nekromanta as the owner brand and exposes col
   assert.ok(flat.some((button) => button.text === '📚 Предложить новеллу' && button.callback_data === 'prop:new'));
   assert.ok(flat.some((button) => button.text === '🗂 Мои заявки' && button.callback_data === 'prop:mine'));
   assert.ok(flat.some((button) => button.text === '🌐 Сайт' && button.url === 'https://bot.example/'));
+});
+
+test('legacy-safe root menu does not expose a dead collaboration callback while multi-team UI is disabled', async () => {
+  const { buildMainMenu } = await loadUi();
+  const payload = buildMainMenu('https://bot.example/');
+  const flat = buttons(payload);
+  assert.equal(flat.some((button) => button.callback_data === 'subs:mt:partners:0'), false);
 });
 
 test('shared navigation primitives keep Back, Home, and destructive actions semantically distinct', async () => {
