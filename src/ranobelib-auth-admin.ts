@@ -48,7 +48,7 @@ export async function handleRanobeLibAuthAdmin(
     }
     const bundle = parseBundle(body);
     if (!bundle) return json({ error: 'Invalid RanobeLib token bundle.' }, 400);
-    if (!env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim()) {
+    if (!env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim() && !env.TELEGRAM_BOT_TOKEN?.trim()) {
       return json({ error: 'RanobeLib credential encryption is unavailable.' }, 503);
     }
     try {
