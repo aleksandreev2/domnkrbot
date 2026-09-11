@@ -481,7 +481,7 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
       SUM(CASE WHEN lifecycle_state='hidden' THEN 1 ELSE 0 END) AS teams_hidden,
       SUM(CASE WHEN lifecycle_state='paused' THEN 1 ELSE 0 END) AS teams_paused,
       SUM(CASE WHEN lifecycle_state='error' THEN 1 ELSE 0 END) AS teams_error,
-      SUM(CASE WHEN lifecycle_state='error' OR (last_sync_error IS NOT NULL AND TRIM(last_sync_error)<>'' THEN 1 ELSE 0 END) AS teams_sync_errors,
+      SUM(CASE WHEN lifecycle_state='error' OR (last_sync_error IS NOT NULL AND TRIM(last_sync_error)<>'' ) THEN 1 ELSE 0 END) AS teams_sync_errors,
       SUM(CASE WHEN lifecycle_state IN ('published','hidden') AND (last_sync_at IS NULL OR last_sync_at < datetime('now','-6 hours')) THEN 1 ELSE 0 END) AS teams_stale,
       (SELECT COUNT(*) FROM ranobelib_chapter_branches WHERE identity_confidence='native') AS branches_native,
       (SELECT COUNT(*) FROM ranobelib_chapter_branches WHERE identity_confidence='fallback') AS branches_fallback,
