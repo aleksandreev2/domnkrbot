@@ -1,6 +1,10 @@
 # Telegram bot token from @BotFather. Keep it secret.
 TELEGRAM_BOT_TOKEN=
 
+# Dedicated random secret used only to encrypt RanobeLib credentials at rest.
+# Do not reuse TELEGRAM_BOT_TOKEN. Example: openssl rand -hex 32
+RANOBELIB_TOKEN_ENCRYPTION_KEY=
+
 # Generate a random webhook secret, e.g. openssl rand -hex 32
 TELEGRAM_WEBHOOK_SECRET=
 
