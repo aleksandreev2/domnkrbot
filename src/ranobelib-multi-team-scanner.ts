@@ -216,7 +216,7 @@ export async function selectDueMultiTeamWorks(
           WHERE bootstrap.book_ref = t.book_ref
             AND bootstrap.presence_state = 'active'
             AND bootstrap_team.lifecycle_state IN ('hidden','published')
-            AND (bootstrap.baseline_ready = 0 OR bootstrap.completion_pending = 1)
+            AND bootstrap.completion_pending = 1
         )
         OR t.next_check_at IS NULL
         OR t.next_check_at <= CURRENT_TIMESTAMP
