@@ -216,7 +216,7 @@ test('scanner keeps baseline and shadow non-delivering and uses branch-aware tea
   assert.match(source, /getChapterBranches\(work\.book_ref\)/);
   assert.match(source, /INSERT OR IGNORE INTO ranobelib_release_teams/);
   assert.match(source, /reconcileReleaseOutboxRecipients\(env, releaseId\)/);
-  assert.match(source, /baseline and shadow modes intentionally advance/i);
+  assert.match(source, /if \(mode === 'live'\)[\s\S]*persistBranchRelease\(env, work, candidate\)/);
   assert.match(
     source,
     /FROM incoming\s+WHERE 1 = 1\s+ON CONFLICT\(book_ref, chapter_id, branch_key\) DO UPDATE SET/i,
