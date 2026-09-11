@@ -1,3 +1,4 @@
+import { buildTelegramDeliveryStatsQuery } from './telegram-admin-delivery-stats.js';
 import { renderTelegramScreen, type TelegramScreenExecutionContext } from './telegram-screen-renderer.js';
 
 type D1Row = Record<string, unknown>;
@@ -325,16 +326,7 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
         SELECT COALESCE(SUM(COALESCE(notification_subscriber_count,0)),0) FROM ranobelib_titles
       ) END AS subscribers
     FROM rollout`),
-    db.prepare(`SELECT
-      SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
-      SUM(CASE WHEN status='retry' THEN 1 ELSE 0 END) AS retry,
-      SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent,
-      SUM(CASE WHEN status='disabled' THEN 1 ELSE 0 END) AS disabled,
-      SUM(CASE WHEN status='sent' AND delivered_at >= datetime('now','-24 hours') THEN 1 ELSE 0 END) AS sent_24h,
-      SUM(CASE WHEN status='sent' AND delivered_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) AS sent_7d,
-      SUM(CASE WHEN status IN ('pending','retry') AND available_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS due_now,
-      CAST(COALESCE((julianday('now') - julianday(MIN(CASE WHEN status IN ('pending','retry') AND available_at <= CURRENT_TIMESTAMP THEN available_at END))) * 1440,0) AS INTEGER) AS oldest_due_minutes
-      FROM ranobelib_notification_outbox`),
+    db.prepare(buildTelegramDeliveryStatsQuery()),
     db.prepare(`SELECT
       COUNT(*) AS total,
       SUM(CASE WHEN p.created_at >= datetime('now','-24 hours') THEN 1 ELSE 0 END) AS new_24h,
@@ -489,7 +481,7 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
       SUM(CASE WHEN lifecycle_state='hidden' THEN 1 ELSE 0 END) AS teams_hidden,
       SUM(CASE WHEN lifecycle_state='paused' THEN 1 ELSE 0 END) AS teams_paused,
       SUM(CASE WHEN lifecycle_state='error' THEN 1 ELSE 0 END) AS teams_error,
-      SUM(CASE WHEN lifecycle_state='error' OR (last_sync_error IS NOT NULL AND TRIM(last_sync_error)<>'') THEN 1 ELSE 0 END) AS teams_sync_errors,
+      SUM(CASE WHEN lifecycle_state='error' OR (last_sync_error IS NOT NULL AND TRIM(last_sync_error)<>'' THEN 1 ELSE 0 END) AS teams_sync_errors,
       SUM(CASE WHEN lifecycle_state IN ('published','hidden') AND (last_sync_at IS NULL OR last_sync_at < datetime('now','-6 hours')) THEN 1 ELSE 0 END) AS teams_stale,
       (SELECT COUNT(*) FROM ranobelib_chapter_branches WHERE identity_confidence='native') AS branches_native,
       (SELECT COUNT(*) FROM ranobelib_chapter_branches WHERE identity_confidence='fallback') AS branches_fallback,
@@ -555,9 +547,16 @@ function buildStatsScreen(section: StatsSection, s: StatsSnapshot) {
     ], back);
   }
   if (section === 'delivery') return screen('📦 Доставка уведомлений', [
-    line('Pending', s.delivery.pending), line('Retry', s.delivery.retry), line('Sent', s.delivery.sent), line('Disabled', s.delivery.disabled),
-    line('Отправлено за 24 ч', s.delivery.sent_24h), line('Отправлено за 7 дней', s.delivery.sent_7d), line('Готовы к отправке сейчас', s.delivery.due_now),
-    `Старейшее ожидающее: ${duration(s.delivery.oldest_due_minutes)}`,
+    line('Pending rows', s.delivery.pending), line('Retry rows', s.delivery.retry), line('Sent', s.delivery.sent), line('Disabled', s.delivery.disabled),
+    '', '<b>Состояние очереди по группам</b>',
+    line('Готовы прямо сейчас', s.delivery.ready_now),
+    line('Ждут coalescing', s.delivery.coalescing),
+    line('Ждут размер стака', s.delivery.stack_waiting),
+    line('Retry заблокирован до available_at', s.delivery.retry_blocked),
+    line('Удерживаются lease', s.delivery.in_lease),
+    line('Устарели / подписка больше не подходит', s.delivery.stale_ineligible),
+    `Возраст старейшей реально готовой: ${duration(s.delivery.oldest_ready_minutes)}`,
+    '', line('Отправлено за 24 ч', s.delivery.sent_24h), line('Отправлено за 7 дней', s.delivery.sent_7d),
   ], back);
   if (section === 'proposals') return screen('📝 Заявки', [
     line('Всего', s.proposals.total), line('Новые за 24 ч', s.proposals.new_24h), line('Новые за 7 дней', s.proposals.new_7d),
@@ -590,7 +589,7 @@ function buildStatsScreen(section: StatsSection, s: StatsSnapshot) {
     `🔔 Получают уведомления: <b>${n(s.subscriptions.users_enabled)}</b>`,
     `📚 Переводы: <b>${n(s.translations.active)}</b> активных / <b>${n(s.translations.completed)}</b> завершённых / <b>${n(s.translations.archived)}</b> архивных`,
     `🧩 Команды: <b>${n(s.multiTeam.teams_published)}</b> published / <b>${n(s.multiTeam.teams_hidden)}</b> hidden / <b>${n(s.multiTeam.teams_paused)}</b> paused / <b>${n(s.multiTeam.teams_error)}</b> error · stale <b>${n(s.multiTeam.teams_stale)}</b> · sync errors <b>${n(s.multiTeam.teams_sync_errors)}</b>`,
-    `📦 Очередь: <b>${n(s.delivery.due_now)}</b> готово / <b>${n(s.delivery.retry)}</b> retry`,
+    `📦 Очередь: <b>${n(s.delivery.ready_now)}</b> реально готово / <b>${n(s.delivery.retry_blocked)}</b> retry blocked / <b>${n(s.delivery.in_lease)}</b> lease`,
     `📝 Заявки: <b>${n(s.proposals.total)}</b>  (+${n(s.proposals.new_24h)} за 24 ч)`,
     `📖 Уникальных читателей: <b>${n(s.publications.unique_readers)}</b>`,
     `🛡 Blacklist: <b>${n(s.access.blacklisted)}</b> / апелляций: <b>${n(s.access.appeals_pending)}</b>`,
