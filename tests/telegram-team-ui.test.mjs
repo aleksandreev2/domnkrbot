@@ -7,6 +7,7 @@ import {
   buildTeamTitleCard,
   buildTeamTranslationsScreen,
   buildWorkSearchResults,
+  buildWorkTranslationPicker,
   parseTeamNotificationCallback,
 } from '../dist-runtime/telegram-team-notification-ux.js';
 import {
@@ -143,6 +144,49 @@ test('team-title card shows translator identity, inherited whole-team state and 
   const callbacks = payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
   assert.ok(callbacks.includes('subs:mt:title:toggle:7:123:team:0'));
   assert.ok(callbacks.includes('subs:mt:title:mode:7:123:team:0'));
+});
+
+test('title card exposes other translations only when alternatives exist', () => {
+  const payload = buildTeamTitleCard({
+    translation: title,
+    deliveryLabel: '⚡ Мгновенно',
+    inheritedDelivery: true,
+    origin: 'team',
+    page: 0,
+    hasAlternatives: true,
+  });
+  const alternate = payload.reply_markup.inline_keyboard.flat().find((button) => button.text === '👥 Другие переводы этой новеллы');
+  assert.equal(alternate?.callback_data, 'subs:mt:alts:123:0');
+
+  const single = buildTeamTitleCard({
+    translation: title,
+    deliveryLabel: '⚡ Мгновенно',
+    inheritedDelivery: true,
+    origin: 'team',
+    page: 0,
+    hasAlternatives: false,
+  });
+  assert.equal(single.reply_markup.inline_keyboard.flat().some((button) => button.text === '👥 Другие переводы этой новеллы'), false);
+});
+
+test('alternate translation picker keeps navigation inside the translation picker', () => {
+  const payload = buildWorkTranslationPicker({
+    group: {
+      bookRef: title.bookRef,
+      ranobelibId: 123,
+      title: title.title,
+      translations: [title, { ...title, teamId: 8, teamName: 'Team Eight', enabled: false, enabledReason: 'none' }],
+    },
+    page: 0,
+    origin: 'alt',
+  });
+  const callbacks = payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
+  assert.ok(callbacks.includes('subs:mt:title:7:123:alt:0'));
+  assert.ok(callbacks.includes('subs:mt:home'));
+  assert.deepEqual(parseTeamNotificationCallback('subs:mt:alts:123:0'), { kind: 'alternates', titleId: 123, page: 0 });
+  assert.deepEqual(parseTeamNotificationCallback('subs:mt:title:7:123:alt:0'), {
+    kind: 'title', teamId: 7, titleId: 123, origin: 'alt', page: 0,
+  });
 });
 
 test('completed team title preserves completed-list origin for card navigation', () => {
