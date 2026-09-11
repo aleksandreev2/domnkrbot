@@ -169,7 +169,9 @@ test('team chapter history discovers auth-hidden titles with exact team attribut
   const requests = [];
 
   const chapter = (id, ref, title, teamId = 64306) => ({
-    teams: [{ id: teamId, slug_url: teamId === 64306 ? teamRef : `${teamId}--other-team` }],
+    chapters: [{
+      teams: [{ id: teamId, slug_url: teamId === 64306 ? teamRef : `${teamId}--other-team` }],
+    }],
     manga: {
       id,
       slug_url: ref,

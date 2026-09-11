@@ -104,10 +104,15 @@ export class RanobeLibClient {
 
       for (const raw of Array.isArray(response.data) ? response.data : []) {
         if (!isRecord(raw)) continue;
-        const teams = Array.isArray(raw.teams) ? raw.teams : [];
-        if (!teams.some((rawTeam) => (
-          isRecord(rawTeam) && teamRecordMatchesRef(rawTeam, normalizedTeamRef, teamId)
-        ))) continue;
+        const chapters = Array.isArray(raw.chapters) ? raw.chapters : [];
+        const attributed = chapters.some((chapter) => {
+          if (!isRecord(chapter)) return false;
+          const teams = Array.isArray(chapter.teams) ? chapter.teams : [];
+          return teams.some((rawTeam) => (
+            isRecord(rawTeam) && teamRecordMatchesRef(rawTeam, normalizedTeamRef, teamId)
+          ));
+        });
+        if (!attributed) continue;
 
         const media = isRecord(raw.manga) ? raw.manga : (isRecord(raw.media) ? raw.media : null);
         const book = normalizeTeamBook(media, this.siteBaseUrl);
