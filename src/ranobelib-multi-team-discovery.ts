@@ -1,4 +1,5 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
+import { createRanobeLibClient } from './ranobelib-client-factory.js';
 import type { RanobeLibTeamBookRef } from './integrations/ranobelib/types.js';
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
 import {
@@ -8,7 +9,7 @@ import {
   type RanobeLibTeamRecord,
 } from './ranobelib-team-registry.js';
 
-export type MultiTeamDiscoveryEnv = { DB: D1DatabaseLike };
+export type MultiTeamDiscoveryEnv = { DB: D1DatabaseLike; RANOBELIB_TOKEN_ENCRYPTION_KEY?: string };
 
 export type TeamDiscoveryResult = {
   teamId: number;
@@ -96,7 +97,7 @@ export async function discoverRegisteredRanobeLibTeams(
   // cannot prevent the remaining teams from refreshing.
   for (const team of teams) {
     try {
-      const client = options.clientFactory?.(team) ?? new RanobeLibClient();
+      const client = options.clientFactory?.(team) ?? createRanobeLibClient(env);
       const result = await discoverOneRegisteredTeam(env, team, client);
       teamsSucceeded += 1;
       discoveredRelationships += result.discovered;
@@ -120,7 +121,7 @@ export async function discoverRegisteredRanobeLibTeams(
 export async function discoverOneRegisteredTeam(
   env: MultiTeamDiscoveryEnv,
   team: RanobeLibTeamRecord,
-  client: TeamDiscoveryClient = new RanobeLibClient(),
+  client: TeamDiscoveryClient = createRanobeLibClient(env),
 ): Promise<TeamDiscoveryResult> {
   if (team.lifecycleState === 'paused') {
     return { teamId: team.id, discovered: 0, activated: 0, dormant: 0, created: 0 };

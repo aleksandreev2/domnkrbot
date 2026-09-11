@@ -1,4 +1,5 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
+import { createRanobeLibClient } from './ranobelib-client-factory.js';
 import type { RanobeLibTeamBookRef } from './integrations/ranobelib/types.js';
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
 
@@ -11,6 +12,7 @@ const STATUS_REFRESH_CONCURRENCY = 4;
 type DiscoveryEnv = {
   DB: D1DatabaseLike;
   RANOBELIB_TEAM_REF?: string;
+  RANOBELIB_TOKEN_ENCRYPTION_KEY?: string;
 };
 
 type StoredTranslationStatus = {
@@ -29,7 +31,7 @@ export type RanobeLibDiscoveryResult = {
 
 export async function discoverRanobeLibTeam(env: DiscoveryEnv): Promise<RanobeLibDiscoveryResult> {
   const teamRef = env.RANOBELIB_TEAM_REF?.trim() || DEFAULT_TEAM_REF;
-  const client = new RanobeLibClient();
+  const client = createRanobeLibClient(env);
   const books = await client.discoverTeamBooks(teamRef);
 
   // Never collapse an existing catalog because of a transient upstream or parsing failure.

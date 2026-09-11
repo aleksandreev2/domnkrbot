@@ -1,0 +1,48 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { RanobeLibAuthProvider } from '../dist-runtime/ranobelib-auth.js';
+import { createRanobeLibClient } from '../dist-runtime/ranobelib-client-factory.js';
+
+function memoryDb() {
+  let row = null;
+  return { prepare(sql) { let values = []; return {
+    bind(...next) { values = next; return this; },
+    async first() { return /SELECT/i.test(sql) && row ? { ...row } : null; },
+    async all() { return { results: [] }; },
+    async run() {
+      if (/INSERT INTO ranobelib_auth_credentials/i.test(sql)) row = {
+        ciphertext: values[0], iv: values[1], key_version: 1, access_expires_at: values[2],
+        state: values[3], last_validated_at: values[4], last_refreshed_at: values[5],
+        last_error: values[6], updated_at: '2026-09-11T12:00:00.000Z',
+      };
+      return { success: true };
+    },
+  }; } };
+}
+
+test('environment-aware client authenticates restricted API reads from encrypted D1 credentials', async () => {
+  const DB = memoryDb();
+  const env = { DB, RANOBELIB_TOKEN_ENCRYPTION_KEY: 'factory-test-key' };
+  await new RanobeLibAuthProvider(env).store({
+    accessToken: 'factory-access', refreshToken: 'factory-refresh', expiresAt: '2099-01-01T00:00:00.000Z',
+  });
+  const headers = [];
+  const client = createRanobeLibClient(env, { fetchImpl: async (_url, init) => {
+    headers.push(init.headers);
+    return Response.json({ data: { scanlateStatus: { id: 1, label: 'В работе' } } });
+  } });
+
+  await client.getTranslationStatus('247881--restricted');
+
+  assert.equal(headers[0].Authorization, 'Bearer factory-access');
+});
+
+test('environment-aware client keeps anonymous reads working when no key is configured', async () => {
+  const headers = [];
+  const client = createRanobeLibClient({ DB: memoryDb() }, { fetchImpl: async (_url, init) => {
+    headers.push(init.headers);
+    return Response.json({ data: { scanlateStatus: null } });
+  } });
+  await client.getTranslationStatus('1--public');
+  assert.equal(headers[0].Authorization, undefined);
+});

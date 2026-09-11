@@ -8,6 +8,11 @@ export interface RanobeLibClientOptions {
   siteBaseUrl?: string;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
+  authProvider?: RanobeLibAuthorizationProvider;
+}
+
+export interface RanobeLibAuthorizationProvider {
+  getAccessToken(options?: { forceRefresh?: boolean }): Promise<string | null>;
 }
 
 export interface RanobeLibChapterOptions {
@@ -26,6 +31,7 @@ export class RanobeLibClient {
   private readonly siteBaseUrl: string;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
+  private readonly authProvider: RanobeLibAuthorizationProvider | null;
   private discoveredTeamRef: string | null = null;
 
   constructor(options: RanobeLibClientOptions = {}) {
@@ -33,6 +39,7 @@ export class RanobeLibClient {
     this.siteBaseUrl = stripTrailingSlash(options.siteBaseUrl ?? 'https://ranobelib.me');
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
+    this.authProvider = options.authProvider ?? null;
   }
 
   async discoverTeamBooks(teamRef: string): Promise<RanobeLibTeamBookRef[]> {
@@ -240,14 +247,16 @@ export class RanobeLibClient {
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
     try {
-      const response = await this.fetchImpl(url, {
-        headers: {
-          accept,
-          'accept-language': 'ru,en;q=0.7',
-          'Site-Id': '3',
-        },
-        signal: controller.signal,
-      });
+      const canAuthorize = new URL(url).origin === 'https://api.cdnlibs.org';
+      const accessToken = canAuthorize
+        ? await this.authProvider?.getAccessToken().catch(() => null) ?? null
+        : null;
+      let response = await this.fetchRead(url, accept, controller.signal, accessToken);
+
+      if (response.status === 401 && accessToken && this.authProvider) {
+        const refreshedToken = await this.authProvider.getAccessToken({ forceRefresh: true });
+        if (refreshedToken) response = await this.fetchRead(url, accept, controller.signal, refreshedToken);
+      }
 
       if (!response.ok) {
         throw new Error(`RanobeLib request failed: ${response.status} ${response.statusText} (${url})`);
@@ -257,6 +266,21 @@ export class RanobeLibClient {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private fetchRead(url: string, accept: string, signal: AbortSignal, accessToken: string | null): Promise<Response> {
+    const headers: Record<string, string> = {
+      accept,
+      'accept-language': 'ru,en;q=0.7',
+      'Site-Id': '3',
+    };
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    return this.fetchImpl(url, {
+      method: 'GET',
+      headers,
+      ...(accessToken ? { redirect: 'manual' as const } : {}),
+      signal,
+    });
   }
 }
 

@@ -6,6 +6,7 @@
   "scripts": {
     "postinstall": "node scripts/prepare-vendor.mjs",
     "prepare:vendor": "node scripts/prepare-vendor.mjs",
+    "pretest": "npm run build:runtime-test && node --test tests/admin-ranobelib-auth-ui.test.mjs tests/ranobelib-auth.test.mjs tests/ranobelib-auth-admin.test.mjs tests/ranobelib-client-factory.test.mjs",
     "typecheck": "tsc --noEmit",
     "build:spike": "tsc -p tsconfig.build.json",
     "build:runtime-test": "tsc -p tsconfig.runtime-test.json",

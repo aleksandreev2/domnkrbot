@@ -1,4 +1,5 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
+import { createRanobeLibClient } from './ranobelib-client-factory.js';
 import type { RanobeLibChapterBranch } from './integrations/ranobelib/types.js';
 import type { D1DatabaseLike, D1PreparedStatementLike } from './ranobelib-runtime.js';
 import { reconcileReleaseOutboxRecipients } from './multi-team-notification-demand.js';
@@ -23,7 +24,7 @@ export type MultiTeamScanResult = {
   errors: string[];
 };
 
-type MultiTeamScannerEnv = { DB: D1DatabaseLike };
+type MultiTeamScannerEnv = { DB: D1DatabaseLike; RANOBELIB_TOKEN_ENCRYPTION_KEY?: string };
 
 type DueWork = {
   book_ref: string;
@@ -71,7 +72,7 @@ export async function scanDueMultiTeamWorks(
   const selected = await selectDueMultiTeamWorks(env, limit, scanClass);
   if (selected.length === 0) return emptyResult(0);
 
-  const client = options.client ?? new RanobeLibClient();
+  const client = options.client ?? createRanobeLibClient(env);
   const now = options.now ?? new Date();
   const outcomes = await mapWithConcurrency(selected, CONCURRENCY, async (work) => {
     try {

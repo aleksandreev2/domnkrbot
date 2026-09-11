@@ -185,6 +185,60 @@ test('default fetch is invoked as a plain function for Cloudflare Workers compat
   }
 });
 
+test('authorization is attached only to exact RanobeLib API GET requests', async () => {
+  const seen = [];
+  const authProvider = { async getAccessToken() { return 'restricted-access'; } };
+  const fetchImpl = async (url, init) => {
+    seen.push({ url: String(url), init });
+    if (String(url).includes('/team/')) return new Response('<html></html>', { status: 200 });
+    return Response.json({ data: { scanlateStatus: { id: 1, label: 'В работе' } } });
+  };
+  const exact = new RanobeLibClient({ fetchImpl, authProvider });
+  await exact.getTranslationStatus('1--book');
+  await exact.discoverTeamPageBooks('11969--dom-nekromanta');
+  const lookalike = new RanobeLibClient({
+    apiBaseUrl: 'https://api.cdnlibs.org.evil.test/api', fetchImpl, authProvider,
+  });
+  await lookalike.getTranslationStatus('1--book');
+
+  assert.equal(seen[0].init.headers.Authorization, 'Bearer restricted-access');
+  assert.equal(seen[0].init.redirect, 'manual');
+  assert.equal(seen[1].init.headers.Authorization, undefined);
+  assert.equal(seen[2].init.headers.Authorization, undefined);
+});
+
+test('authenticated 401 forces one refresh and retries exactly once', async () => {
+  const forced = [];
+  const authProvider = {
+    async getAccessToken(options = {}) {
+      forced.push(options.forceRefresh === true);
+      return options.forceRefresh ? 'refreshed-access' : 'stale-access';
+    },
+  };
+  const requests = [];
+  const client = new RanobeLibClient({ authProvider, fetchImpl: async (_url, init) => {
+    requests.push(init.headers.Authorization);
+    if (requests.length === 1) return new Response('unauthorized', { status: 401 });
+    return Response.json({ data: { scanlateStatus: { id: 1, label: 'В работе' } } });
+  } });
+
+  const status = await client.getTranslationStatus('1--book');
+
+  assert.equal(status.label, 'В работе');
+  assert.deepEqual(forced, [false, true]);
+  assert.deepEqual(requests, ['Bearer stale-access', 'Bearer refreshed-access']);
+});
+
+test('authenticated 401 retry never loops after a second 401', async () => {
+  let requests = 0;
+  const client = new RanobeLibClient({
+    authProvider: { async getAccessToken() { return 'still-invalid'; } },
+    fetchImpl: async () => { requests += 1; return new Response('unauthorized', { status: 401 }); },
+  });
+  await assert.rejects(() => client.getTranslationStatus('1--book'), /401/);
+  assert.equal(requests, 2);
+});
+
 test('production scanner uses the Paid bounded batch and concurrency instead of the obsolete Free sync setting', () => {
   const wrangler = JSON.parse(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
   const scanner = readFileSync(new URL('../src/ranobelib-fast-scanner.ts', import.meta.url), 'utf8');

@@ -20,3 +20,10 @@ test('Workers Paid subrequest budget is explicit in the deployment source of tru
     'production must not depend on an implicit or dashboard-only subrequest limit',
   );
 });
+
+test('production declares the RanobeLib encryption key as a required Worker secret', async () => {
+  const source = await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+  const wrangler = JSON.parse(source);
+  assert.ok(wrangler.secrets?.required?.includes('RANOBELIB_TOKEN_ENCRYPTION_KEY'));
+  assert.equal(wrangler.vars?.RANOBELIB_TOKEN_ENCRYPTION_KEY, undefined);
+});

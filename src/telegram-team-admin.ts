@@ -1,4 +1,5 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
+import { createRanobeLibClient } from './ranobelib-client-factory.js';
 import { formatTeamAwareReleaseNotification } from './multi-team-notification-render.js';
 import {
   getMultiTeamRollout,
@@ -23,6 +24,7 @@ export type TelegramTeamAdminEnv = {
   DB: D1DatabaseLike;
   TELEGRAM_BOT_TOKEN?: string;
   ADMIN_TELEGRAM_IDS?: string;
+  RANOBELIB_TOKEN_ENCRYPTION_KEY?: string;
 };
 
 type TeamAdminUpdate = {
@@ -299,7 +301,7 @@ export async function handleTelegramTeamAdmin(
       return true;
     }
     try {
-      const books = await new RanobeLibClient().discoverTeamBooks(parsed.ranobelibTeamRef);
+      const books = await createRanobeLibClient(env).discoverTeamBooks(parsed.ranobelibTeamRef);
       if (!books.length) throw new Error('команда не вернула ни одной новеллы');
       const displayName = humanizeTeamRef(parsed.ranobelibTeamRef);
       await setAdminInput(env, String(userId), {
@@ -538,7 +540,7 @@ async function sendTeamAdminTestNotification(
   chatId: number,
   team: RanobeLibTeamRecord,
 ): Promise<void> {
-  const preview = await loadTeamAdminNotificationPreview(env.DB, team);
+  const preview = await loadTeamAdminNotificationPreview(env.DB, team, createRanobeLibClient(env));
   await sendPayload(env, chatId, buildTeamAdminTestNotificationPayload(preview));
 }
 

@@ -1,4 +1,5 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
+import { createRanobeLibClient } from './ranobelib-client-factory.js';
 import {
   detectRecentBootstrapReleaseCandidates,
   detectReleaseDelta,
@@ -18,6 +19,7 @@ const DEFAULT_TEAM_REF = '11969--dom-nekromanta';
 type ScannerEnv = {
   DB: D1DatabaseLike;
   RANOBELIB_TEAM_REF?: string;
+  RANOBELIB_TOKEN_ENCRYPTION_KEY?: string;
 };
 
 export type DueTitle = {
@@ -153,7 +155,7 @@ async function scanSelectedTitles(
 ): Promise<FastScanResult> {
   if (!selected.length) return { selected: 0, succeeded: 0, failed: 0, newReleases: 0, errors: [] };
 
-  const client = new RanobeLibClient();
+  const client = createRanobeLibClient(env);
   const teamRef = env.RANOBELIB_TEAM_REF?.trim() || DEFAULT_TEAM_REF;
 
   // Workers Paid gives this invocation far more subrequest headroom, while the platform still

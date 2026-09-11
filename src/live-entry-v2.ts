@@ -40,6 +40,7 @@ import {
   scanIdleRanobeLibTitles,
 } from './ranobelib-fast-scanner.js';
 import { getRanobeLibHome } from './ranobelib-runtime.js';
+import { handleRanobeLibAuthAdmin, type RanobeLibAuthAdminEnv } from './ranobelib-auth-admin.js';
 import { handleTelegramAdminStatsWebhook, type TelegramAdminStatsEnv } from './telegram-admin-stats.js';
 import { createTelegramLatencyTiming, type TelegramLatencyTiming } from './telegram-latency-timing.js';
 import { withTrustedTelegramMigrations } from './telegram-migration-trust.js';
@@ -82,6 +83,7 @@ type Env = PublicationCommentGateEnv
   & TelegramAdminStatsEnv
   & ChannelMembershipEnv
   & NotificationDeliveryEnv
+  & RanobeLibAuthAdminEnv
   & {
     RANOBELIB_TEAM_REF?: string;
     NOTIFICATION_QUEUE?: QueueProducerLike;
@@ -138,6 +140,9 @@ function timedTelegramContext(
 export default {
   async fetch(request: Request, env: Env, ctx: CommentGateExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    const ranobelibAuthAdmin = await handleRanobeLibAuthAdmin(request, env);
+    if (ranobelibAuthAdmin) return ranobelibAuthAdmin;
 
     if (request.method === 'POST' && url.pathname === '/telegram/webhook') {
       const expectedSecret = env.TELEGRAM_WEBHOOK_SECRET?.trim() ?? '';

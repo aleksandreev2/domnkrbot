@@ -16,6 +16,10 @@ async function deliveryScopeSql() {
   return readFile(new URL('../migrations/0026_multi_team_delivery_scope.sql', import.meta.url), 'utf8');
 }
 
+async function ranobelibAuthSql() {
+  return readFile(new URL('../migrations/0027_ranobelib_auth_credentials.sql', import.meta.url), 'utf8');
+}
+
 test('0023 is additive and keeps the legacy delivery path available for rollback', async () => {
   const sql = await migrationSql();
   assert.doesNotMatch(sql, /\bDROP\s+(?:TABLE|COLUMN|INDEX|TRIGGER)\b/i);
@@ -103,4 +107,20 @@ test('0026 avoids data-dependent LIKE/GLOB patterns when matching branch-release
   assert.doesNotMatch(sql, /\b(?:LIKE|GLOB)\b/i);
   assert.match(sql, /substr\(id, 1, length\('branch-release:v1:' \|\| book_ref \|\| ':'\)\) = 'branch-release:v1:' \|\| book_ref \|\| ':'/i);
   assert.match(sql, /substr\(NEW\.id, 1, length\('branch-release:v1:' \|\| NEW\.book_ref \|\| ':'\)\) = 'branch-release:v1:' \|\| NEW\.book_ref \|\| ':'/i);
+});
+
+test('0027 stores exactly one encrypted RanobeLib credential bundle without plaintext tokens', async () => {
+  const sql = normalize(await ranobelibAuthSql());
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS ranobelib_auth_credentials/i);
+  assert.match(sql, /singleton_id INTEGER PRIMARY KEY CHECK \(singleton_id = 1\)/i);
+  assert.match(sql, /ciphertext TEXT NOT NULL/i);
+  assert.match(sql, /iv TEXT NOT NULL/i);
+  assert.match(sql, /key_version INTEGER NOT NULL DEFAULT 1/i);
+  assert.match(sql, /access_expires_at TEXT NOT NULL/i);
+  assert.match(sql, /state TEXT NOT NULL CHECK \(state IN \('active', 'expired', 'invalid'\)\)/i);
+  assert.match(sql, /last_validated_at TEXT/i);
+  assert.match(sql, /last_refreshed_at TEXT/i);
+  assert.match(sql, /last_error TEXT/i);
+  assert.doesNotMatch(sql, /\baccess_token\b|\brefresh_token\b/i);
+  assert.doesNotMatch(sql, /\b(?:DROP|DELETE|ALTER)\b/i);
 });
