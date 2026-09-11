@@ -18,6 +18,7 @@ import { formatReleaseNotification } from './telegram-subscriptions.js';
 import { formatTranslationCompletionNotification } from './telegram-translation-completion.js';
 
 const CLAIM_LEASE_MINUTES = 10;
+const INSTANT_COALESCE_SECONDS = 30;
 
 export type MultiTeamNotificationDeliveryEnv = NotificationDeliveryEnv;
 
@@ -150,7 +151,7 @@ async function selectReadyMultiTeamDeliveryGroups(
         AND (
           eligible=0
           OR translation_completed=1
-          OR delivery_mode<>'stack'
+          OR (delivery_mode<>'stack' AND oldest_pending_at<=datetime('now','-${INSTANT_COALESCE_SECONDS} seconds'))
           OR stack_size IS NULL OR stack_size<2 OR stack_size>100
           OR pending_chapters>=stack_size
           OR oldest_pending_at<=datetime('now','-7 days')
