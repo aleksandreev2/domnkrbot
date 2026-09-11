@@ -1,16 +1,23 @@
-name: Production Smoke - Appeals Alerts
+name: Production Smoke
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
 
 jobs:
   verify-production:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Verify appeals and proposal alerts build reached production
-        run: EXPECTED_MARKER=domnkr-build-20260909-appeals-alerts1 node scripts/check-production.mjs
+      - name: Verify exact CI revision reached production
+        env:
+          EXPECTED_REVISION: ${{ github.event.workflow_run.head_sha }}
+        run: node scripts/check-production.mjs
