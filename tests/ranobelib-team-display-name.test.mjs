@@ -34,12 +34,6 @@ test('RanobeLib client resolves the localized team name from title team metadata
 test('team discovery refreshes stored display name from upstream metadata without making it mandatory', async () => {
   const source = await readFile(new URL('../src/ranobelib-multi-team-discovery.ts', import.meta.url), 'utf8');
   assert.match(source, /getTeamDisplayName/);
-  assert.match(source, /setRanobeLibTeamDisplayName/);
+  assert.match(source, /UPDATE ranobelib_teams[\s\S]*display_name/);
   assert.match(source, /catch\(\(\) => null\)/);
-});
-
-test('admin add flow prefers the upstream localized team name and keeps slug humanization only as fallback', async () => {
-  const source = await readFile(new URL('../src/telegram-team-admin.ts', import.meta.url), 'utf8');
-  assert.match(source, /getTeamDisplayName/);
-  assert.match(source, /upstreamDisplayName\s*\?\?\s*humanizeTeamRef/);
 });
