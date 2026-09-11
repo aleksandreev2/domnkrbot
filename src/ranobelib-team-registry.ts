@@ -1,4 +1,5 @@
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
+import { refreshAllWorkNotificationDemand } from './multi-team-notification-demand.js';
 
 export type RanobeLibTeamLifecycleState = 'hidden' | 'published' | 'paused' | 'error';
 
@@ -137,6 +138,7 @@ export async function setRanobeLibTeamLifecycle(
     SET lifecycle_state = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).bind(state, positiveInt(teamId, 'teamId')).run();
+  await refreshAllWorkNotificationDemand(env);
 }
 
 export async function recordRanobeLibTeamSyncSuccess(
