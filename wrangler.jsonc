@@ -2,6 +2,9 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "domnkrbot",
   "main": "src/live-entry-v3.ts",
+  "build": {
+    "command": "node scripts/write-deploy-revision.mjs"
+  },
   "compatibility_date": "2026-08-14",
   "keep_vars": true,
   "workers_dev": true,
