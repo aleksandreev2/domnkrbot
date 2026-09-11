@@ -21,6 +21,8 @@ export type TeamCompletionPlanTranslation = {
   upstreamTeamId: number;
   baselineReady: boolean;
   semanticStatus: string;
+  completionPending: boolean;
+  lifecycleState: string;
 };
 
 export type TeamCompletionPlanBranch = {
@@ -32,11 +34,17 @@ export type TeamCompletionPlanBranch = {
   upstreamTeamIds: number[];
 };
 
+export type TeamCompletionFinalization = {
+  teamId: number;
+  upstreamTeamId: number;
+  chapterId: number;
+  branchKey: string;
+};
+
 export type TeamScopedCompletionPlan = {
+  finalizations: TeamCompletionFinalization[];
   notifyTeamIds: number[];
   silentTeamIds: number[];
-  branchKey: string | null;
-  upstreamTeamIds: number[];
 };
 
 /**
@@ -94,58 +102,75 @@ export function computeTeamScopedScanPlan(input: {
 }
 
 /**
- * Work-level `scanlateStatus` is only context. Completion becomes team-scoped only when the final
- * successful chapter poll exposes one unambiguous latest branch whose upstream participant set
- * explicitly contains the team. Multiple competing latest branches fail closed as ambiguous.
+ * Completion is driven by an already team-scoped pending transition created by discovery. The
+ * final chapter poll is used only to prove that the pending team owns an unambiguous latest branch.
+ * Each team is evaluated against its own branches, never against the work-global latest chapter.
  *
- * Baselined teams receive a completion event. A team being baselined for the first time is only
- * classified silently so historical completion is never replayed to users.
+ * A baselined published team receives a completion event. Hidden teams and teams being baselined
+ * for the first time are finalized silently so private state and historical completion never leak.
  */
 export function computeTeamScopedCompletionPlan(input: {
-  workCompleted: boolean;
   translations: readonly TeamCompletionPlanTranslation[];
   branches: readonly TeamCompletionPlanBranch[];
 }): TeamScopedCompletionPlan {
-  const empty = (): TeamScopedCompletionPlan => ({
-    notifyTeamIds: [], silentTeamIds: [], branchKey: null, upstreamTeamIds: [],
-  });
-  if (!input.workCompleted || input.branches.length === 0) return empty();
+  const finalizations: TeamCompletionFinalization[] = [];
+  const notifyTeamIds: number[] = [];
+  const silentTeamIds: number[] = [];
 
-  const activeTranslations = input.translations
+  const pending = input.translations
     .map((row) => ({
       teamId: positiveTeamId(row.teamId),
       upstreamTeamId: positiveTeamId(row.upstreamTeamId),
       baselineReady: Boolean(row.baselineReady),
       semanticStatus: String(row.semanticStatus ?? '').trim(),
+      completionPending: Boolean(row.completionPending),
+      lifecycleState: String(row.lifecycleState ?? '').trim(),
     }))
-    .filter((row): row is { teamId: number; upstreamTeamId: number; baselineReady: boolean; semanticStatus: string } =>
-      row.teamId !== null && row.upstreamTeamId !== null && row.semanticStatus === 'active');
-  if (activeTranslations.length === 0) return empty();
+    .filter((row): row is {
+      teamId: number;
+      upstreamTeamId: number;
+      baselineReady: boolean;
+      semanticStatus: string;
+      completionPending: boolean;
+      lifecycleState: string;
+    } => row.teamId !== null
+      && row.upstreamTeamId !== null
+      && row.completionPending
+      && row.semanticStatus !== 'completed');
 
-  const ordered = [...input.branches].sort(compareCompletionBranchPosition);
-  const latest = ordered[ordered.length - 1];
-  if (!latest) return empty();
-  const latestBranches = ordered.filter((branch) => sameChapterPosition(branch, latest));
-  if (latestBranches.length !== 1) return empty();
+  for (const row of pending) {
+    const teamBranches = input.branches.filter((branch) => branch.upstreamTeamIds.some(
+      (rawTeamId) => positiveTeamId(rawTeamId) === row.upstreamTeamId,
+    ));
+    if (teamBranches.length === 0) continue;
 
-  const branch = latestBranches[0]!;
-  if (branch.identityConfidence === 'ambiguous') return empty();
-  const upstreamTeamIds = [...new Set(branch.upstreamTeamIds
-    .map(positiveTeamId)
-    .filter((value): value is number => value !== null))]
-    .sort((a, b) => a - b);
-  if (upstreamTeamIds.length === 0) return empty();
-  const participants = new Set(upstreamTeamIds);
+    const ordered = [...teamBranches].sort(compareCompletionBranchPosition);
+    const latest = ordered[ordered.length - 1];
+    if (!latest) continue;
+    const latestAtPosition = ordered.filter((branch) => sameChapterPosition(branch, latest));
+    const distinctLatest = new Map(latestAtPosition.map((branch) => [
+      `${branch.chapterId}\u0000${branch.branchKey}`,
+      branch,
+    ]));
+    if (distinctLatest.size !== 1) continue;
 
-  const affected = activeTranslations.filter((row) => participants.has(row.upstreamTeamId));
-  if (affected.length === 0) return empty();
+    const branch = [...distinctLatest.values()][0]!;
+    if (branch.identityConfidence === 'ambiguous') continue;
 
-  return {
-    notifyTeamIds: affected.filter((row) => row.baselineReady).map((row) => row.teamId).sort((a, b) => a - b),
-    silentTeamIds: affected.filter((row) => !row.baselineReady).map((row) => row.teamId).sort((a, b) => a - b),
-    branchKey: branch.branchKey,
-    upstreamTeamIds,
-  };
+    finalizations.push({
+      teamId: row.teamId,
+      upstreamTeamId: row.upstreamTeamId,
+      chapterId: branch.chapterId,
+      branchKey: branch.branchKey,
+    });
+    if (row.baselineReady && row.lifecycleState === 'published') notifyTeamIds.push(row.teamId);
+    else silentTeamIds.push(row.teamId);
+  }
+
+  finalizations.sort((a, b) => a.teamId - b.teamId);
+  notifyTeamIds.sort((a, b) => a - b);
+  silentTeamIds.sort((a, b) => a - b);
+  return { finalizations, notifyTeamIds, silentTeamIds };
 }
 
 /**
