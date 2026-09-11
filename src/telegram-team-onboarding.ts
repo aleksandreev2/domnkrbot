@@ -1,4 +1,5 @@
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
+import { refreshAllWorkNotificationDemand } from './multi-team-notification-demand.js';
 import { mainMenuButton, type TelegramPayload } from './telegram-bot-ui.js';
 import type { TelegramSubscriptionUpdate } from './telegram-subscriptions.js';
 
@@ -181,6 +182,7 @@ export async function handleTelegramTeamOnboarding(
       INSERT OR IGNORE INTO telegram_team_subscriptions (user_telegram_id, team_id)
       VALUES (?, ?)
     `).bind(userId, teamId).run();
+    await refreshAllWorkNotificationDemand(env);
     await persistOnboardingCompletion(env, userId, 'team_selected');
     await sendPayload(env, chatId, {
       text: `✅ Уведомления команды <b>${escapeHtml(team.display_name)}</b> включены.`,
