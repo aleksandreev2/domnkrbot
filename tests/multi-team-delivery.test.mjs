@@ -112,6 +112,12 @@ test('user-facing translator copy only loads published release teams', () => {
   );
 });
 
+test('instant chapter groups use a short bounded coalescing window while completion still flushes immediately', () => {
+  assert.match(deliverySource, /const\s+INSTANT_COALESCE_SECONDS\s*=\s*30\s*;/);
+  assert.match(deliverySource, /translation_completed=1[\s\S]*delivery_mode<>'stack'[\s\S]*oldest_pending_at<=datetime\('now','-30 seconds'\)/);
+  assert.doesNotMatch(deliverySource, /OR\s+delivery_mode<>'stack'\s+OR/);
+});
+
 test('v3 entry switches queue and fallback cron to the multi-team drain only when delivery rollout is enabled', () => {
   assert.match(entrySource, /getMultiTeamRollout/);
   assert.match(entrySource, /drainMultiTeamNotificationOutbox/);
