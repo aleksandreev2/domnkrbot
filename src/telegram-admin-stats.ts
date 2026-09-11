@@ -123,28 +123,208 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
       SUM(CASE WHEN created_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) AS new_7d,
       SUM(CASE WHEN created_at >= datetime('now','-30 days') THEN 1 ELSE 0 END) AS new_30d
       FROM users`),
-    db.prepare(`SELECT
+    db.prepare(`WITH rollout AS (
+      SELECT COALESCE((
+        SELECT CASE WHEN value='1' THEN 1 ELSE 0 END
+        FROM app_settings
+        WHERE key='ranobelib_multi_team_delivery'
+      ),0) AS enabled
+    )
+    SELECT
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(*) FROM (
+          SELECT s.user_telegram_id
+          FROM telegram_team_subscriptions s
+          JOIN ranobelib_teams team ON team.id=s.team_id
+          WHERE team.lifecycle_state='published'
+          UNION
+          SELECT s.user_telegram_id
+          FROM telegram_team_title_subscriptions s
+          JOIN ranobelib_teams team ON team.id=s.team_id
+          WHERE team.lifecycle_state='published'
+        )
+      ) ELSE (
+        SELECT COUNT(*) FROM (
+          SELECT user_telegram_id FROM telegram_subscription_settings WHERE all_titles=1
+          UNION SELECT user_telegram_id FROM title_subscriptions
+        )
+      ) END AS users_enabled,
       (SELECT COUNT(*) FROM (
         SELECT user_telegram_id FROM telegram_subscription_settings WHERE all_titles=1
         UNION SELECT user_telegram_id FROM title_subscriptions
-      )) AS users_enabled,
-      (SELECT COUNT(*) FROM telegram_subscription_settings WHERE all_titles=1) AS all_titles_users,
-      (SELECT COUNT(*) FROM title_subscriptions) AS explicit_subscriptions,
+      )) AS legacy_users_enabled,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(DISTINCT s.user_telegram_id)
+        FROM telegram_team_subscriptions s
+        JOIN ranobelib_teams team ON team.id=s.team_id
+        WHERE team.lifecycle_state='published'
+      ) ELSE (
+        SELECT COUNT(*) FROM telegram_subscription_settings WHERE all_titles=1
+      ) END AS all_titles_users,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(*)
+        FROM telegram_team_title_subscriptions s
+        JOIN ranobelib_teams team ON team.id=s.team_id
+        WHERE team.lifecycle_state='published'
+      ) ELSE (
+        SELECT COUNT(*) FROM title_subscriptions
+      ) END AS explicit_subscriptions,
       (SELECT COUNT(*) FROM telegram_subscription_settings WHERE COALESCE(delivery_mode,'instant')='instant') AS instant_users,
       (SELECT COUNT(*) FROM telegram_subscription_settings WHERE delivery_mode='stack') AS stack_users,
-      (SELECT COUNT(*) FROM telegram_title_delivery_settings) AS title_overrides`),
-    db.prepare(`SELECT
-      COUNT(*) AS total,
-      SUM(CASE WHEN is_active=1 THEN 1 ELSE 0 END) AS active,
-      SUM(CASE WHEN translation_is_completed=1 THEN 1 ELSE 0 END) AS completed,
-      SUM(CASE WHEN is_active=0 AND COALESCE(translation_is_completed,0)<>1 THEN 1 ELSE 0 END) AS archived,
-      SUM(CASE WHEN is_active=1 AND translation_is_completed IS NULL THEN 1 ELSE 0 END) AS unknown_status,
-      SUM(CASE WHEN snapshot_ready=1 THEN 1 ELSE 0 END) AS snapshot_ready,
-      SUM(CASE WHEN is_active=1 AND sync_error IS NOT NULL AND TRIM(sync_error)<>'' THEN 1 ELSE 0 END) AS with_errors,
-      SUM(CASE WHEN is_active=1 AND next_check_at IS NOT NULL AND next_check_at <= CURRENT_TIMESTAMP THEN 1 ELSE 0 END) AS due_now,
-      SUM(CASE WHEN is_active=1 AND next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes') THEN 1 ELSE 0 END) AS late_5m,
-      SUM(COALESCE(notification_subscriber_count,0)) AS subscribers
-      FROM ranobelib_titles`),
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(*)
+        FROM telegram_team_title_delivery_settings s
+        JOIN ranobelib_teams team ON team.id=s.team_id
+        WHERE team.lifecycle_state='published'
+      ) ELSE (
+        SELECT COUNT(*) FROM telegram_title_delivery_settings
+      ) END AS title_overrides
+    FROM rollout`),
+    db.prepare(`WITH rollout AS (
+      SELECT COALESCE((
+        SELECT CASE WHEN value='1' THEN 1 ELSE 0 END
+        FROM app_settings
+        WHERE key='ranobelib_multi_team_delivery'
+      ),0) AS enabled
+    )
+    SELECT
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(DISTINCT tt.book_ref)
+        FROM ranobelib_team_translations tt
+        JOIN ranobelib_teams team ON team.id=tt.team_id
+        WHERE team.lifecycle_state='published'
+      ) ELSE (SELECT COUNT(*) FROM ranobelib_titles) END AS total,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(DISTINCT tt.book_ref)
+        FROM ranobelib_team_translations tt
+        JOIN ranobelib_teams team ON team.id=tt.team_id
+        WHERE team.lifecycle_state='published'
+          AND tt.presence_state='active'
+          AND tt.semantic_status<>'completed'
+      ) ELSE (SELECT COUNT(*) FROM ranobelib_titles WHERE is_active=1) END AS active,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(DISTINCT tt.book_ref)
+        FROM ranobelib_team_translations tt
+        JOIN ranobelib_teams team ON team.id=tt.team_id
+        WHERE team.lifecycle_state='published'
+          AND tt.presence_state='active'
+          AND tt.semantic_status='completed'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations other
+            JOIN ranobelib_teams other_team ON other_team.id=other.team_id
+            WHERE other.book_ref=tt.book_ref
+              AND other_team.lifecycle_state='published'
+              AND other.presence_state='active'
+              AND other.semantic_status<>'completed'
+          )
+      ) ELSE (SELECT COUNT(*) FROM ranobelib_titles WHERE translation_is_completed=1) END AS completed,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(DISTINCT tt.book_ref)
+        FROM ranobelib_team_translations tt
+        JOIN ranobelib_teams team ON team.id=tt.team_id
+        WHERE team.lifecycle_state='published'
+          AND tt.presence_state='dormant'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations active_tt
+            JOIN ranobelib_teams active_team ON active_team.id=active_tt.team_id
+            WHERE active_tt.book_ref=tt.book_ref
+              AND active_team.lifecycle_state='published'
+              AND active_tt.presence_state='active'
+          )
+      ) ELSE (
+        SELECT COUNT(*) FROM ranobelib_titles
+        WHERE is_active=0 AND COALESCE(translation_is_completed,0)<>1
+      ) END AS archived,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(DISTINCT tt.book_ref)
+        FROM ranobelib_team_translations tt
+        JOIN ranobelib_teams team ON team.id=tt.team_id
+        WHERE team.lifecycle_state='published'
+          AND tt.presence_state='active'
+          AND tt.semantic_status='unknown'
+      ) ELSE (
+        SELECT COUNT(*) FROM ranobelib_titles
+        WHERE is_active=1 AND translation_is_completed IS NULL
+      ) END AS unknown_status,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(*) FROM (
+          SELECT tt.book_ref
+          FROM ranobelib_team_translations tt
+          JOIN ranobelib_teams team ON team.id=tt.team_id
+          WHERE team.lifecycle_state='published' AND tt.presence_state='active'
+          GROUP BY tt.book_ref
+          HAVING MIN(tt.baseline_ready)=1
+        )
+      ) ELSE (SELECT COUNT(*) FROM ranobelib_titles WHERE snapshot_ready=1) END AS snapshot_ready,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(*)
+        FROM ranobelib_titles t
+        WHERE t.sync_error IS NOT NULL AND TRIM(t.sync_error)<>''
+          AND EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations tt
+            JOIN ranobelib_teams team ON team.id=tt.team_id
+            WHERE tt.book_ref=t.book_ref
+              AND team.lifecycle_state='published'
+              AND tt.presence_state='active'
+              AND tt.semantic_status<>'completed'
+          )
+      ) ELSE (
+        SELECT COUNT(*) FROM ranobelib_titles
+        WHERE is_active=1 AND sync_error IS NOT NULL AND TRIM(sync_error)<>''
+      ) END AS with_errors,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(*)
+        FROM ranobelib_titles t
+        WHERE t.next_check_at IS NOT NULL AND t.next_check_at<=CURRENT_TIMESTAMP
+          AND EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations tt
+            JOIN ranobelib_teams team ON team.id=tt.team_id
+            WHERE tt.book_ref=t.book_ref
+              AND team.lifecycle_state='published'
+              AND tt.presence_state='active'
+              AND tt.semantic_status<>'completed'
+          )
+      ) ELSE (
+        SELECT COUNT(*) FROM ranobelib_titles
+        WHERE is_active=1 AND next_check_at IS NOT NULL AND next_check_at<=CURRENT_TIMESTAMP
+      ) END AS due_now,
+      CASE WHEN enabled=1 THEN (
+        SELECT COUNT(*)
+        FROM ranobelib_titles t
+        WHERE t.next_check_at IS NOT NULL AND t.next_check_at<datetime('now','-5 minutes')
+          AND EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations tt
+            JOIN ranobelib_teams team ON team.id=tt.team_id
+            WHERE tt.book_ref=t.book_ref
+              AND team.lifecycle_state='published'
+              AND tt.presence_state='active'
+              AND tt.semantic_status<>'completed'
+          )
+      ) ELSE (
+        SELECT COUNT(*) FROM ranobelib_titles
+        WHERE is_active=1 AND next_check_at IS NOT NULL AND next_check_at<datetime('now','-5 minutes')
+      ) END AS late_5m,
+      CASE WHEN enabled=1 THEN (
+        SELECT COALESCE(SUM(COALESCE(t.notification_subscriber_count,0)),0)
+        FROM ranobelib_titles t
+        WHERE EXISTS (
+          SELECT 1
+          FROM ranobelib_team_translations tt
+          JOIN ranobelib_teams team ON team.id=tt.team_id
+          WHERE tt.book_ref=t.book_ref
+            AND team.lifecycle_state='published'
+            AND tt.presence_state='active'
+            AND tt.semantic_status<>'completed'
+        )
+      ) ELSE (
+        SELECT COALESCE(SUM(COALESCE(notification_subscriber_count,0)),0) FROM ranobelib_titles
+      ) END AS subscribers
+    FROM rollout`),
     db.prepare(`SELECT
       SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END) AS pending,
       SUM(CASE WHEN status='retry' THEN 1 ELSE 0 END) AS retry,
@@ -184,15 +364,64 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
       (SELECT COUNT(*) FROM channel_membership_appeals WHERE status='approved') AS appeals_approved,
       (SELECT COUNT(*) FROM channel_membership_appeals WHERE status='rejected') AS appeals_rejected
       FROM channel_access_state a`),
-    db.prepare(`SELECT
+    db.prepare(`WITH rollout AS (
+      SELECT COALESCE((
+        SELECT CASE WHEN value='1' THEN 1 ELSE 0 END
+        FROM app_settings
+        WHERE key='ranobelib_multi_team_delivery'
+      ),0) AS enabled
+    )
+    SELECT
       SUM(CASE WHEN created_at >= datetime('now','-24 hours') THEN 1 ELSE 0 END) AS releases_24h,
       SUM(CASE WHEN created_at >= datetime('now','-7 days') THEN 1 ELSE 0 END) AS releases_7d,
       MAX(created_at) AS last_release_at,
-      (SELECT MAX(last_synced_at) FROM ranobelib_titles) AS last_sync_at,
-      (SELECT COUNT(*) FROM ranobelib_titles WHERE is_active=1 AND (consecutive_failures>0 OR (sync_error IS NOT NULL AND TRIM(sync_error)<>''))) AS failures,
-      (SELECT COUNT(*) FROM ranobelib_titles WHERE is_active=1 AND next_check_at IS NOT NULL AND next_check_at<=CURRENT_TIMESTAMP) AS due_scans
-      FROM ranobelib_releases`),
-    db.prepare(`SELECT COALESCE(json_group_array(json_object(
+      (SELECT MAX(t.last_synced_at)
+       FROM ranobelib_titles t
+       WHERE (enabled=0 AND t.is_active=1)
+          OR (enabled=1 AND EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations tt
+            JOIN ranobelib_teams team ON team.id=tt.team_id
+            WHERE tt.book_ref=t.book_ref
+              AND team.lifecycle_state='published'
+              AND tt.presence_state='active'
+              AND tt.semantic_status<>'completed'
+          ))) AS last_sync_at,
+      (SELECT COUNT(*)
+       FROM ranobelib_titles t
+       WHERE (t.consecutive_failures>0 OR (t.sync_error IS NOT NULL AND TRIM(t.sync_error)<>''))
+         AND ((enabled=0 AND t.is_active=1)
+          OR (enabled=1 AND EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations tt
+            JOIN ranobelib_teams team ON team.id=tt.team_id
+            WHERE tt.book_ref=t.book_ref
+              AND team.lifecycle_state='published'
+              AND tt.presence_state='active'
+              AND tt.semantic_status<>'completed'
+          )))) AS failures,
+      (SELECT COUNT(*)
+       FROM ranobelib_titles t
+       WHERE t.next_check_at IS NOT NULL AND t.next_check_at<=CURRENT_TIMESTAMP
+         AND ((enabled=0 AND t.is_active=1)
+          OR (enabled=1 AND EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations tt
+            JOIN ranobelib_teams team ON team.id=tt.team_id
+            WHERE tt.book_ref=t.book_ref
+              AND team.lifecycle_state='published'
+              AND tt.presence_state='active'
+              AND tt.semantic_status<>'completed'
+          )))) AS due_scans
+      FROM ranobelib_releases CROSS JOIN rollout`),
+    db.prepare(`WITH rollout AS (
+      SELECT COALESCE((
+        SELECT CASE WHEN value='1' THEN 1 ELSE 0 END
+        FROM app_settings
+        WHERE key='ranobelib_multi_team_delivery'
+      ),0) AS enabled
+    )
+    SELECT COALESCE(json_group_array(json_object(
       'book_ref', book_ref,
       'title', title,
       'unknown', unknown,
@@ -203,28 +432,56 @@ async function loadStatsSnapshot(db: D1Database): Promise<StatsSnapshot> {
     )), '[]') AS items
     FROM (
       SELECT
-        book_ref,
-        COALESCE(NULLIF(TRIM(title), ''), book_ref) AS title,
-        CASE WHEN translation_is_completed IS NULL THEN 1 ELSE 0 END AS unknown,
-        CASE WHEN sync_error IS NOT NULL AND TRIM(sync_error)<>'' THEN 1 ELSE 0 END AS has_error,
-        sync_error,
-        COALESCE(consecutive_failures,0) AS failures,
+        t.book_ref AS book_ref,
+        COALESCE(NULLIF(TRIM(t.title), ''), t.book_ref) AS title,
+        CASE WHEN rollout.enabled=1 THEN CASE WHEN EXISTS (
+          SELECT 1
+          FROM ranobelib_team_translations tt
+          JOIN ranobelib_teams team ON team.id=tt.team_id
+          WHERE tt.book_ref=t.book_ref
+            AND team.lifecycle_state='published'
+            AND tt.presence_state='active'
+            AND tt.semantic_status='unknown'
+        ) THEN 1 ELSE 0 END ELSE CASE WHEN t.translation_is_completed IS NULL THEN 1 ELSE 0 END END AS unknown,
+        CASE WHEN t.sync_error IS NOT NULL AND TRIM(t.sync_error)<>'' THEN 1 ELSE 0 END AS has_error,
+        t.sync_error AS sync_error,
+        COALESCE(t.consecutive_failures,0) AS failures,
         CASE
-          WHEN next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes')
-          THEN CAST(MAX(0, (julianday('now') - julianday(next_check_at)) * 1440) AS INTEGER)
+          WHEN t.next_check_at IS NOT NULL AND t.next_check_at < datetime('now','-5 minutes')
+          THEN CAST(MAX(0, (julianday('now') - julianday(t.next_check_at)) * 1440) AS INTEGER)
           ELSE 0
         END AS delay_minutes
-      FROM ranobelib_titles
-      WHERE is_active=1
+      FROM ranobelib_titles t CROSS JOIN rollout
+      WHERE (
+          (rollout.enabled=0 AND t.is_active=1)
+          OR (rollout.enabled=1 AND EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations tt
+            JOIN ranobelib_teams team ON team.id=tt.team_id
+            WHERE tt.book_ref=t.book_ref
+              AND team.lifecycle_state='published'
+              AND tt.presence_state='active'
+              AND tt.semantic_status<>'completed'
+          ))
+        )
         AND (
-          translation_is_completed IS NULL
-          OR (sync_error IS NOT NULL AND TRIM(sync_error)<>'')
-          OR (next_check_at IS NOT NULL AND next_check_at < datetime('now','-5 minutes'))
+          (rollout.enabled=0 AND t.translation_is_completed IS NULL)
+          OR (rollout.enabled=1 AND EXISTS (
+            SELECT 1
+            FROM ranobelib_team_translations tt
+            JOIN ranobelib_teams team ON team.id=tt.team_id
+            WHERE tt.book_ref=t.book_ref
+              AND team.lifecycle_state='published'
+              AND tt.presence_state='active'
+              AND tt.semantic_status='unknown'
+          ))
+          OR (t.sync_error IS NOT NULL AND TRIM(t.sync_error)<>'')
+          OR (t.next_check_at IS NOT NULL AND t.next_check_at < datetime('now','-5 minutes'))
         )
       ORDER BY
-        CASE WHEN sync_error IS NOT NULL AND TRIM(sync_error)<>'' THEN 1 ELSE 0 END DESC,
-        CASE WHEN translation_is_completed IS NULL THEN 1 ELSE 0 END DESC,
-        next_check_at ASC
+        CASE WHEN t.sync_error IS NOT NULL AND TRIM(t.sync_error)<>'' THEN 1 ELSE 0 END DESC,
+        unknown DESC,
+        t.next_check_at ASC
       LIMIT 6
     )`),
     db.prepare(`SELECT
@@ -323,7 +580,7 @@ function buildStatsScreen(section: StatsSection, s: StatsSnapshot) {
     `Команды: <b>${n(s.multiTeam.teams_published)}</b> published / <b>${n(s.multiTeam.teams_hidden)}</b> hidden / <b>${n(s.multiTeam.teams_paused)}</b> paused / <b>${n(s.multiTeam.teams_error)}</b> error`,
     `Sync: errors <b>${n(s.multiTeam.teams_sync_errors)}</b> / stale <b>${n(s.multiTeam.teams_stale)}</b>`,
     `Branch identity: native <b>${n(s.multiTeam.branches_native)}</b> / fallback <b>${n(s.multiTeam.branches_fallback)}</b> / ambiguous <b>${n(s.multiTeam.branches_ambiguous)}</b>`,
-    `Migration parity: legacy <b>${n(s.subscriptions.users_enabled)}</b> / primary <b>${n(s.multiTeam.primary_effective_users)}</b> / mismatch <b>${Math.abs(n(s.subscriptions.users_enabled) - n(s.multiTeam.primary_effective_users))}</b>`,
+    `Migration parity: legacy <b>${n(s.subscriptions.legacy_users_enabled ?? s.subscriptions.users_enabled)}</b> / primary <b>${n(s.multiTeam.primary_effective_users)}</b> / mismatch <b>${Math.abs(n(s.subscriptions.legacy_users_enabled ?? s.subscriptions.users_enabled) - n(s.multiTeam.primary_effective_users))}</b>`,
     `Rollout: shadow <b>${flag(s.multiTeam.rollout_shadow)}</b> / delivery <b>${flag(s.multiTeam.rollout_delivery)}</b> / UI <b>${flag(s.multiTeam.rollout_ui)}</b>`,
   ], back);
 
