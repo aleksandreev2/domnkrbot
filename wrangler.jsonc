@@ -26,7 +26,8 @@
   },
   "secrets": {
     "required": [
-      "TELEGRAM_BOT_TOKEN"
+      "TELEGRAM_BOT_TOKEN",
+      "RANOBELIB_TOKEN_ENCRYPTION_KEY"
     ]
   },
   "triggers": {
