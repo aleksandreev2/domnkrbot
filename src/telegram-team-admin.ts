@@ -1,4 +1,10 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
+import {
+  getMultiTeamRollout,
+  setMultiTeamRolloutFlag,
+  type MultiTeamRolloutKey,
+  type MultiTeamRolloutState,
+} from './multi-team-rollout.js';
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
 import { discoverOneRegisteredTeam } from './ranobelib-multi-team-discovery.js';
 import {
@@ -49,6 +55,90 @@ export type TeamTranslationDiagnostics = {
   unknown: number;
 };
 
+export type MultiTeamRolloutPhase = 'shadow' | 'delivery' | 'ui';
+export type MultiTeamRolloutTransition = {
+  allowed: boolean;
+  next: MultiTeamRolloutState;
+  reason: string | null;
+};
+
+export function planMultiTeamRolloutTransition(
+  state: MultiTeamRolloutState,
+  phase: MultiTeamRolloutPhase,
+  enabled: boolean,
+): MultiTeamRolloutTransition {
+  const current: MultiTeamRolloutState = { ...state };
+
+  if (enabled) {
+    if (phase === 'delivery' && !state.shadow) {
+      return { allowed: false, next: current, reason: 'Сначала включите Shadow.' };
+    }
+    if (phase === 'ui') {
+      if (!state.delivery) return { allowed: false, next: current, reason: 'Сначала включите Delivery.' };
+      if (!state.shadow) return { allowed: false, next: current, reason: 'Сначала включите Shadow.' };
+    }
+    return { allowed: true, next: { ...current, [phase]: true }, reason: null };
+  }
+
+  if (phase === 'shadow') {
+    return {
+      allowed: true,
+      next: { shadow: false, delivery: false, ui: false },
+      reason: null,
+    };
+  }
+  if (phase === 'delivery') {
+    return {
+      allowed: true,
+      next: { shadow: state.shadow, delivery: false, ui: false },
+      reason: null,
+    };
+  }
+  return {
+    allowed: true,
+    next: { ...current, ui: false },
+    reason: null,
+  };
+}
+
+export function buildMultiTeamRolloutAdmin(state: MultiTeamRolloutState): TelegramPayload {
+  const rows: TelegramButton[][] = [];
+  if (!state.shadow) {
+    rows.push([{ text: '🧪 Включить Shadow', callback_data: 'teamadmin:rollout:shadow:on' }]);
+  } else if (!state.delivery) {
+    rows.push([{ text: '⚠️ Включить Delivery', callback_data: 'teamadmin:rollout:delivery:on' }]);
+    rows.push([{ text: '↩️ Выключить Shadow', callback_data: 'teamadmin:rollout:shadow:off' }]);
+  } else if (!state.ui) {
+    rows.push([{ text: '⚠️ Включить UI', callback_data: 'teamadmin:rollout:ui:on' }]);
+    rows.push([{ text: '↩️ Вернуть в Shadow', callback_data: 'teamadmin:rollout:delivery:off' }]);
+    rows.push([{ text: '🛑 Полный rollback', callback_data: 'teamadmin:rollout:shadow:off' }]);
+  } else {
+    rows.push([{ text: '🙈 Выключить UI', callback_data: 'teamadmin:rollout:ui:off' }]);
+    rows.push([{ text: '↩️ Вернуть в Shadow', callback_data: 'teamadmin:rollout:delivery:off' }]);
+    rows.push([{ text: '🛑 Полный rollback', callback_data: 'teamadmin:rollout:shadow:off' }]);
+  }
+  rows.push([{ text: '↩️ Ко всем командам', callback_data: 'teamadmin:home' }], [mainMenuButton()]);
+
+  return {
+    text: [
+      '🚦 <b>Multi-team rollout</b>',
+      '',
+      `Shadow: ${rolloutStateLabel(state.shadow)}`,
+      `Delivery: ${rolloutStateLabel(state.delivery)}`,
+      `UI: ${rolloutStateLabel(state.ui)}`,
+      '',
+      '<b>Порядок:</b> Shadow → Delivery → UI.',
+      'Shadow запускает новую модель параллельно и не отправляет её уведомления пользователям.',
+      'Delivery переключает генерацию и доставку уведомлений на multi-team.',
+      'UI открывает пользователям команды, team-title подписки и onboarding.',
+      '',
+      'Скрытые команды не публикуются автоматически при включении UI.',
+    ].join('\n'),
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: rows },
+  };
+}
+
 export function parseRanobeLibTeamInput(value: string): { ranobelibTeamId: number; ranobelibTeamRef: string } | null {
   const text = String(value ?? '').trim();
   const urlMatch = /^https?:\/\/(?:www\.)?ranobelib\.me\/(?:[a-z]{2}\/)?team\/(\d+--[A-Za-z0-9_-]+)\/?(?:[?#].*)?$/i.exec(text);
@@ -75,6 +165,7 @@ export function buildTeamAdminList(teams: Array<Pick<RanobeLibTeamRecord, 'id' |
   }
   if (!teams.length) lines.push('Команды ещё не настроены.');
   rows.push([{ text: '➕ Добавить команду', callback_data: 'teamadmin:add' }]);
+  rows.push([{ text: '🚦 Multi-team rollout', callback_data: 'teamadmin:rollout' }]);
   rows.push([mainMenuButton()]);
   return { text: lines.join('\n'), parse_mode: 'HTML', reply_markup: { inline_keyboard: rows } };
 }
@@ -134,6 +225,44 @@ export async function handleTelegramTeamAdmin(
     await clearAdminInput(env, String(userId));
     await sendPayload(env, chatId, buildTeamAdminList(await listAllRanobeLibTeams(env)));
     return true;
+  }
+
+  if (data === 'teamadmin:rollout') {
+    await clearAdminInput(env, String(userId));
+    return showMultiTeamRollout(env, chatId);
+  }
+
+  let rolloutMatch = /^teamadmin:rollout:(shadow|delivery|ui):(on|off)$/.exec(data);
+  if (rolloutMatch) {
+    const phase = rolloutMatch[1] as MultiTeamRolloutPhase;
+    const enabled = rolloutMatch[2] === 'on';
+    const current = await getMultiTeamRollout(env, { bypassCache: true });
+    const transition = planMultiTeamRolloutTransition(current, phase, enabled);
+    if (!transition.allowed) {
+      await sendPayload(env, chatId, buildRolloutBlockedMessage(transition.reason ?? 'Переход недоступен.'));
+      return true;
+    }
+
+    if (enabled && phase !== 'shadow') {
+      await sendPayload(env, chatId, buildRolloutConfirmation(phase));
+      return true;
+    }
+
+    await applyMultiTeamRolloutState(env, current, transition.next);
+    return showMultiTeamRollout(env, chatId);
+  }
+
+  rolloutMatch = /^teamadmin:rollout:(delivery|ui):confirm:on$/.exec(data);
+  if (rolloutMatch) {
+    const phase = rolloutMatch[1] as 'delivery' | 'ui';
+    const current = await getMultiTeamRollout(env, { bypassCache: true });
+    const transition = planMultiTeamRolloutTransition(current, phase, true);
+    if (!transition.allowed) {
+      await sendPayload(env, chatId, buildRolloutBlockedMessage(transition.reason ?? 'Переход недоступен.'));
+      return true;
+    }
+    await applyMultiTeamRolloutState(env, current, transition.next);
+    return showMultiTeamRollout(env, chatId);
   }
 
   if (data === 'teamadmin:add') {
@@ -300,6 +429,77 @@ async function showTeam(env: TelegramTeamAdminEnv, chatId: number, teamId: numbe
   return true;
 }
 
+async function showMultiTeamRollout(env: TelegramTeamAdminEnv, chatId: number): Promise<boolean> {
+  const state = await getMultiTeamRollout(env, { bypassCache: true });
+  await sendPayload(env, chatId, buildMultiTeamRolloutAdmin(state));
+  return true;
+}
+
+function buildRolloutConfirmation(phase: 'delivery' | 'ui'): TelegramPayload {
+  if (phase === 'delivery') {
+    return {
+      text: [
+        '⚠️ <b>Подтвердить включение Delivery?</b>',
+        '',
+        'Новая multi-team модель станет авторитетной для генерации и доставки уведомлений.',
+        'Перед этим Shadow должен быть проверен на реальном трафике без расхождений и historical replay.',
+      ].join('\n'),
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '✅ Включить Delivery', callback_data: 'teamadmin:rollout:delivery:confirm:on' }],
+          [{ text: '↩️ Отмена', callback_data: 'teamadmin:rollout' }],
+        ],
+      },
+    };
+  }
+  return {
+    text: [
+      '⚠️ <b>Подтвердить включение UI?</b>',
+      '',
+      'Пользователи увидят team-aware каталог, подписки и onboarding.',
+      'Скрытые команды останутся скрытыми и не будут опубликованы автоматически.',
+    ].join('\n'),
+    parse_mode: 'HTML',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '✅ Включить UI', callback_data: 'teamadmin:rollout:ui:confirm:on' }],
+        [{ text: '↩️ Отмена', callback_data: 'teamadmin:rollout' }],
+      ],
+    },
+  };
+}
+
+function buildRolloutBlockedMessage(reason: string): TelegramPayload {
+  return {
+    text: `⛔ ${escapeHtml(reason)}`,
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: [[{ text: '↩️ К rollout', callback_data: 'teamadmin:rollout' }], [mainMenuButton()]] },
+  };
+}
+
+async function applyMultiTeamRolloutState(
+  env: TelegramTeamAdminEnv,
+  current: MultiTeamRolloutState,
+  next: MultiTeamRolloutState,
+): Promise<void> {
+  const changes: Array<[MultiTeamRolloutKey, boolean]> = [];
+
+  // Rollback downstream first so a partial failure can only leave the system in a safer state.
+  if (current.ui && !next.ui) changes.push(['ranobelib_multi_team_ui', false]);
+  if (current.delivery && !next.delivery) changes.push(['ranobelib_multi_team_delivery', false]);
+  if (current.shadow && !next.shadow) changes.push(['ranobelib_multi_team_shadow', false]);
+
+  // Activation moves upstream first and only ever advances one stage per confirmed admin action.
+  if (!current.shadow && next.shadow) changes.push(['ranobelib_multi_team_shadow', true]);
+  if (!current.delivery && next.delivery) changes.push(['ranobelib_multi_team_delivery', true]);
+  if (!current.ui && next.ui) changes.push(['ranobelib_multi_team_ui', true]);
+
+  for (const [flag, enabled] of changes) {
+    await setMultiTeamRolloutFlag(env, flag, enabled);
+  }
+}
+
 async function loadTeamTranslationDiagnostics(env: TelegramTeamAdminEnv, teamId: number): Promise<TeamTranslationDiagnostics> {
   const row = await env.DB.prepare(`
     SELECT
@@ -393,6 +593,10 @@ async function telegramCall<T = unknown>(env: TelegramTeamAdminEnv, method: stri
   const body = await response.json().catch(() => null) as TelegramResponse<T> | null;
   if (!response.ok || !body?.ok) throw new Error(body?.description || `Telegram ${method} failed with HTTP ${response.status}`);
   return body.result as T;
+}
+
+function rolloutStateLabel(enabled: boolean): string {
+  return enabled ? '✅ включён' : '⛔ выключен';
 }
 
 function humanizeTeamRef(ref: string): string {
