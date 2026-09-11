@@ -236,8 +236,9 @@ async function scanOneBook(
   const chapters = await client.getChapters(book.ref, { teamRef });
   const latest = chapters.length ? chapters[chapters.length - 1]! : null;
   const delta = detectReleaseDelta(book.ref, previousRows, chapters);
+  const lastReleaseMs = timestampMs(state?.last_release_at ?? null);
   const recoveredScheduled = snapshotReady && previousRows
-    ? detectScheduledReleaseTransitions(previousRows, chapters, now.getTime())
+    ? detectScheduledReleaseTransitions(previousRows, chapters, now.getTime(), lastReleaseMs)
     : [];
   const hasRecordedRelease = typeof state?.last_release_at === 'string' && state.last_release_at.trim().length > 0;
   const recentBootstrap = hasRecordedRelease
@@ -249,9 +250,10 @@ async function scanOneBook(
 
   if (!snapshotReady) {
     await insertChapters(env, book.ref, chapters);
-  } else if (delta) {
-    if (delta.added.length) await insertChapters(env, book.ref, delta.added);
-    if (delta.removed.length) await deleteChapters(env, book.ref, delta.removed);
+  } else if (delta?.added.length) {
+    // ranobelib_chapters is a monotonic seen-ID ledger for legacy notification dedupe.
+    // A chapter temporarily omitted upstream must stay remembered so reappearance is not "new".
+    await insertChapters(env, book.ref, delta.added);
   }
 
   const displayTitle = book.title || state?.title || humanizeSlug(book.slug);
@@ -402,15 +404,6 @@ async function insertChapters(env: ScannerEnv, bookRef: string, chapters: Ranobe
     ON CONFLICT(book_ref, chapter_id) DO UPDATE SET
       volume = excluded.volume, number = excluded.number, name = excluded.name
   `).bind(bookRef, payload).run();
-}
-
-async function deleteChapters(env: ScannerEnv, bookRef: string, chapters: RanobeLibChapter[]): Promise<void> {
-  if (!chapters.length) return;
-  await env.DB.prepare(`
-    DELETE FROM ranobelib_chapters
-    WHERE book_ref = ?
-      AND chapter_id IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
-  `).bind(bookRef, JSON.stringify(chapters.map((chapter) => chapter.id))).run();
 }
 
 async function mapWithConcurrency<T, R>(
