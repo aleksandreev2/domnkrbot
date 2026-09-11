@@ -204,7 +204,7 @@ test('team discovery treats current catalog membership as active while preservin
   assert.match(source, /SELECT \?, book_ref, 'active', 'active'/);
   assert.match(
     source,
-    /WHEN ranobelib_team_translations\.semantic_status = 'completed' THEN 'completed'[\s\S]*ELSE 'active'/,
+    /WHEN excluded\.completion_pending = 1[\s\S]*AND ranobelib_team_translations\.semantic_status = 'completed'[\s\S]*AND ranobelib_team_translations\.completion_pending = 0[\s\S]*THEN 'completed'[\s\S]*WHEN excluded\.completion_pending = 1 THEN 'active'/,
   );
 });
 
