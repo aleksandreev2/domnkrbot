@@ -6,6 +6,7 @@ ALTER TABLE ranobelib_releases
 
 -- Multi-team release ids already encode the stable branch key before the final chapter-id suffix.
 -- Backfill any rows created during a deployment overlap without rewriting legacy release identity.
+-- Use exact prefix equality so stored book_ref data cannot hit SQLite pattern-length limits.
 UPDATE ranobelib_releases
 SET delivery_scope_key = substr(
   substr(id, length('branch-release:v1:' || book_ref || ':') + 1),
@@ -13,7 +14,7 @@ SET delivery_scope_key = substr(
   instr(substr(id, length('branch-release:v1:' || book_ref || ':') + 1), ':') - 1
 )
 WHERE delivery_scope_key IS NULL
-  AND id LIKE 'branch-release:v1:' || book_ref || ':%';
+  AND substr(id, 1, length('branch-release:v1:' || book_ref || ':')) = 'branch-release:v1:' || book_ref || ':';
 
 -- Keep new branch releases scoped without coupling the scanner insert path to rollout-only schema.
 -- encodeURIComponent() escapes ':' inside branch keys, so the first ':' after the prefix is the
@@ -21,7 +22,7 @@ WHERE delivery_scope_key IS NULL
 CREATE TRIGGER IF NOT EXISTS trg_ranobelib_release_delivery_scope
 AFTER INSERT ON ranobelib_releases
 WHEN NEW.delivery_scope_key IS NULL
-  AND NEW.id LIKE 'branch-release:v1:' || NEW.book_ref || ':%'
+  AND substr(NEW.id, 1, length('branch-release:v1:' || NEW.book_ref || ':')) = 'branch-release:v1:' || NEW.book_ref || ':'
 BEGIN
   UPDATE ranobelib_releases
   SET delivery_scope_key = substr(

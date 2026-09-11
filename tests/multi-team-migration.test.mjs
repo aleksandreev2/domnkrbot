@@ -12,6 +12,10 @@ async function baselineResetSql() {
   return readFile(new URL('../migrations/0024_multi_team_branch_baseline_reset.sql', import.meta.url), 'utf8');
 }
 
+async function deliveryScopeSql() {
+  return readFile(new URL('../migrations/0026_multi_team_delivery_scope.sql', import.meta.url), 'utf8');
+}
+
 test('0023 is additive and keeps the legacy delivery path available for rollback', async () => {
   const sql = await migrationSql();
   assert.doesNotMatch(sql, /\bDROP\s+(?:TABLE|COLUMN|INDEX|TRIGGER)\b/i);
@@ -92,4 +96,11 @@ test('0024 forces a silent branch-aware baseline instead of trusting legacy chap
   assert.match(sql, /SELECT id FROM ranobelib_teams WHERE is_primary = 1 LIMIT 1/i);
   assert.doesNotMatch(sql, /INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+ranobelib_releases/i);
   assert.doesNotMatch(sql, /INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+ranobelib_notification_outbox/i);
+});
+
+test('0026 avoids data-dependent LIKE/GLOB patterns when matching branch-release prefixes', async () => {
+  const sql = normalize(await deliveryScopeSql());
+  assert.doesNotMatch(sql, /\b(?:LIKE|GLOB)\b/i);
+  assert.match(sql, /substr\(id, 1, length\('branch-release:v1:' \|\| book_ref \|\| ':'\)\) = 'branch-release:v1:' \|\| book_ref \|\| ':'/i);
+  assert.match(sql, /substr\(NEW\.id, 1, length\('branch-release:v1:' \|\| NEW\.book_ref \|\| ':'\)\) = 'branch-release:v1:' \|\| NEW\.book_ref \|\| ':'/i);
 });
