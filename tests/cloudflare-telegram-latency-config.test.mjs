@@ -28,3 +28,16 @@ test('RanobeLib encryption key stays secret-only without blocking anonymous fall
   assert.ok(!wrangler.secrets?.required?.includes('RANOBELIB_TOKEN_ENCRYPTION_KEY'));
   assert.equal(wrangler.vars?.RANOBELIB_TOKEN_ENCRYPTION_KEY, undefined);
 });
+
+test('production smoke is pinned to the exact Workers Builds git revision', async () => {
+  const wranglerSource = await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8');
+  const wrangler = JSON.parse(wranglerSource);
+  const smoke = await readFile(new URL('../scripts/check-production.mjs', import.meta.url), 'utf8');
+  const workflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+
+  assert.match(String(wrangler.build?.command ?? ''), /write-deploy-revision\.mjs/);
+  assert.match(smoke, /EXPECTED_REVISION/);
+  assert.match(smoke, /\/deploy-revision\.txt/);
+  assert.match(workflow, /EXPECTED_REVISION:\s*\$\{\{\s*github\.sha\s*\}\}/);
+  assert.doesNotMatch(workflow, /EXPECTED_MARKER=.*check-production\.mjs/);
+});
