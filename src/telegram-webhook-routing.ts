@@ -27,6 +27,10 @@ function isCommand(text: string, command: string): boolean {
   return new RegExp(`^/${command}(?:@[A-Za-z0-9_]+)?$`, 'i').test(text.trim());
 }
 
+function isCommandWithArgs(text: string, command: string): boolean {
+  return new RegExp(`^/${command}(?:@[A-Za-z0-9_]+)?\\s+[\\s\\S]+$`, 'i').test(text.trim());
+}
+
 function isDownloadStart(text: string): boolean {
   return /^\/start(?:@[A-Za-z0-9_]+)?\s+dl_\d+\s*$/i.test(text.trim());
 }
@@ -61,7 +65,7 @@ export function classifyTelegramWebhookUpdate(update: TelegramWebhookUpdateLike)
   if (message?.chat?.type === 'private') {
     if (isCommand(text, 'notifications') || isCommand(text, 'subscriptions')) return 'notifications';
     if (isCommand(text, 'stats')) return 'admin-stats';
-    if (isCommand(text, 'ranobelib_auth') || isRanobeLibOAuthCallback(text)) return 'ranobelib-auth';
+    if (isCommand(text, 'ranobelib_auth') || isCommandWithArgs(text, 'ranobelib_import') || isRanobeLibOAuthCallback(text)) return 'ranobelib-auth';
     if (isCommand(text, 'start') || isCommand(text, 'propose')) return 'proposal';
     if (text && !text.startsWith('/')) return 'generic-private-text';
   }
