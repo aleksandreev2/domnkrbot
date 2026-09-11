@@ -74,8 +74,8 @@ export function planMultiTeamRolloutTransition(
       return { allowed: false, next: current, reason: 'Сначала включите Shadow.' };
     }
     if (phase === 'ui') {
-      if (!state.shadow) return { allowed: false, next: current, reason: 'Сначала включите Shadow.' };
       if (!state.delivery) return { allowed: false, next: current, reason: 'Сначала включите Delivery.' };
+      if (!state.shadow) return { allowed: false, next: current, reason: 'Сначала включите Shadow.' };
     }
     return { allowed: true, next: { ...current, [phase]: true }, reason: null };
   }
