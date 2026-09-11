@@ -74,11 +74,25 @@ export async function handleTelegramPartnerCollaboration(
   const dashboardCallback = data === 'prop:notifications' || data === 'subs:center' || data === 'subs:mt:home';
   const homeCallback = data === 'prop:home';
   const partnerAlias = /^subs:mt:partners:(\d+)$/.exec(data);
+  const legacyMineTeamsAlias = /^subs:mt:teams:mine:(\d+)$/.exec(data);
+  const legacyAllTeamsAlias = /^subs:mt:teams:all:(\d+)$/.exec(data);
+  const legacyMineTitlesAlias = /^subs:mt:titles:(\d+)$/.exec(data);
   const parsed = parsePartnerCollaborationCallback(data);
   const teamPage = /^subs:mt:team:(\d+):(active|completed):(\d+)$/.exec(data);
   const teamToggle = /^subs:mt:team:toggle:(\d+):(\d+)$/.exec(data);
 
-  if (!dashboardCommand && !dashboardCallback && !homeCallback && !partnerAlias && !parsed && !teamPage && !teamToggle) {
+  if (
+    !dashboardCommand
+    && !dashboardCallback
+    && !homeCallback
+    && !partnerAlias
+    && !legacyMineTeamsAlias
+    && !legacyAllTeamsAlias
+    && !legacyMineTitlesAlias
+    && !parsed
+    && !teamPage
+    && !teamToggle
+  ) {
     return false;
   }
 
@@ -103,8 +117,21 @@ export async function handleTelegramPartnerCollaboration(
     return true;
   }
 
-  if (partnerAlias || parsed?.kind === 'partners') {
-    const page = partnerAlias ? safePage(partnerAlias[1]) : parsed!.page;
+  if (partnerAlias) {
+    const page = safePage(partnerAlias[1]);
+    const teams = await listPartnerTeams(env, userId, page, 8);
+    await render(env, chatId, messageId, buildPartnerTeamList({ teams, page, origin: 'partners' }), ctx);
+    return true;
+  }
+
+  if (parsed?.kind === 'partners') {
+    const teams = await listPartnerTeams(env, userId, parsed.page, 8);
+    await render(env, chatId, messageId, buildPartnerTeamList({ teams, page: parsed.page, origin: 'partners' }), ctx);
+    return true;
+  }
+
+  if (legacyAllTeamsAlias) {
+    const page = safePage(legacyAllTeamsAlias[1]);
     const teams = await listPartnerTeams(env, userId, page, 8);
     await render(env, chatId, messageId, buildPartnerTeamList({ teams, page, origin: 'partners' }), ctx);
     return true;
@@ -124,9 +151,28 @@ export async function handleTelegramPartnerCollaboration(
     return true;
   }
 
+  if (legacyMineTeamsAlias) {
+    const page = safePage(legacyMineTeamsAlias[1]);
+    const teams = await listMyFollowedTeams(env, userId, page, 8);
+    await render(env, chatId, messageId, buildPartnerTeamList({ teams, page, origin: 'mine' }), ctx);
+    return true;
+  }
+
   if (parsed?.kind === 'my-teams') {
     const teams = await listMyFollowedTeams(env, userId, parsed.page, 8);
     await render(env, chatId, messageId, buildPartnerTeamList({ teams, page: parsed.page, origin: 'mine' }), ctx);
+    return true;
+  }
+
+  if (legacyMineTitlesAlias) {
+    const page = safePage(legacyMineTitlesAlias[1]);
+    const translations = await listMyManualTeamTitles(env, userId, page, 8);
+    await render(env, chatId, messageId, buildPartnerTranslationList({
+      translations,
+      page,
+      completed: false,
+      scope: 'mine',
+    }), ctx);
     return true;
   }
 
