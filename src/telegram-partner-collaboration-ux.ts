@@ -89,7 +89,7 @@ export function buildPartnerTeamList(input: {
     text: `${team.followed ? '🔔 ' : '🤝 '}${truncate(team.displayName, 31)} · ${nonNegative(team.activeCount)}`,
     callback_data: `subs:mt:team:${safeId(team.id)}:active:0`,
   }]);
-  const pager = pageButtons(page, input.teams.length >= 8, (target) => input.origin === 'partners'
+  const pager = pageButtons(page, input.teams.length > 8, (target) => input.origin === 'partners'
     ? `subs:pc:catalog:partners:${target}`
     : `subs:pc:mine:teams:${target}`);
   if (pager) rows.push(pager);
@@ -123,7 +123,7 @@ export function buildPartnerTranslationList(input: {
     if (input.scope === 'mine') return `subs:pc:mine:titles:${target}`;
     return `subs:pc:catalog:${input.completed ? 'completed' : 'active'}:${target}`;
   };
-  const pager = pageButtons(page, input.translations.length >= 8, callback);
+  const pager = pageButtons(page, input.translations.length > 8, callback);
   if (pager) rows.push(pager);
   rows.push([{
     text: input.scope === 'mine' ? '↩️ К моим подпискам' : '↩️ К каталогу',

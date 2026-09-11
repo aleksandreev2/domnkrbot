@@ -278,7 +278,7 @@ async function listPartnerTeams(
     GROUP BY team.id, team.display_name, team.is_primary, sub.team_id
     ORDER BY team.display_name COLLATE NOCASE ASC, team.id ASC
     LIMIT ? OFFSET ?
-  `).bind(userId, limit, offset).all<TeamRow>();
+  `).bind(userId, limit + 1, offset).all<TeamRow>();
   return results.map(teamFromRow);
 }
 
@@ -297,7 +297,7 @@ async function listCatalogTranslations(
       AND ${completed ? "tt.semantic_status='completed'" : "tt.semantic_status<>'completed'"}
     ORDER BY title COLLATE NOCASE ASC, team.is_primary DESC, team.display_name COLLATE NOCASE ASC, team.id ASC
     LIMIT ? OFFSET ?
-  `).bind(userId, userId, userId, limit, offset).all<TranslationRow>();
+  `).bind(userId, userId, userId, limit + 1, offset).all<TranslationRow>();
   return results.map(translationFromRow);
 }
 

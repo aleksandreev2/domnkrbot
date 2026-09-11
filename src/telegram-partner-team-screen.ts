@@ -13,7 +13,7 @@ export function buildPartnerAwareTeamScreen(input: {
     text: `${input.completed ? '✅' : translation.enabled ? '🔔' : '📚'} ${truncate(translation.title, 42)}`,
     callback_data: `subs:mt:title:${safeId(translation.teamId)}:${safeId(translation.ranobelibId)}:${input.completed ? 'completed' : 'team'}:${page}`,
   }]);
-  const pager = pageButtons(page, input.translations.length >= 8, (target) => `subs:mt:team:${input.team.id}:${status}:${target}`);
+  const pager = pageButtons(page, input.translations.length > 8, (target) => `subs:mt:team:${input.team.id}:${status}:${target}`);
   if (pager) rows.push(pager);
   if (!input.completed && input.team.completedCount > 0) {
     rows.push([{ text: `✅ Завершённые (${nonNegative(input.team.completedCount)})`, callback_data: `subs:mt:team:${input.team.id}:completed:0` }]);

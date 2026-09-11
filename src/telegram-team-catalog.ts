@@ -103,7 +103,7 @@ export async function listPublishedTeams(
     GROUP BY team.id, team.display_name, team.is_primary, sub.team_id
     ORDER BY team.is_primary DESC, team.display_name COLLATE NOCASE ASC, team.id ASC
     LIMIT ? OFFSET ?
-  `).bind(userId, limit, offset).all<TeamRow>();
+  `).bind(userId, limit + 1, offset).all<TeamRow>();
   return results.map(teamFromRow);
 }
 
@@ -126,7 +126,7 @@ export async function listMyFollowedTeams(
     GROUP BY team.id, team.display_name, team.is_primary
     ORDER BY team.is_primary DESC, team.display_name COLLATE NOCASE ASC, team.id ASC
     LIMIT ? OFFSET ?
-  `).bind(userId, limit, offset).all<TeamRow>();
+  `).bind(userId, limit + 1, offset).all<TeamRow>();
   return results.map(teamFromRow);
 }
 
@@ -146,7 +146,7 @@ export async function listTeamTranslations(
       AND ${completed ? "tt.semantic_status='completed'" : "tt.semantic_status<>'completed'"}
     ORDER BY title COLLATE NOCASE ASC, t.ranobelib_id ASC
     LIMIT ? OFFSET ?
-  `).bind(userId, userId, userId, teamId, limit, offset).all<TranslationRow>();
+  `).bind(userId, userId, userId, teamId, limit + 1, offset).all<TranslationRow>();
   return results.map(translationFromRow);
 }
 
@@ -173,7 +173,7 @@ export async function listMyManualTeamTitles(
       )
     ORDER BY title COLLATE NOCASE ASC, team.display_name COLLATE NOCASE ASC, t.ranobelib_id ASC
     LIMIT ? OFFSET ?
-  `).bind(userId, userId, userId, userId, userId, limit, offset).all<TranslationRow>();
+  `).bind(userId, userId, userId, userId, userId, limit + 1, offset).all<TranslationRow>();
   return results.map(translationFromRow);
 }
 
