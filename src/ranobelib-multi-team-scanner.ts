@@ -105,6 +105,21 @@ export function classifyUnattributedTeamPayload(input: {
   return 'error';
 }
 
+export async function withOneTransientD1Retry<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isTransientD1ResetError(error)) throw error;
+    return operation();
+  }
+}
+
+function isTransientD1ResetError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /D1_ERROR:[\s\S]*object to be reset/i.test(message)
+    || /D1 DB storage caused object to be reset/i.test(message);
+}
+
 export async function scanDueMultiTeamWorks(
   env: MultiTeamScannerEnv,
   options: MultiTeamScanOptions,
@@ -118,7 +133,9 @@ export async function scanDueMultiTeamWorks(
   const now = options.now ?? new Date();
   const outcomes = await mapWithConcurrency(selected, CONCURRENCY, async (work) => {
     try {
-      return await scanOneMultiTeamWork(env, client, work, options.mode, scanClass, now);
+      return await withOneTransientD1Retry(
+        () => scanOneMultiTeamWork(env, client, work, options.mode, scanClass, now),
+      );
     } catch (error) {
       await scheduleWorkFailure(env.DB, work.book_ref, error);
       return {
