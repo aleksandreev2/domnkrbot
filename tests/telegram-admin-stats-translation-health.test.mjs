@@ -135,3 +135,14 @@ test('translation health SQL excludes removed team titles from unknown/error hea
   assert.match(source, /sync_error\s+IS\s+NOT\s+NULL[\s\S]{0,180}is_active\s*=\s*1|is_active\s*=\s*1[\s\S]{0,180}sync_error\s+IS\s+NOT\s+NULL/i);
   assert.match(source, /WHERE\s+is_active\s*=\s*1[\s\S]{0,260}translation_is_completed\s+IS\s+NULL/i);
 });
+
+test('multi-team rollout stats use published team subscriptions and partner-only active work health', () => {
+  const source = readFileSync(new URL('../src/telegram-admin-stats.ts', import.meta.url), 'utf8');
+  assert.match(source, /telegram_team_subscriptions/i);
+  assert.match(source, /telegram_team_title_subscriptions/i);
+  assert.match(source, /telegram_team_title_delivery_settings/i);
+  assert.match(source, /ranobelib_team_translations/i);
+  assert.match(source, /lifecycle_state\s*=\s*'published'/i);
+  assert.match(source, /presence_state\s*=\s*'active'/i);
+  assert.match(source, /ranobelib_multi_team_delivery/i);
+});
