@@ -56,6 +56,7 @@
     "src/ranobelib-fast-scanner.ts",
     "src/ranobelib-auth.ts",
     "src/ranobelib-auth-admin.ts",
+    "src/ranobelib-auth-alerts.ts",
     "src/ranobelib-client-factory.ts",
     "src/ranobelib-discovery-scheduler.ts",
     "src/telegram-notification-delivery-groups.ts",
