@@ -38,5 +38,6 @@ test('production smoke is pinned to the exact Workers Builds git revision', asyn
   assert.match(smoke, /EXPECTED_REVISION/);
   assert.match(smoke, /GITHUB_SHA/);
   assert.match(smoke, /\/deploy-revision\.txt/);
-  assert.match(smoke, /revision\.text\.trim\(\)\s*===\s*expectedRevision/);
+  assert.match(smoke, /const\s+deployedRevision\s*=\s*revision\.text\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(smoke, /revision\.text\.trim\(\)\.toLowerCase\(\)\s*===\s*expectedRevision/);
 });
