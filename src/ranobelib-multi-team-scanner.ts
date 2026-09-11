@@ -18,6 +18,7 @@ export {
 
 export type MultiTeamScanMode = 'baseline' | 'shadow' | 'live';
 export type MultiTeamScanClass = 'hot' | 'idle' | 'all';
+export type UnattributedTeamPayloadDisposition = 'ok' | 'awaiting-first-team-branch' | 'error';
 
 export type MultiTeamScanOptions = {
   limit?: number;
@@ -87,6 +88,21 @@ export function computeMultiTeamNextCheckDelayMinutes(input: {
   if (input.changed) return 1;
   const misses = Math.max(0, Math.floor(Number(input.consecutiveNoChange) || 0));
   return misses <= 2 ? 2 : 5;
+}
+
+export function classifyUnattributedTeamPayload(input: {
+  fetchedBranchCount: number;
+  relevantBranchCount: number;
+  translations: readonly { baselineReady: boolean; completionPending: boolean }[];
+}): UnattributedTeamPayloadDisposition {
+  if (input.fetchedBranchCount <= 0 || input.relevantBranchCount > 0) return 'ok';
+  if (
+    input.translations.length > 0
+    && input.translations.every((row) => !row.baselineReady && !row.completionPending)
+  ) {
+    return 'awaiting-first-team-branch';
+  }
+  return 'error';
 }
 
 export async function scanDueMultiTeamWorks(
@@ -237,8 +253,24 @@ async function scanOneMultiTeamWork(
   const relevant = fetched
     .map((branch) => mapBranchToRegisteredTeams(branch, upstreamToInternal))
     .filter((value): value is { branch: RanobeLibChapterBranch; teamIds: number[] } => value !== null);
-  if (fetched.length > 0 && relevant.length === 0) {
-    throw new Error('RanobeLib returned chapters but none were attributable to a registered actionable team');
+  const attributionDisposition = classifyUnattributedTeamPayload({
+    fetchedBranchCount: fetched.length,
+    relevantBranchCount: relevant.length,
+    translations: translations.map((row) => ({
+      baselineReady: Number(row.baseline_ready) === 1,
+      completionPending: Number(row.completion_pending) === 1,
+    })),
+  });
+  if (attributionDisposition === 'awaiting-first-team-branch') {
+    await recordAwaitingFirstTeamBranch(env.DB, work, scanClass);
+    return { fetchedWorks: 1, detectedReleases: 0, persistedReleases: 0, ambiguousBranches: 0 };
+  }
+  if (attributionDisposition === 'error') {
+    const expectedTeamIds = [...upstreamToInternal.keys()].sort((a, b) => a - b);
+    const actualTeamIds = [...new Set(fetched.flatMap((branch) => branch.teamIds))].sort((a, b) => a - b);
+    throw new Error(
+      `RanobeLib returned chapters but none were attributable to a registered actionable team; expected upstream team IDs [${expectedTeamIds.join(',')}], actual [${actualTeamIds.join(',')}]`,
+    );
   }
   const ambiguousBranches = relevant.reduce(
     (count, value) => count + (value.branch.identityConfidence === 'ambiguous' ? 1 : 0),
@@ -657,6 +689,30 @@ async function updateWorkAfterSuccessfulScan(
     changed ? 1 : 0,
     work.book_ref,
   ).run();
+}
+
+async function recordAwaitingFirstTeamBranch(
+  db: D1DatabaseLike,
+  work: DueWork,
+  scanClass: MultiTeamScanClass,
+): Promise<void> {
+  const previousMisses = Math.max(0, Math.floor(Number(work.consecutive_no_change ?? 0)));
+  const misses = previousMisses + 1;
+  const delay = computeMultiTeamNextCheckDelayMinutes({
+    scanClass,
+    changed: false,
+    consecutiveNoChange: misses,
+  });
+  await db.prepare(`
+    UPDATE ranobelib_titles
+    SET last_synced_at = CURRENT_TIMESTAMP,
+        consecutive_no_change = ?,
+        consecutive_failures = 0,
+        next_check_at = datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes'),
+        scan_priority = MAX(scan_priority - 1, 0),
+        sync_error = NULL
+    WHERE book_ref = ?
+  `).bind(misses, delay, work.book_ref).run();
 }
 
 async function scheduleNextWorkCheck(
