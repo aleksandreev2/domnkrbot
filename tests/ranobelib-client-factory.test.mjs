@@ -66,3 +66,33 @@ test('environment-aware client keeps anonymous reads working when no key is conf
   await client.getTranslationStatus('1--public');
   assert.equal(headers[0].Authorization, undefined);
 });
+
+test('environment-aware client retries one transient RanobeLib 5xx read before surfacing an error', async () => {
+  let calls = 0;
+  const client = createRanobeLibClient({ DB: memoryDb() }, { fetchImpl: async () => {
+    calls += 1;
+    if (calls === 1) {
+      return Response.json({ message: 'temporary upstream failure' }, {
+        status: 500,
+        statusText: 'Internal Server Error',
+      });
+    }
+    return Response.json({ data: [] });
+  } });
+
+  const branches = await client.getChapterBranches('68760--cultivation-online');
+
+  assert.deepEqual(branches, []);
+  assert.equal(calls, 2);
+});
+
+test('environment-aware client does not retry permanent 4xx reads', async () => {
+  let calls = 0;
+  const client = createRanobeLibClient({ DB: memoryDb() }, { fetchImpl: async () => {
+    calls += 1;
+    return Response.json({ message: 'not found' }, { status: 404, statusText: 'Not Found' });
+  } });
+
+  await assert.rejects(() => client.getChapterBranches('1--missing'), /404 Not Found/);
+  assert.equal(calls, 1);
+});
