@@ -56,11 +56,13 @@ export function detectRecentBootstrapReleaseCandidates(
  * Repairs snapshots created by the old sync logic, which could persist a scheduled
  * chapter before its RanobeLib branch publication time. Once that publication time
  * is reached, firstSeenAt < releasedAt proves the row was observed prematurely.
+ * A recorded release boundary makes this recovery one-shot and prevents historical replay.
  */
 export function detectScheduledReleaseTransitions(
   previous: RanobeLibChapter[],
   current: RanobeLibChapter[],
   nowMs = Date.now(),
+  releasedAfterMs: number | null = null,
 ): RanobeLibChapter[] {
   const previousById = new Map(previous.map((chapter) => [chapter.id, chapter]));
   return sortChapters(current.filter((chapter) => {
@@ -69,6 +71,7 @@ export function detectScheduledReleaseTransitions(
     const firstSeenMs = parseTimestamp(stored.firstSeenAt);
     const releasedMs = parseTimestamp(chapter.releasedAt);
     if (firstSeenMs === null || releasedMs === null) return false;
+    if (releasedAfterMs !== null && Number.isFinite(releasedAfterMs) && releasedMs <= releasedAfterMs) return false;
     return firstSeenMs < releasedMs && releasedMs <= nowMs;
   }));
 }
