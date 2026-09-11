@@ -7,6 +7,7 @@ import { multiTeamDeliveryScopeKey } from '../dist-runtime/ranobelib-multi-team-
 
 const deliverySource = readFileSync(new URL('../src/telegram-multi-team-delivery.ts', import.meta.url), 'utf8');
 const entrySource = readFileSync(new URL('../src/live-entry-v3.ts', import.meta.url), 'utf8');
+const schedulerSource = readFileSync(new URL('../src/live-entry-v2.ts', import.meta.url), 'utf8');
 const scannerSource = readFileSync(new URL('../src/ranobelib-multi-team-scanner.ts', import.meta.url), 'utf8');
 const migration = readFileSync(new URL('../migrations/0026_multi_team_delivery_scope.sql', import.meta.url), 'utf8');
 
@@ -116,6 +117,14 @@ test('instant chapter groups use a short bounded coalescing window while complet
   assert.match(deliverySource, /const\s+INSTANT_COALESCE_SECONDS\s*=\s*30\s*;/);
   assert.match(deliverySource, /translation_completed=1[\s\S]*delivery_mode<>'stack'[\s\S]*oldest_pending_at<=datetime\('now','-\$\{INSTANT_COALESCE_SECONDS\} seconds'\)/);
   assert.doesNotMatch(deliverySource, /OR\s+delivery_mode<>'stack'\s+OR/);
+});
+
+test('live scanner schedules a delayed queue wakeup after the instant coalescing window', () => {
+  assert.match(schedulerSource, /send\(\{\s*kind:\s*'drain'\s*\},\s*\{\s*delaySeconds\s*\}/);
+  assert.match(
+    schedulerSource,
+    /scan\.persistedReleases\s*>\s*0[\s\S]*queueNotificationWakeup\(env\)[\s\S]*queueNotificationWakeup\(env,\s*31\)/,
+  );
 });
 
 test('v3 entry switches queue and fallback cron to the multi-team drain only when delivery rollout is enabled', () => {

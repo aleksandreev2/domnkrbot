@@ -61,7 +61,8 @@ import {
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
 type NotificationWakeup = { kind: 'drain' };
-type QueueProducerLike = { send(message: NotificationWakeup): Promise<void> };
+type QueueSendOptions = { delaySeconds?: number };
+type QueueProducerLike = { send(message: NotificationWakeup, options?: QueueSendOptions): Promise<void> };
 type QueueMessageLike = { body: unknown };
 type QueueBatchLike = { messages: QueueMessageLike[] };
 type TelegramWebhookUpdate = Parameters<typeof classifyTelegramWebhookUpdate>[0];
@@ -90,14 +91,16 @@ type Env = PublicationCommentGateEnv
     NOTIFICATION_QUEUE?: QueueProducerLike;
   };
 
-async function queueNotificationWakeup(env: Env): Promise<boolean> {
+async function queueNotificationWakeup(env: Env, delaySeconds = 0): Promise<boolean> {
   try {
-    const send = env.NOTIFICATION_QUEUE?.send({ kind: 'drain' });
+    const send = delaySeconds > 0
+      ? env.NOTIFICATION_QUEUE?.send({ kind: 'drain' }, { delaySeconds })
+      : env.NOTIFICATION_QUEUE?.send({ kind: 'drain' });
     if (!send) return false;
     await send;
     return true;
   } catch (error) {
-    console.error('Notification Queue wake-up failed', error);
+    console.error('Notification Queue wake-up failed', { delaySeconds, error });
     return false;
   }
 }
@@ -245,7 +248,10 @@ export default {
         mode: 'live',
         scanClass: 'hot',
       });
-      if (scan.persistedReleases > 0) await queueNotificationWakeup(env);
+      if (scan.persistedReleases > 0) {
+        await queueNotificationWakeup(env);
+        await queueNotificationWakeup(env, 31);
+      }
       console.log('RanobeLib fast scan complete', { cron: controller.cron, mode, ...scan });
       return;
     }
@@ -283,7 +289,10 @@ export default {
         mode: 'live',
         scanClass: 'idle',
       });
-      if (scan.persistedReleases > 0) await queueNotificationWakeup(env);
+      if (scan.persistedReleases > 0) {
+        await queueNotificationWakeup(env);
+        await queueNotificationWakeup(env, 31);
+      }
       console.log('RanobeLib idle scan complete', { cron: controller.cron, mode, ...scan });
       return;
     }
