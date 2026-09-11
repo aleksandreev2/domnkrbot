@@ -186,12 +186,6 @@ export async function supplementPartnerHistory(
   const booksByRef = new Map(catalogBooks.map((book) => [cleanRef(book.ref), book]));
   const preserved = new Set<string>();
 
-  // Primary-team discovery remains exactly on the established API path. The secondary source is
-  // only needed for partner history, where RanobeLib can omit older relations from target_model=team.
-  if (team.isPrimary) {
-    return { books: [...booksByRef.values()], preservedRefs: [] };
-  }
-
   if (client.discoverTeamHistoryBooks) {
     try {
       const historyBooks = await client.discoverTeamHistoryBooks(team.ranobelibTeamRef);
@@ -201,6 +195,12 @@ export async function supplementPartnerHistory(
     } catch (error) {
       console.error('RanobeLib partner chapter history fallback failed', team.ranobelibTeamRef, compactError(error));
     }
+  }
+
+  // Exact chapter-team attribution is safe for every team and covers titles hidden from the
+  // anonymous catalog. Keep the less authoritative HTML/detail fallback partner-only.
+  if (team.isPrimary) {
+    return { books: [...booksByRef.values()], preservedRefs: [] };
   }
 
   if (!client.discoverTeamPageBooks || !client.getTeamAttributedBook) {

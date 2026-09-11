@@ -121,6 +121,31 @@ test('partner discovery directly merges titles exactly attributed by team chapte
   assert.deepEqual(result.preservedRefs, []);
 });
 
+test('primary-team discovery also merges auth-hidden titles from exact chapter history', async () => {
+  const { supplementPartnerHistory } = await discovery();
+  const catalogRef = '202991--i-became-the-academys-kibitz-villain';
+  const hiddenRef = '68760--cultivation-online';
+  const book = (id, ref, title) => ({
+    id,
+    ref,
+    slug: ref.split('--').slice(1).join('--'),
+    url: `https://ranobelib.me/ru/book/${ref}`,
+    title,
+  });
+
+  const result = await supplementPartnerHistory(
+    { isPrimary: true, ranobelibTeamRef: '11969--dom-nekromanta' },
+    {
+      discoverTeamBooks: async () => [book(202991, catalogRef, 'Я стал злодеем Академии')],
+      discoverTeamHistoryBooks: async () => [book(68760, hiddenRef, 'Культивация Онлайн')],
+    },
+    [book(202991, catalogRef, 'Я стал злодеем Академии')],
+    [],
+  );
+
+  assert.deepEqual(result.books.map((value) => value.ref).sort(), [catalogRef, hiddenRef].sort());
+});
+
 test('team discovery treats current catalog membership as active while preserving confirmed completion', async () => {
   const source = await readFile(new URL('../src/ranobelib-multi-team-discovery.ts', import.meta.url), 'utf8');
 
