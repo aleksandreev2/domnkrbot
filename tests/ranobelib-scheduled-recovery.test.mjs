@@ -32,6 +32,14 @@ test('recovers a scheduled chapter that was snapshotted before its release time 
   );
   assert.deepEqual(recovered.map((chapter) => chapter.number), ['52']);
 
+  const alreadyHandled = ranobelib.detectScheduledReleaseTransitions(
+    previous,
+    current,
+    new Date('2026-09-02T07:00:00.000Z').getTime(),
+    new Date('2026-09-02T06:00:00.000Z').getTime(),
+  );
+  assert.deepEqual(alreadyHandled, [], 'a scheduled chapter older than the last recorded release must not be replayed');
+
   const notYetReleased = ranobelib.detectScheduledReleaseTransitions(
     previous,
     current,
@@ -91,4 +99,15 @@ test('fast scanner wires recent bootstrap recovery into release creation', () =>
   assert.match(scanner, /detectRecentBootstrapReleaseCandidates/);
   assert.match(scanner, /hasRecordedRelease/);
   assert.match(scanner, /releaseChapters/);
+});
+
+test('legacy scanner keeps the seen chapter ledger monotonic across transient upstream omissions', () => {
+  const scanner = readFileSync(new URL('../src/ranobelib-fast-scanner.ts', import.meta.url), 'utf8');
+  assert.doesNotMatch(scanner, /await\s+deleteChapters\s*\(/, 'temporarily missing chapters must stay remembered so they cannot be announced again');
+});
+
+test('legacy scanner bounds scheduled-release recovery by the last recorded release', () => {
+  const scanner = readFileSync(new URL('../src/ranobelib-fast-scanner.ts', import.meta.url), 'utf8');
+  assert.match(scanner, /lastReleaseMs\s*=\s*timestampMs\(state\?\.last_release_at/);
+  assert.match(scanner, /detectScheduledReleaseTransitions\(previousRows,\s*chapters,\s*now\.getTime\(\),\s*lastReleaseMs\)/);
 });
