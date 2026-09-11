@@ -7,7 +7,9 @@ export function createRanobeLibClient(
   env: RanobeLibClientFactoryEnv,
   options: Omit<RanobeLibClientOptions, 'authProvider'> = {},
 ): RanobeLibClient {
-  const secretConfigured = Boolean(env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim());
+  const secretConfigured = Boolean(
+    env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim() || env.TELEGRAM_BOT_TOKEN?.trim(),
+  );
   const authProvider = secretConfigured
     ? new RanobeLibAuthProvider(env, { fetchImpl: options.fetchImpl })
     : undefined;
