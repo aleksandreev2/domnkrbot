@@ -214,6 +214,7 @@ async function loadClaimedMultiTeamDeliveryRows(
           FROM ranobelib_release_teams rt
           JOIN ranobelib_teams team ON team.id=rt.team_id
           WHERE rt.release_id=c.release_id
+            AND team.lifecycle_state='published'
           ORDER BY team.is_primary DESC, team.display_name COLLATE NOCASE ASC, team.id ASC
         )
       ) AS team_names_json
