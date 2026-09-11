@@ -3,6 +3,9 @@ import { createRanobeLibClient } from './ranobelib-client-factory.js';
 import type { RanobeLibChapterBranch } from './integrations/ranobelib/types.js';
 import type { D1DatabaseLike, D1PreparedStatementLike } from './ranobelib-runtime.js';
 import { reconcileReleaseOutboxRecipients } from './multi-team-notification-demand.js';
+import { computeTeamScopedScanPlan, multiTeamDeliveryScopeKey } from './multi-team-scan-plan.js';
+
+export { computeTeamScopedScanPlan, multiTeamDeliveryScopeKey } from './multi-team-scan-plan.js';
 
 export type MultiTeamScanMode = 'baseline' | 'shadow' | 'live';
 export type MultiTeamScanClass = 'hot' | 'idle' | 'all';
@@ -55,6 +58,7 @@ type StoredBranchRow = {
 
 type ReleaseCandidate = {
   branchKey: string;
+  deliveryScopeKey: string;
   teamIds: number[];
   chapters: RanobeLibChapterBranch[];
 };
@@ -204,6 +208,9 @@ async function scanOneMultiTeamWork(
   const relevant = fetched
     .map((branch) => mapBranchToRegisteredTeams(branch, upstreamToInternal))
     .filter((value): value is { branch: RanobeLibChapterBranch; teamIds: number[] } => value !== null);
+  if (fetched.length > 0 && relevant.length === 0) {
+    throw new Error('RanobeLib returned chapters but none were attributable to a registered actionable team');
+  }
   const ambiguousBranches = relevant.reduce(
     (count, value) => count + (value.branch.identityConfidence === 'ambiguous' ? 1 : 0),
     0,
@@ -215,14 +222,32 @@ async function scanOneMultiTeamWork(
     WHERE book_ref = ?
   `).bind(work.book_ref).all<StoredBranchRow>();
   const storedKeys = new Set(storedRows.map((row) => branchSnapshotKey(Number(row.chapter_id), row.branch_key)));
-  const baselineNeeded = translations.some((row) => Number(row.baseline_ready) !== 1);
-
-  const candidates = baselineNeeded
-    ? []
-    : groupReleaseCandidates(relevant.filter(({ branch }) => !storedKeys.has(branchSnapshotKey(branch.chapterId, branch.branchKey))));
+  const plan = computeTeamScopedScanPlan({
+    translations: translations.map((row) => ({
+      teamId: Number(row.internal_team_id),
+      baselineReady: Number(row.baseline_ready) === 1,
+    })),
+    branches: relevant.map(({ branch, teamIds }) => ({
+      chapterId: branch.chapterId,
+      branchKey: branch.branchKey,
+      teamIds,
+    })),
+    storedBranchKeys: [...storedKeys],
+    fetchedBranchCount: fetched.length,
+  });
+  const releasableTeams = new Map(plan.releasableBranches.map((branch) => [
+    branchSnapshotKey(branch.chapterId, branch.branchKey),
+    branch.teamIds,
+  ]));
+  const candidates = groupReleaseCandidates(relevant
+    .map(({ branch }) => {
+      const teamIds = releasableTeams.get(branchSnapshotKey(branch.chapterId, branch.branchKey));
+      return teamIds?.length ? { branch, teamIds } : null;
+    })
+    .filter((value): value is { branch: RanobeLibChapterBranch; teamIds: number[] } => value !== null));
 
   let persistedReleases = 0;
-  if (mode === 'live' && !baselineNeeded) {
+  if (mode === 'live') {
     for (const candidate of candidates) {
       if (await persistBranchRelease(env, work, candidate)) persistedReleases += 1;
     }
@@ -230,9 +255,10 @@ async function scanOneMultiTeamWork(
 
   // Baseline and shadow modes intentionally advance the canonical branch snapshot. During shadow,
   // legacy delivery remains authoritative, so advancing here prevents a replay when live cutover
-  // happens. In live mode release rows are written before the snapshot so retry can recover safely.
+  // happens. Team-scoped baseline consumes history only for the new team while already-baselined
+  // teams may still release fresh branches from the same work.
   await persistBranchSnapshot(env.DB, work.book_ref, relevant);
-  await markTranslationsBaselined(env.DB, work.book_ref, translations.map((row) => Number(row.internal_team_id)));
+  await markTranslationsBaselined(env.DB, work.book_ref, plan.teamIdsToBaseline);
   await updateWorkAfterSuccessfulScan(env.DB, work, relevant.map(({ branch }) => branch), scanClass, candidates.length > 0, now);
 
   return {
@@ -283,6 +309,7 @@ function groupReleaseCandidates(
     if (existing) existing.chapters.push(value.branch);
     else groups.set(groupKey, {
       branchKey: value.branch.branchKey,
+      deliveryScopeKey: multiTeamDeliveryScopeKey(value.branch, value.teamIds),
       teamIds: value.teamIds,
       chapters: [value.branch],
     });
@@ -311,8 +338,8 @@ async function persistBranchRelease(
       id, book_ref, title_snapshot, chapter_count,
       first_chapter_id, first_volume, first_number,
       last_chapter_id, last_volume, last_number,
-      summary, release_kind, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'chapters', CURRENT_TIMESTAMP)
+      summary, release_kind, delivery_scope_key, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'chapters', ?, CURRENT_TIMESTAMP)
   `).bind(
     releaseId,
     work.book_ref,
@@ -325,6 +352,7 @@ async function persistBranchRelease(
     last.volume,
     last.number,
     summary,
+    candidate.deliveryScopeKey,
   );
   const teamStatements = candidate.teamIds.map((teamId) => env.DB.prepare(`
     INSERT OR IGNORE INTO ranobelib_release_teams (release_id, team_id)
