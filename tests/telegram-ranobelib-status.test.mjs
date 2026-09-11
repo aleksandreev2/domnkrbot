@@ -28,8 +28,9 @@ class StatusDb {
   prepare(sql) { const statement = new Statement(this, sql); this.calls.push(statement); return statement; }
   first(sql) {
     if (/FROM ranobelib_auth_credentials/i.test(sql)) return null;
-    if (/FROM ranobelib_titles/i.test(sql) && /WHERE book_ref=\?/i.test(sql)) return {
+    if (/FROM ranobelib_titles/i.test(sql) && /WHERE t\.book_ref=\?/i.test(sql)) return {
       book_ref: '247881--test-book', ranobelib_id: 247881, title: 'Тестовый тайтл', chapter_count: 123,
+      work_notification_demand: 14,
       latest_volume: '4', latest_number: '123', latest_name: 'Финал',
       last_synced_at: '2026-09-11 18:00:00', next_check_at: '2026-09-11 18:05:00',
       sync_error: null, consecutive_failures: 0,
@@ -47,7 +48,7 @@ class StatusDb {
     if (/FROM ranobelib_team_translations/i.test(sql)) return [{
       display_name: 'Дом Некроманта', ranobelib_team_id: 11969, lifecycle_state: 'published',
       presence_state: 'active', semantic_status: 'active', baseline_ready: 1,
-      notification_subscriber_count: 14, last_synced_at: '2026-09-11 18:00:00', sync_error: null,
+      last_synced_at: '2026-09-11 18:00:00', sync_error: null,
     }];
     return [];
   }
@@ -88,9 +89,11 @@ test('/ranobelib_status renders operational title diagnostics without credential
     assert.ok(send);
     const text = send.body.text;
     assert.match(text, /Тестовый тайтл/);
+    assert.match(text, /Work demand \(hot-scan\):.*14/);
     assert.match(text, /Последняя известная глава:.*т\.4 гл\.123.*Финал/);
     assert.match(text, /Health:.*missing/);
-    assert.match(text, /Дом Некроманта.*published\/active\/active.*baseline.*ready.*demand.*14/);
+    assert.match(text, /Дом Некроманта.*published\/active\/active.*baseline.*ready/);
+    assert.doesNotMatch(text, /Дом Некроманта[^\n]*demand/i);
     assert.match(text, /Следующая проверка/);
     assert.match(text, /Последний release/);
     assert.match(text, /pending.*2.*retry.*1.*sent.*90.*disabled.*3/);
