@@ -1,4 +1,5 @@
 import { RanobeLibClient } from './integrations/ranobelib/client.js';
+import { formatTeamAwareReleaseNotification } from './multi-team-notification-render.js';
 import {
   getMultiTeamRollout,
   setMultiTeamRolloutFlag,
@@ -15,6 +16,7 @@ import {
   setRanobeLibTeamLifecycle,
   type RanobeLibTeamRecord,
 } from './ranobelib-team-registry.js';
+import { loadTeamAdminNotificationPreview, type TeamAdminNotificationPreview } from './team-admin-notification-preview.js';
 import { mainMenuButton, type TelegramButton, type TelegramPayload } from './telegram-bot-ui.js';
 
 export type TelegramTeamAdminEnv = {
@@ -178,6 +180,7 @@ export function buildTeamAdminCard(team: RanobeLibTeamRecord, diagnostics?: Team
     if (team.lifecycleState === 'paused') rows.push([{ text: '▶️ Возобновить', callback_data: `teamadmin:resume:${team.id}` }]);
   }
   rows.push([{ text: '🔄 Синхронизировать', callback_data: `teamadmin:sync:${team.id}` }]);
+  rows.push([{ text: '🧪 Тест уведомления', callback_data: `teamadmin:test-notification:${team.id}` }]);
   rows.push([{ text: '📣 Канал рекомендации', callback_data: `teamadmin:channel:${team.id}` }]);
   if (team.recommendationChatId) rows.push([{ text: '❌ Убрать канал рекомендации', callback_data: `teamadmin:channel:clear:${team.id}` }]);
   rows.push([{ text: '↩️ Ко всем командам', callback_data: 'teamadmin:home' }], [mainMenuButton()]);
@@ -200,6 +203,20 @@ export function buildTeamAdminCard(team: RanobeLibTeamRecord, diagnostics?: Team
     parse_mode: 'HTML',
     reply_markup: { inline_keyboard: rows },
   };
+}
+
+export function buildTeamAdminTestNotificationPayload(input: TeamAdminNotificationPreview): TelegramPayload {
+  return formatTeamAwareReleaseNotification({
+    ...(input.titleId ? { titleId: input.titleId } : {}),
+    title: input.title,
+    url: input.readUrl,
+    chapterCount: 1,
+    firstNumber: input.number,
+    lastNumber: input.number,
+    summary: input.chapterName ?? '',
+    subscribed: true,
+    teamNames: input.teamNames,
+  });
 }
 
 export async function handleTelegramTeamAdmin(
@@ -362,6 +379,22 @@ export async function handleTelegramTeamAdmin(
     return showTeam(env, chatId, teamId);
   }
 
+  match = /^teamadmin:test-notification:(\d+)$/.exec(data);
+  if (match) {
+    const teamId = Number(match[1]);
+    const team = await getRanobeLibTeamById(env, teamId);
+    if (!team) {
+      await sendPayload(env, chatId, simpleAdminMessage('Команда не найдена.'));
+      return true;
+    }
+    try {
+      await sendTeamAdminTestNotification(env, chatId, team);
+    } catch (error) {
+      await sendPayload(env, chatId, simpleAdminMessage(`Не удалось отправить тестовое уведомление: <code>${escapeHtml(compactError(error))}</code>`));
+    }
+    return true;
+  }
+
   match = /^teamadmin:channel:(\d+)$/.exec(data);
   if (match) {
     const teamId = Number(match[1]);
@@ -498,6 +531,15 @@ async function applyMultiTeamRolloutState(
   for (const [flag, enabled] of changes) {
     await setMultiTeamRolloutFlag(env, flag, enabled);
   }
+}
+
+async function sendTeamAdminTestNotification(
+  env: TelegramTeamAdminEnv,
+  chatId: number,
+  team: RanobeLibTeamRecord,
+): Promise<void> {
+  const preview = await loadTeamAdminNotificationPreview(env.DB, team);
+  await sendPayload(env, chatId, buildTeamAdminTestNotificationPayload(preview));
 }
 
 async function loadTeamTranslationDiagnostics(env: TelegramTeamAdminEnv, teamId: number): Promise<TeamTranslationDiagnostics> {
