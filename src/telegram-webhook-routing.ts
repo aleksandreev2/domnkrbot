@@ -65,7 +65,13 @@ export function classifyTelegramWebhookUpdate(update: TelegramWebhookUpdateLike)
   if (message?.chat?.type === 'private') {
     if (isCommand(text, 'notifications') || isCommand(text, 'subscriptions')) return 'notifications';
     if (isCommand(text, 'stats')) return 'admin-stats';
-    if (isCommand(text, 'ranobelib_auth') || isCommandWithArgs(text, 'ranobelib_import') || isRanobeLibOAuthCallback(text)) return 'ranobelib-auth';
+    if (
+      isCommand(text, 'ranobelib_auth')
+      || isCommandWithArgs(text, 'ranobelib_import')
+      || isCommand(text, 'ranobelib_status')
+      || isCommandWithArgs(text, 'ranobelib_status')
+      || isRanobeLibOAuthCallback(text)
+    ) return 'ranobelib-auth';
     if (isCommand(text, 'start') || isCommand(text, 'propose')) return 'proposal';
     if (text && !text.startsWith('/')) return 'generic-private-text';
   }
