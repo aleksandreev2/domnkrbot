@@ -47,15 +47,51 @@ export async function verifyTestDiscovery(root = process.cwd()) {
   return files;
 }
 
-function runBatch(root, files, index, total) {
-  console.log(`[test-discovery] running batch ${index}/${total} (${files.length} files)`);
-  const result = spawnSync(process.execPath, ['--test', ...files], {
+function runNodeTests(root, files, stdio = 'inherit') {
+  return spawnSync(process.execPath, ['--test', ...files], {
     cwd: root,
     env: process.env,
-    stdio: 'inherit',
+    stdio,
+    encoding: stdio === 'inherit' ? undefined : 'utf8',
   });
+}
+
+function annotationEscape(value) {
+  return String(value).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+}
+
+function diagnoseFailedBatch(root, files) {
+  console.error('[test-discovery] batch failed; isolating failing files');
+  const failed = [];
+  for (const file of files) {
+    const result = runNodeTests(root, [file], 'pipe');
+    if (result.error) throw result.error;
+    if (result.status === 0) continue;
+    failed.push(file);
+    process.stdout.write(result.stdout ?? '');
+    process.stderr.write(result.stderr ?? '');
+    if (process.env.GITHUB_ACTIONS === 'true') {
+      console.error(`::error file=${annotationEscape(file)},title=Test file failed::${annotationEscape(`${file} failed in automatic test discovery`)}`);
+    } else {
+      console.error(`[test-discovery] failing file: ${file}`);
+    }
+  }
+  return failed;
+}
+
+function runBatch(root, files, index, total) {
+  console.log(`[test-discovery] running batch ${index}/${total} (${files.length} files)`);
+  const result = runNodeTests(root, files);
   if (result.error) throw result.error;
-  if (result.status !== 0) process.exit(result.status ?? 1);
+  if (result.status === 0) return;
+
+  const failed = diagnoseFailedBatch(root, files);
+  if (failed.length === 0) {
+    console.error('[test-discovery] batch failed only when files ran together; check shared global state or resource contention');
+  } else {
+    console.error(`[test-discovery] ${failed.length} failing file(s): ${failed.join(', ')}`);
+  }
+  process.exit(result.status ?? 1);
 }
 
 const root = process.cwd();
