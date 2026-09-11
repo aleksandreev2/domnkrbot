@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 async function scanPlan() {
   return import('../dist-runtime/multi-team-scan-plan.js');
+}
+
+async function source(path) {
+  return readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 }
 
 test('completed work context finalizes only the latest unambiguous branch participants', async () => {
@@ -128,4 +133,24 @@ test('work-level status alone is never enough to complete a team without attribu
 
   assert.deepEqual(plan.notifyTeamIds, []);
   assert.deepEqual(plan.silentTeamIds, []);
+});
+
+test('multi-team scanner performs a final status read and completion finalization after chapter persistence', async () => {
+  const scanner = await source('src/ranobelib-multi-team-scanner.ts');
+  assert.match(scanner, /getTranslationStatus/);
+  assert.match(scanner, /computeTeamScopedCompletionPlan/);
+  assert.match(scanner, /persistTeamCompletionRelease/);
+
+  const persistSnapshotAt = scanner.indexOf('await persistBranchSnapshot');
+  const finalizeAt = scanner.indexOf('await finalizeTeamCompletions');
+  assert.ok(persistSnapshotAt >= 0, 'scanner must persist the final chapter snapshot');
+  assert.ok(finalizeAt > persistSnapshotAt, 'team completion must finalize only after the final chapter snapshot');
+});
+
+test('team completion release is mapped to exact teams and generic work completion is not copied blindly', async () => {
+  const scanner = await source('src/ranobelib-multi-team-scanner.ts');
+  assert.match(scanner, /INSERT OR IGNORE INTO ranobelib_release_teams/);
+  assert.match(scanner, /release_kind[\s\S]*translation_completed/);
+  assert.match(scanner, /notifyTeamIds/);
+  assert.doesNotMatch(scanner, /UPDATE ranobelib_team_translations[\s\S]{0,400}SET semantic_status = 'completed'[\s\S]{0,400}WHERE book_ref = \?\s*(?:;|`)/);
 });
