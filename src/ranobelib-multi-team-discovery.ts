@@ -26,7 +26,8 @@ export type MultiTeamDiscoveryResult = {
   errors: string[];
 };
 
-export type TeamDiscoveryClient = Pick<RanobeLibClient, 'discoverTeamBooks'>;
+export type TeamDiscoveryClient = Pick<RanobeLibClient, 'discoverTeamBooks'> &
+  Partial<Pick<RanobeLibClient, 'getTeamDisplayName'>>;
 
 export type MultiTeamDiscoveryOptions = {
   clientFactory?: (team: RanobeLibTeamRecord) => TeamDiscoveryClient;
@@ -123,6 +124,17 @@ export async function discoverOneRegisteredTeam(
   // never collapse a previously valid team because one request unexpectedly returned zero items.
   if (books.length === 0) {
     throw new Error(`RanobeLib team ${team.ranobelibTeamRef} returned no book links`);
+  }
+
+  const upstreamDisplayName = client.getTeamDisplayName
+    ? await client.getTeamDisplayName(team.ranobelibTeamRef, books.map((book) => book.ref)).catch(() => null)
+    : null;
+  if (upstreamDisplayName && upstreamDisplayName !== team.displayName) {
+    await env.DB.prepare(`
+      UPDATE ranobelib_teams
+      SET display_name = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).bind(upstreamDisplayName, team.id).run();
   }
 
   const { results: existingRows } = await env.DB.prepare(`
