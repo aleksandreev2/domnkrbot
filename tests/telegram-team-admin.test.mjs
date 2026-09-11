@@ -30,7 +30,7 @@ test('recommendation channel parser accepts username and t.me without numeric-id
   assert.equal(normalizeRecommendationChannelInput('-1001234567890'), null);
 });
 
-test('admin list exposes lifecycle controls while keeping the primary identity visible', () => {
+test('admin list exposes lifecycle and rollout controls while keeping the primary identity visible', () => {
   const payload = buildTeamAdminList([
     { id: 1, displayName: 'Дом Некроманта', isPrimary: true, lifecycleState: 'published', lastSyncError: null },
     { id: 7, displayName: 'Team Seven', isPrimary: false, lifecycleState: 'hidden', lastSyncError: 'upstream failed' },
@@ -40,6 +40,64 @@ test('admin list exposes lifecycle controls while keeping the primary identity v
   const callbacks = payload.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
   assert.ok(callbacks.includes('teamadmin:view:7'));
   assert.ok(callbacks.includes('teamadmin:add'));
+  assert.ok(callbacks.includes('teamadmin:rollout'));
+});
+
+test('rollout planner enforces Shadow -> Delivery -> UI and cascades safe rollback', async () => {
+  const admin = await import('../dist-runtime/telegram-team-admin.js');
+  assert.equal(typeof admin.planMultiTeamRolloutTransition, 'function');
+
+  const off = { shadow: false, delivery: false, ui: false };
+  assert.deepEqual(admin.planMultiTeamRolloutTransition(off, 'delivery', true), {
+    allowed: false,
+    next: off,
+    reason: 'Сначала включите Shadow.',
+  });
+  assert.deepEqual(admin.planMultiTeamRolloutTransition(off, 'ui', true), {
+    allowed: false,
+    next: off,
+    reason: 'Сначала включите Delivery.',
+  });
+
+  const shadow = admin.planMultiTeamRolloutTransition(off, 'shadow', true);
+  assert.deepEqual(shadow, {
+    allowed: true,
+    next: { shadow: true, delivery: false, ui: false },
+    reason: null,
+  });
+
+  const live = { shadow: true, delivery: true, ui: true };
+  assert.deepEqual(admin.planMultiTeamRolloutTransition(live, 'delivery', false), {
+    allowed: true,
+    next: { shadow: true, delivery: false, ui: false },
+    reason: null,
+  });
+  assert.deepEqual(admin.planMultiTeamRolloutTransition(live, 'shadow', false), {
+    allowed: true,
+    next: { shadow: false, delivery: false, ui: false },
+    reason: null,
+  });
+});
+
+test('rollout admin card only offers the next safe activation stage', async () => {
+  const admin = await import('../dist-runtime/telegram-team-admin.js');
+  assert.equal(typeof admin.buildMultiTeamRolloutAdmin, 'function');
+
+  const off = admin.buildMultiTeamRolloutAdmin({ shadow: false, delivery: false, ui: false });
+  const offCallbacks = off.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
+  assert.match(off.text, /Shadow:.*выключен/s);
+  assert.ok(offCallbacks.includes('teamadmin:rollout:shadow:on'));
+  assert.ok(!offCallbacks.includes('teamadmin:rollout:delivery:confirm:on'));
+  assert.ok(!offCallbacks.includes('teamadmin:rollout:ui:confirm:on'));
+
+  const shadow = admin.buildMultiTeamRolloutAdmin({ shadow: true, delivery: false, ui: false });
+  const shadowCallbacks = shadow.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
+  assert.ok(shadowCallbacks.includes('teamadmin:rollout:delivery:on'));
+  assert.ok(!shadowCallbacks.includes('teamadmin:rollout:ui:on'));
+
+  const delivery = admin.buildMultiTeamRolloutAdmin({ shadow: true, delivery: true, ui: false });
+  const deliveryCallbacks = delivery.reply_markup.inline_keyboard.flat().map((button) => button.callback_data).filter(Boolean);
+  assert.ok(deliveryCallbacks.includes('teamadmin:rollout:ui:on'));
 });
 
 test('admin team card exposes team-scoped translation diagnostics', () => {
