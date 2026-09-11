@@ -18,11 +18,14 @@ function db() {
     async first() { return /SELECT/i.test(sql) && row ? { ...row } : null; },
     async all() { return { results: [] }; },
     async run() {
-      if (/INSERT INTO ranobelib_auth_credentials/i.test(sql)) row = {
-        ciphertext: values[0], iv: values[1], key_version: 1, access_expires_at: values[2],
-        state: values[3], last_validated_at: values[4], last_refreshed_at: values[5],
-        last_error: values[6], updated_at: '2026-09-11T12:00:00.000Z',
-      };
+      if (/INSERT INTO ranobelib_auth_credentials/i.test(sql)) {
+        const keyVersion = Number(/VALUES\s*\(1\s*,\s*\?\s*,\s*\?\s*,\s*(\d+)/i.exec(sql)?.[1] ?? 1);
+        row = {
+          ciphertext: values[0], iv: values[1], key_version: keyVersion, access_expires_at: values[2],
+          state: values[3], last_validated_at: values[4], last_refreshed_at: values[5],
+          last_error: values[6], updated_at: '2026-09-11T12:00:00.000Z',
+        };
+      }
       if (/DELETE FROM ranobelib_auth_credentials/i.test(sql)) row = null;
       return { success: true };
     },
