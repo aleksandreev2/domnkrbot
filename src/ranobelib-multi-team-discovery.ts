@@ -74,8 +74,6 @@ export function computeTeamDiscoveryReconciliation(
     }
   }
 
-  // Brand-new refs are activations from the catalog point of view; callers can separately count
-  // them as created by comparing to stored keys.
   activate.push(...discovered);
   return {
     activate: sortedUnique(activate),
@@ -94,8 +92,6 @@ export async function discoverRegisteredRanobeLibTeams(
   let discoveredRelationships = 0;
   const errors: string[] = [];
 
-  // Team catalog discovery is deliberately isolated per team. A transient failure in one team
-  // cannot prevent the remaining teams from refreshing.
   for (const team of teams) {
     try {
       const client = options.clientFactory?.(team) ?? createRanobeLibClient(env);
@@ -129,8 +125,6 @@ export async function discoverOneRegisteredTeam(
   }
 
   const catalogBooks = await client.discoverTeamBooks(team.ranobelibTeamRef);
-  // An empty catalog is treated as upstream/parser failure, exactly like the legacy discovery path:
-  // never collapse a previously valid team because one request unexpectedly returned zero items.
   if (catalogBooks.length === 0) {
     throw new Error(`RanobeLib team ${team.ranobelibTeamRef} returned no book links`);
   }
@@ -192,16 +186,18 @@ export async function supplementPartnerHistory(
   if (client.discoverTeamHistoryBooks) {
     try {
       const historyBooks = await client.discoverTeamHistoryBooks(team.ranobelibTeamRef);
-      // History rows already carry an explicit teams[] attribution checked by the client, so they
-      // remain authoritative even when the anonymous title detail endpoint returns 404.
-      for (const book of historyBooks) booksByRef.set(cleanRef(book.ref), book);
+      for (const book of historyBooks) {
+        const ref = cleanRef(book.ref);
+        const catalogBook = booksByRef.get(ref);
+        // A history row proves relation attribution but usually carries less metadata. Never let it
+        // erase team-catalog scanlateStatus evidence used for completion transitions.
+        booksByRef.set(ref, catalogBook ? mergeBookEvidence(catalogBook, book) : book);
+      }
     } catch (error) {
       console.error('RanobeLib partner chapter history fallback failed', team.ranobelibTeamRef, compactError(error));
     }
   }
 
-  // Exact chapter-team attribution is safe for every team and covers titles hidden from the
-  // anonymous catalog. Keep the less authoritative HTML/detail fallback partner-only.
   if (team.isPrimary) {
     return { books: [...booksByRef.values()], preservedRefs: [] };
   }
@@ -215,8 +211,6 @@ export async function supplementPartnerHistory(
   try {
     pageBooks = await client.discoverTeamPageBooks(team.ranobelibTeamRef);
   } catch (error) {
-    // Secondary discovery is deliberately fail-open. A broken/blocked HTML page must not turn
-    // previously known partner translations dormant merely because the API catalog is incomplete.
     for (const row of existingRows) {
       const ref = cleanRef(row.book_ref);
       if (ref && row.presence_state === 'active' && !booksByRef.has(ref)) preserved.add(ref);
@@ -233,16 +227,12 @@ export async function supplementPartnerHistory(
     if (!ref || booksByRef.has(ref)) continue;
     const stored = existingByRef.get(ref);
     if (stored?.presence_state === 'active') {
-      // This is already-known state and the public team page still asserts it. Avoid an N+1 detail
-      // request on every sync; exact verification is mandatory only before creating/reactivating.
       preserved.add(ref);
       continue;
     }
     candidates.push(ref);
   }
 
-  // Existing active relations missing from both the API catalog and HTML page get one exact-detail
-  // chance before dormancy. This handles different RanobeLib views lagging each other.
   for (const row of existingRows) {
     const ref = cleanRef(row.book_ref);
     if (!ref || row.presence_state !== 'active' || booksByRef.has(ref) || pageRefs.has(ref)) continue;
@@ -261,8 +251,6 @@ export async function supplementPartnerHistory(
       const book = await client.getTeamAttributedBook(team.ranobelibTeamRef, ref);
       if (book) booksByRef.set(cleanRef(book.ref), book);
     } catch (error) {
-      // Exact lookup failures are inconclusive, not negative evidence. Preserve only existing active
-      // rows; brand-new candidates can safely wait for the next sync instead of being guessed in.
       if (existingByRef.get(ref)?.presence_state === 'active') preserved.add(ref);
       console.error('RanobeLib partner title attribution check failed', team.ranobelibTeamRef, ref, compactError(error));
     }
@@ -281,8 +269,6 @@ async function upsertWorkRows(db: D1DatabaseLike, books: RanobeLibTeamBookRef[])
     coverUrl: normalizeCoverUrl(book.coverUrl ?? null),
   })));
 
-  // New work rows are inserted dormant from the legacy single-team scanner's perspective. The new
-  // multi-team scheduler uses ranobelib_team_translations and can still bootstrap them safely.
   await db.prepare(`
     WITH incoming AS (
       SELECT
@@ -314,34 +300,92 @@ async function upsertTeamTranslationRows(
   teamId: number,
   books: RanobeLibTeamBookRef[],
 ): Promise<void> {
-  const refsJson = JSON.stringify(books.map((book) => book.ref));
+  const payload = JSON.stringify(books.map((book) => ({
+    ref: book.ref,
+    completionState: inferTeamCompletionState(book),
+    completionLabel: cleanStatusLabel(book.translationStatusLabel),
+  })));
+
   await db.prepare(`
     WITH incoming AS (
-      SELECT CAST(value AS TEXT) AS book_ref
-      FROM json_each(?)
+      SELECT
+        CAST(json_extract(j.value, '$.ref') AS TEXT) AS book_ref,
+        CAST(json_extract(j.value, '$.completionState') AS INTEGER) AS completion_state,
+        json_extract(j.value, '$.completionLabel') AS completion_label
+      FROM json_each(?) AS j
     )
     INSERT INTO ranobelib_team_translations (
-      team_id, book_ref, presence_state, semantic_status, baseline_ready,
+      team_id, book_ref, presence_state, semantic_status, completion_evidence,
+      completion_pending, completion_revision, baseline_ready,
       notification_subscriber_count, last_seen_at, last_synced_at, sync_error, updated_at
     )
-    SELECT ?, book_ref, 'active', 'active', 0, 0,
-           CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, CURRENT_TIMESTAMP
+    SELECT ?, book_ref, 'active', 'active',
+      CASE
+        WHEN completion_state = 1 THEN 'team-catalog:completed:pending'
+        WHEN completion_state = 0 THEN 'team-catalog:active'
+        ELSE NULL
+      END,
+      CASE WHEN completion_state = 1 THEN 1 ELSE 0 END,
+      CASE WHEN completion_state = 1 THEN 1 ELSE 0 END,
+      0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, CURRENT_TIMESTAMP
     FROM incoming
     WHERE book_ref IS NOT NULL AND book_ref != ''
     ON CONFLICT(team_id, book_ref) DO UPDATE SET
       presence_state = 'active',
-      -- Current membership in this exact team's RanobeLib catalog is attributable team evidence
-      -- that the relationship is actionable. It is not completion evidence: a previously confirmed
-      -- completion remains final until a stronger team-specific signal explicitly reopens it.
       semantic_status = CASE
-        WHEN ranobelib_team_translations.semantic_status = 'completed' THEN 'completed'
-        ELSE 'active'
+        WHEN excluded.completion_pending = 1
+          AND ranobelib_team_translations.semantic_status = 'completed'
+          AND ranobelib_team_translations.completion_pending = 0
+          THEN 'completed'
+        WHEN excluded.completion_pending = 1 THEN 'active'
+        WHEN excluded.completion_evidence = 'team-catalog:active' THEN 'active'
+        ELSE ranobelib_team_translations.semantic_status
+      END,
+      completion_evidence = CASE
+        WHEN excluded.completion_pending = 1
+          AND ranobelib_team_translations.semantic_status = 'completed'
+          AND ranobelib_team_translations.completion_pending = 0
+          THEN ranobelib_team_translations.completion_evidence
+        WHEN excluded.completion_pending = 1 THEN excluded.completion_evidence
+        WHEN excluded.completion_evidence = 'team-catalog:active' THEN excluded.completion_evidence
+        ELSE ranobelib_team_translations.completion_evidence
+      END,
+      completion_pending = CASE
+        WHEN excluded.completion_pending = 1
+          AND ranobelib_team_translations.semantic_status = 'completed'
+          AND ranobelib_team_translations.completion_pending = 0
+          THEN 0
+        WHEN excluded.completion_pending = 1 THEN 1
+        WHEN excluded.completion_evidence = 'team-catalog:active' THEN 0
+        ELSE ranobelib_team_translations.completion_pending
+      END,
+      completion_revision = CASE
+        WHEN excluded.completion_pending = 1
+          AND ranobelib_team_translations.semantic_status <> 'completed'
+          AND ranobelib_team_translations.completion_pending = 0
+          THEN ranobelib_team_translations.completion_revision + 1
+        ELSE ranobelib_team_translations.completion_revision
       END,
       last_seen_at = CURRENT_TIMESTAMP,
       last_synced_at = CURRENT_TIMESTAMP,
       sync_error = NULL,
       updated_at = CURRENT_TIMESTAMP
-  `).bind(refsJson, teamId).run();
+  `).bind(payload, teamId).run();
+
+  // A team-scoped completion transition always receives a prompt final chapter poll even when the
+  // work currently has no subscriber demand or the team is hidden.
+  await db.prepare(`
+    UPDATE ranobelib_titles
+    SET next_check_at = CURRENT_TIMESTAMP,
+        scan_priority = MAX(scan_priority, 20)
+    WHERE book_ref IN (
+      SELECT tt.book_ref
+      FROM ranobelib_team_translations tt
+      WHERE tt.team_id = ?
+        AND tt.presence_state = 'active'
+        AND tt.completion_pending = 1
+    )
+  `).bind(teamId).run();
 }
 
 async function markTeamTranslationsDormant(
@@ -360,6 +404,32 @@ async function markTeamTranslationsDormant(
     WHERE team_id = ?
       AND book_ref IN (SELECT CAST(value AS TEXT) FROM json_each(?))
   `).bind(teamId, refsJson).run();
+}
+
+export function inferTeamCompletionState(
+  book: Pick<RanobeLibTeamBookRef, 'translationStatusLabel'>,
+): boolean | null {
+  const label = cleanStatusLabel(book.translationStatusLabel);
+  if (!label) return null;
+  const normalized = label.toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
+  if (normalized === 'завершен' || normalized === 'завершено') return true;
+  if (normalized === 'продолжается' || normalized === 'в работе' || normalized === 'онгоинг' || normalized === 'ongoing') {
+    return false;
+  }
+  return null;
+}
+
+function mergeBookEvidence(primary: RanobeLibTeamBookRef, fallback: RanobeLibTeamBookRef): RanobeLibTeamBookRef {
+  return {
+    ...fallback,
+    ...primary,
+    translationStatusId: primary.translationStatusId ?? fallback.translationStatusId,
+    translationStatusLabel: primary.translationStatusLabel ?? fallback.translationStatusLabel,
+  };
+}
+
+function cleanStatusLabel(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 function cleanRef(value: unknown): string {

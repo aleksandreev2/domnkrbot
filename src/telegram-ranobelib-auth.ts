@@ -1,4 +1,5 @@
 import { RanobeLibAuthProvider, type RanobeLibAuthEnv, type RanobeLibAuthHealth } from './ranobelib-auth.js';
+import { handleTelegramRanobeLibStatusWebhook } from './telegram-ranobelib-status.js';
 import type { TelegramSubscriptionUpdate } from './telegram-subscriptions.js';
 
 export type TelegramRanobeLibAuthEnv = RanobeLibAuthEnv & {
@@ -40,12 +41,7 @@ export async function createRanobeLibAuthorizationRequest(
   const now = options.now?.() ?? new Date();
   const randomBytes = options.randomBytes ?? defaultRandomBytes;
   const nonce = base64UrlEncode(randomBytes(24));
-  const payload: OAuthStatePayload = {
-    v: 1,
-    uid,
-    exp: now.getTime() + STATE_TTL_MS,
-    nonce,
-  };
+  const payload: OAuthStatePayload = { v: 1, uid, exp: now.getTime() + STATE_TTL_MS, nonce };
   const body = base64UrlEncode(encoder.encode(JSON.stringify(payload)));
   const signature = base64UrlEncode(await signWithBotSecret(env, 'domnkrbot:ranobelib-oauth-state:v1', body));
   const state = `${body}.${signature}`;
@@ -84,13 +80,7 @@ export async function completeRanobeLibAuthorizationFromCallback(
     method: 'POST',
     redirect: 'manual',
     headers: { accept: 'application/json', 'content-type': 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'authorization_code',
-      client_id: 1,
-      redirect_uri: REDIRECT_URI,
-      code_verifier: verifier,
-      code,
-    }),
+    body: JSON.stringify({ grant_type: 'authorization_code', client_id: 1, redirect_uri: REDIRECT_URI, code_verifier: verifier, code }),
   });
   if (!tokenResponse.ok) throw new Error(`RanobeLib OAuth token exchange failed: ${tokenResponse.status}`);
 
@@ -103,11 +93,7 @@ export async function completeRanobeLibAuthorizationFromCallback(
   }
 
   const auth = new RanobeLibAuthProvider(env, { fetchImpl, now: () => now });
-  await auth.validateAndStore({
-    accessToken,
-    refreshToken,
-    expiresAt: new Date(now.getTime() + expiresIn * 1000).toISOString(),
-  });
+  await auth.validateAndStore({ accessToken, refreshToken, expiresAt: new Date(now.getTime() + expiresIn * 1000).toISOString() });
   await wakeRanobeLibTitles(env);
   return auth.health();
 }
@@ -119,31 +105,21 @@ export async function importRanobeLibTokenBundle(
 ): Promise<RanobeLibAuthHealth> {
   const now = options.now?.() ?? new Date();
   const fetchImpl = options.fetchImpl ?? ((request, init) => fetch(request, init));
-  if (!input || typeof input !== 'object' || Array.isArray(input)) {
-    throw new Error('RanobeLib token bundle is invalid.');
-  }
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('RanobeLib token bundle is invalid.');
 
   const payload = input as Record<string, unknown>;
   const accessToken = stringValue(payload.access_token);
   const refreshToken = stringValue(payload.refresh_token);
   const expiresIn = Number(payload.expires_in);
   const timestamp = Number(payload.timestamp);
-  if (!accessToken || !refreshToken || !Number.isFinite(expiresIn) || expiresIn <= 0) {
-    throw new Error('RanobeLib token bundle is invalid.');
-  }
+  if (!accessToken || !refreshToken || !Number.isFinite(expiresIn) || expiresIn <= 0) throw new Error('RanobeLib token bundle is invalid.');
 
-  const baseTime = Number.isFinite(timestamp) && timestamp > 0
-    ? normalizeTimestampMilliseconds(timestamp)
-    : now.getTime();
+  const baseTime = Number.isFinite(timestamp) && timestamp > 0 ? normalizeTimestampMilliseconds(timestamp) : now.getTime();
   const expiresAt = new Date(baseTime + expiresIn * 1000);
   if (Number.isNaN(expiresAt.getTime())) throw new Error('RanobeLib token bundle is invalid.');
 
   const auth = new RanobeLibAuthProvider(env, { fetchImpl, now: () => now });
-  await auth.validateAndStore({
-    accessToken,
-    refreshToken,
-    expiresAt: expiresAt.toISOString(),
-  });
+  await auth.validateAndStore({ accessToken, refreshToken, expiresAt: expiresAt.toISOString() });
   await wakeRanobeLibTitles(env);
   return auth.health();
 }
@@ -155,6 +131,9 @@ export async function handleTelegramRanobeLibAuthWebhook(
 ): Promise<Response | null> {
   const url = new URL(request.url);
   if (request.method !== 'POST' || url.pathname !== '/telegram/webhook') return null;
+
+  const statusResponse = await handleTelegramRanobeLibStatusWebhook(request, env, options.fetchImpl);
+  if (statusResponse) return statusResponse;
 
   const update = await request.clone().json().catch(() => null) as TelegramSubscriptionUpdate | null;
   const message = update?.message;
@@ -174,23 +153,17 @@ export async function handleTelegramRanobeLibAuthWebhook(
       const authorization = await createRanobeLibAuthorizationRequest(env, String(user.id), options);
       await sendTelegramMessage(env, chatId, {
         text: [
-          '🔐 <b>Авторизация RanobeLib</b>',
-          '',
+          '🔐 <b>Авторизация RanobeLib</b>', '',
           '1. Нажмите «Войти в RanobeLib» и авторизуйтесь.',
           '2. После возврата на RanobeLib скопируйте адрес страницы целиком и пришлите его сюда.',
-          '',
-          'Ссылка действует 15 минут.',
+          '', 'Ссылка действует 15 минут.',
         ].join('\n'),
         parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [[{ text: 'Войти в RanobeLib', url: authorization.authorizeUrl }]],
-        },
+        reply_markup: { inline_keyboard: [[{ text: 'Войти в RanobeLib', url: authorization.authorizeUrl }]] },
       }, options.fetchImpl);
     } catch (error) {
       console.error('RanobeLib OAuth start failed', safeOAuthError(error));
-      await sendTelegramMessage(env, chatId, {
-        text: '❌ Не удалось начать авторизацию RanobeLib. Попробуйте /ranobelib_auth ещё раз.',
-      }, options.fetchImpl).catch(() => undefined);
+      await sendTelegramMessage(env, chatId, { text: '❌ Не удалось начать авторизацию RanobeLib. Попробуйте /ranobelib_auth ещё раз.' }, options.fetchImpl).catch(() => undefined);
     }
     return new Response('ok');
   }
@@ -199,28 +172,20 @@ export async function handleTelegramRanobeLibAuthWebhook(
     try {
       const bundle = JSON.parse(importMatch[1]!) as unknown;
       await importRanobeLibTokenBundle(env, bundle, options);
-      await sendTelegramMessage(env, chatId, {
-        text: '✅ RanobeLib-токены импортированы и проверены. Скрытые тайтлы поставлены на немедленное сканирование.',
-      }, options.fetchImpl);
+      await sendTelegramMessage(env, chatId, { text: '✅ RanobeLib-токены импортированы и проверены. Скрытые тайтлы поставлены на немедленное сканирование.' }, options.fetchImpl);
     } catch (error) {
       console.error('RanobeLib token import failed', safeOAuthError(error));
-      await sendTelegramMessage(env, chatId, {
-        text: '❌ Не удалось импортировать RanobeLib-токены. Проверьте JSON bundle и отправьте команду ещё раз.',
-      }, options.fetchImpl).catch(() => undefined);
+      await sendTelegramMessage(env, chatId, { text: '❌ Не удалось импортировать RanobeLib-токены. Проверьте JSON bundle и отправьте команду ещё раз.' }, options.fetchImpl).catch(() => undefined);
     }
     return new Response('ok');
   }
 
   try {
     await completeRanobeLibAuthorizationFromCallback(env, String(user.id), text, options);
-    await sendTelegramMessage(env, chatId, {
-      text: '✅ RanobeLib авторизован. Скрытые тайтлы поставлены на немедленное сканирование.',
-    }, options.fetchImpl);
+    await sendTelegramMessage(env, chatId, { text: '✅ RanobeLib авторизован. Скрытые тайтлы поставлены на немедленное сканирование.' }, options.fetchImpl);
   } catch (error) {
     console.error('RanobeLib OAuth completion failed', safeOAuthError(error));
-    await sendTelegramMessage(env, chatId, {
-      text: '❌ Авторизация RanobeLib не завершилась. Запустите /ranobelib_auth ещё раз и пришлите новый callback URL.',
-    }, options.fetchImpl).catch(() => undefined);
+    await sendTelegramMessage(env, chatId, { text: '❌ Авторизация RanobeLib не завершилась. Запустите /ranobelib_auth ещё раз и пришлите новый callback URL.' }, options.fetchImpl).catch(() => undefined);
   }
   return new Response('ok');
 }
@@ -250,12 +215,7 @@ async function wakeRanobeLibTitles(env: TelegramRanobeLibAuthEnv): Promise<void>
   `).run();
 }
 
-async function verifyState(
-  env: TelegramRanobeLibAuthEnv,
-  userId: string,
-  state: string,
-  now: Date,
-): Promise<OAuthStatePayload> {
+async function verifyState(env: TelegramRanobeLibAuthEnv, userId: string, state: string, now: Date): Promise<OAuthStatePayload> {
   const [body, signature, extra] = state.split('.');
   if (!body || !signature || extra) throw new Error('Invalid RanobeLib OAuth state.');
   const expected = await signWithBotSecret(env, 'domnkrbot:ranobelib-oauth-state:v1', body);
@@ -265,11 +225,8 @@ async function verifyState(
   const decoded = base64UrlDecode(body);
   if (!decoded) throw new Error('Invalid RanobeLib OAuth state payload.');
   let payload: Partial<OAuthStatePayload>;
-  try {
-    payload = JSON.parse(decoder.decode(decoded)) as Partial<OAuthStatePayload>;
-  } catch {
-    throw new Error('Invalid RanobeLib OAuth state payload.');
-  }
+  try { payload = JSON.parse(decoder.decode(decoded)) as Partial<OAuthStatePayload>; }
+  catch { throw new Error('Invalid RanobeLib OAuth state payload.'); }
   if (payload.v !== 1 || typeof payload.uid !== 'string' || typeof payload.nonce !== 'string' || !Number.isFinite(payload.exp)) {
     throw new Error('Invalid RanobeLib OAuth state payload.');
   }
@@ -283,11 +240,7 @@ async function codeVerifier(env: TelegramRanobeLibAuthEnv, nonce: string): Promi
   return base64UrlEncode(await signWithBotSecret(env, 'domnkrbot:ranobelib-oauth-pkce:v1', nonce));
 }
 
-async function signWithBotSecret(
-  env: TelegramRanobeLibAuthEnv,
-  namespace: string,
-  value: string,
-): Promise<Uint8Array> {
+async function signWithBotSecret(env: TelegramRanobeLibAuthEnv, namespace: string, value: string): Promise<Uint8Array> {
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
   const material = await crypto.subtle.digest('SHA-256', encoder.encode(`${namespace}\n${token}`));
@@ -297,11 +250,8 @@ async function signWithBotSecret(
 
 function parseOfficialCallback(value: string): URL {
   let url: URL;
-  try {
-    url = new URL(value.trim());
-  } catch {
-    throw new Error('Invalid RanobeLib OAuth callback URL.');
-  }
+  try { url = new URL(value.trim()); }
+  catch { throw new Error('Invalid RanobeLib OAuth callback URL.'); }
   if (url.origin !== 'https://ranobelib.me' || url.pathname.replace(/\/+$/g, '') !== '/ru/front/auth/oauth/callback') {
     throw new Error('Invalid RanobeLib OAuth callback URL.');
   }
@@ -315,12 +265,7 @@ function requiredUserId(value: string): string {
 }
 
 function isAdmin(env: TelegramRanobeLibAuthEnv, userId: number): boolean {
-  return new Set(
-    String(env.ADMIN_TELEGRAM_IDS ?? '')
-      .split(/[\s,;]+/)
-      .map((value) => value.trim())
-      .filter(Boolean),
-  ).has(String(userId));
+  return new Set(String(env.ADMIN_TELEGRAM_IDS ?? '').split(/[\s,;]+/).map((value) => value.trim()).filter(Boolean)).has(String(userId));
 }
 
 async function sendTelegramMessage(
@@ -332,9 +277,7 @@ async function sendTelegramMessage(
   const token = env.TELEGRAM_BOT_TOKEN?.trim();
   if (!token) throw new Error('TELEGRAM_BOT_TOKEN is not configured');
   const response = await fetchImpl(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, ...payload }),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, ...payload }),
   });
   const body = await response.json().catch(() => null) as TelegramResponse<unknown> | null;
   if (!response.ok || !body?.ok) throw new Error(body?.description || `Telegram sendMessage failed: ${response.status}`);
@@ -347,20 +290,13 @@ function safeOAuthError(error: unknown): string {
   if (status) return `oauth_http_${status}`;
   if (/token bundle/i.test(message)) return 'oauth_token_bundle_invalid';
   if (/callback/i.test(message)) return 'oauth_callback_invalid';
+  if (/encryption key/i.test(message)) return 'oauth_encryption_unavailable';
   return 'oauth_failed';
 }
 
-function stringValue(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function normalizeTimestampMilliseconds(value: number): number {
-  return value < 100_000_000_000 ? value * 1000 : value;
-}
-
-function defaultRandomBytes(length: number): Uint8Array {
-  return crypto.getRandomValues(new Uint8Array(length));
-}
+function stringValue(value: unknown): string { return typeof value === 'string' ? value.trim() : ''; }
+function normalizeTimestampMilliseconds(value: number): number { return value < 100_000_000_000 ? value * 1000 : value; }
+function defaultRandomBytes(length: number): Uint8Array { return crypto.getRandomValues(new Uint8Array(length)); }
 
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = '';
@@ -374,9 +310,7 @@ function base64UrlDecode(value: string): Uint8Array | null {
     const padded = normalized + '='.repeat((4 - normalized.length % 4) % 4);
     const binary = atob(padded);
     return Uint8Array.from(binary, (character) => character.charCodeAt(0));
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function constantTimeBytesEqual(left: Uint8Array, right: Uint8Array): boolean {

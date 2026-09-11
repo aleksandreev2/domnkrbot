@@ -3,7 +3,7 @@
   "name": "domnkrbot",
   "main": "src/live-entry-v3.ts",
   "build": {
-    "command": "node scripts/write-deploy-revision.mjs"
+    "command": "npm run typecheck && npm test && node scripts/write-deploy-revision.mjs"
   },
   "compatibility_date": "2026-08-14",
   "keep_vars": true,
@@ -26,7 +26,8 @@
   },
   "secrets": {
     "required": [
-      "TELEGRAM_BOT_TOKEN"
+      "TELEGRAM_BOT_TOKEN",
+      "RANOBELIB_TOKEN_ENCRYPTION_KEY"
     ]
   },
   "triggers": {

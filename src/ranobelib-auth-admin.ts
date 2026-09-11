@@ -48,8 +48,8 @@ export async function handleRanobeLibAuthAdmin(
     }
     const bundle = parseBundle(body);
     if (!bundle) return json({ error: 'Invalid RanobeLib token bundle.' }, 400);
-    if (!env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim() && !env.TELEGRAM_BOT_TOKEN?.trim()) {
-      return json({ error: 'RanobeLib credential encryption is unavailable.' }, 503);
+    if (!env.RANOBELIB_TOKEN_ENCRYPTION_KEY?.trim()) {
+      return json({ error: 'RanobeLib dedicated credential encryption key is unavailable.' }, 503);
     }
     try {
       await auth.validateAndStore(bundle);
@@ -85,6 +85,7 @@ function safeValidationError(error: unknown): string {
   if (/validation failed: \d{3}/i.test(message)) return message.slice(0, 120);
   if (/validation returned no account/i.test(message)) return 'RanobeLib validation returned no account.';
   if (/token bundle/i.test(message)) return 'Invalid RanobeLib token bundle.';
+  if (/encryption key/i.test(message)) return 'RanobeLib dedicated credential encryption key is unavailable.';
   return 'RanobeLib credential validation failed.';
 }
 

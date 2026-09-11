@@ -3,12 +3,22 @@ import { createRanobeLibClient } from './ranobelib-client-factory.js';
 import type { RanobeLibChapterBranch } from './integrations/ranobelib/types.js';
 import type { D1DatabaseLike, D1PreparedStatementLike } from './ranobelib-runtime.js';
 import { reconcileReleaseOutboxRecipients } from './multi-team-notification-demand.js';
-import { computeTeamScopedScanPlan, multiTeamDeliveryScopeKey } from './multi-team-scan-plan.js';
+import {
+  computeTeamScopedCompletionPlan,
+  computeTeamScopedScanPlan,
+  multiTeamDeliveryScopeKey,
+  type TeamScopedCompletionPlan,
+} from './multi-team-scan-plan.js';
 
-export { computeTeamScopedScanPlan, multiTeamDeliveryScopeKey } from './multi-team-scan-plan.js';
+export {
+  computeTeamScopedCompletionPlan,
+  computeTeamScopedScanPlan,
+  multiTeamDeliveryScopeKey,
+} from './multi-team-scan-plan.js';
 
 export type MultiTeamScanMode = 'baseline' | 'shadow' | 'live';
 export type MultiTeamScanClass = 'hot' | 'idle' | 'all';
+export type UnattributedTeamPayloadDisposition = 'ok' | 'awaiting-first-team-branch' | 'error';
 
 export type MultiTeamScanOptions = {
   limit?: number;
@@ -49,6 +59,8 @@ type TranslationRow = {
   presence_state: string;
   semantic_status: string;
   baseline_ready: number | string;
+  completion_pending: number | string;
+  completion_revision: number | string;
 };
 
 type StoredBranchRow = {
@@ -78,6 +90,36 @@ export function computeMultiTeamNextCheckDelayMinutes(input: {
   return misses <= 2 ? 2 : 5;
 }
 
+export function classifyUnattributedTeamPayload(input: {
+  fetchedBranchCount: number;
+  relevantBranchCount: number;
+  translations: readonly { baselineReady: boolean; completionPending: boolean }[];
+}): UnattributedTeamPayloadDisposition {
+  if (input.fetchedBranchCount <= 0 || input.relevantBranchCount > 0) return 'ok';
+  if (
+    input.translations.length > 0
+    && input.translations.every((row) => !row.baselineReady && !row.completionPending)
+  ) {
+    return 'awaiting-first-team-branch';
+  }
+  return 'error';
+}
+
+export async function withOneTransientD1Retry<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isTransientD1ResetError(error)) throw error;
+    return operation();
+  }
+}
+
+function isTransientD1ResetError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /D1_ERROR:[\s\S]*object to be reset/i.test(message)
+    || /D1 DB storage caused object to be reset/i.test(message);
+}
+
 export async function scanDueMultiTeamWorks(
   env: MultiTeamScannerEnv,
   options: MultiTeamScanOptions,
@@ -91,7 +133,9 @@ export async function scanDueMultiTeamWorks(
   const now = options.now ?? new Date();
   const outcomes = await mapWithConcurrency(selected, CONCURRENCY, async (work) => {
     try {
-      return await scanOneMultiTeamWork(env, client, work, options.mode, scanClass, now);
+      return await withOneTransientD1Retry(
+        () => scanOneMultiTeamWork(env, client, work, options.mode, scanClass, now),
+      );
     } catch (error) {
       await scheduleWorkFailure(env.DB, work.book_ref, error);
       return {
@@ -128,7 +172,7 @@ export async function selectDueMultiTeamWorks(
          WHERE bootstrap.book_ref = t.book_ref
            AND bootstrap.presence_state = 'active'
            AND bootstrap_team.lifecycle_state IN ('hidden','published')
-           AND bootstrap.baseline_ready = 0
+           AND (bootstrap.baseline_ready = 0 OR bootstrap.completion_pending = 1)
        ) OR COALESCE(t.notification_subscriber_count, 0) > 0)`
     : scanClass === 'idle'
       ? `COALESCE(t.notification_subscriber_count, 0) = 0
@@ -138,7 +182,7 @@ export async function selectDueMultiTeamWorks(
            WHERE bootstrap.book_ref = t.book_ref
              AND bootstrap.presence_state = 'active'
              AND bootstrap_team.lifecycle_state IN ('hidden','published')
-             AND bootstrap.baseline_ready = 0
+             AND (bootstrap.baseline_ready = 0 OR bootstrap.completion_pending = 1)
          )`
       : '1 = 1';
   const staleHotSchedulePredicate = scanClass === 'hot'
@@ -160,6 +204,7 @@ export async function selectDueMultiTeamWorks(
         AND team.lifecycle_state IN ('hidden', 'published')
         AND (
           tt.baseline_ready = 0
+          OR tt.completion_pending = 1
           OR (team.lifecycle_state = 'published' AND tt.semantic_status <> 'completed')
         )
     )
@@ -171,7 +216,7 @@ export async function selectDueMultiTeamWorks(
           WHERE bootstrap.book_ref = t.book_ref
             AND bootstrap.presence_state = 'active'
             AND bootstrap_team.lifecycle_state IN ('hidden','published')
-            AND bootstrap.baseline_ready = 0
+            AND bootstrap.completion_pending = 1
         )
         OR t.next_check_at IS NULL
         OR t.next_check_at <= CURRENT_TIMESTAMP
@@ -180,7 +225,8 @@ export async function selectDueMultiTeamWorks(
     ORDER BY
       CASE WHEN EXISTS (
         SELECT 1 FROM ranobelib_team_translations bootstrap
-        WHERE bootstrap.book_ref = t.book_ref AND bootstrap.baseline_ready = 0
+        WHERE bootstrap.book_ref = t.book_ref
+          AND (bootstrap.baseline_ready = 0 OR bootstrap.completion_pending = 1)
       ) THEN 0 ELSE 1 END ASC,
       COALESCE(t.next_check_at, '') ASC,
       COALESCE(t.notification_subscriber_count, 0) DESC,
@@ -224,8 +270,24 @@ async function scanOneMultiTeamWork(
   const relevant = fetched
     .map((branch) => mapBranchToRegisteredTeams(branch, upstreamToInternal))
     .filter((value): value is { branch: RanobeLibChapterBranch; teamIds: number[] } => value !== null);
-  if (fetched.length > 0 && relevant.length === 0) {
-    throw new Error('RanobeLib returned chapters but none were attributable to a registered actionable team');
+  const attributionDisposition = classifyUnattributedTeamPayload({
+    fetchedBranchCount: fetched.length,
+    relevantBranchCount: relevant.length,
+    translations: translations.map((row) => ({
+      baselineReady: Number(row.baseline_ready) === 1,
+      completionPending: Number(row.completion_pending) === 1,
+    })),
+  });
+  if (attributionDisposition === 'awaiting-first-team-branch') {
+    await recordAwaitingFirstTeamBranch(env.DB, work, scanClass);
+    return { fetchedWorks: 1, detectedReleases: 0, persistedReleases: 0, ambiguousBranches: 0 };
+  }
+  if (attributionDisposition === 'error') {
+    const expectedTeamIds = [...upstreamToInternal.keys()].sort((a, b) => a - b);
+    const actualTeamIds = [...new Set(fetched.flatMap((branch) => branch.teamIds))].sort((a, b) => a - b);
+    throw new Error(
+      `RanobeLib returned chapters but none were attributable to a registered actionable team; expected upstream team IDs [${expectedTeamIds.join(',')}], actual [${actualTeamIds.join(',')}]`,
+    );
   }
   const ambiguousBranches = relevant.reduce(
     (count, value) => count + (value.branch.identityConfidence === 'ambiguous' ? 1 : 0),
@@ -251,6 +313,24 @@ async function scanOneMultiTeamWork(
     storedBranchKeys: [...storedKeys],
     fetchedBranchCount: fetched.length,
   });
+  const completionPlan = computeTeamScopedCompletionPlan({
+    translations: translations.map((row) => ({
+      teamId: Number(row.internal_team_id),
+      upstreamTeamId: Number(row.upstream_team_id),
+      baselineReady: Number(row.baseline_ready) === 1,
+      semanticStatus: row.semantic_status,
+      completionPending: Number(row.completion_pending) === 1,
+      lifecycleState: row.lifecycle_state,
+    })),
+    branches: fetched.map((branch) => ({
+      chapterId: branch.chapterId,
+      volume: branch.volume,
+      number: branch.number,
+      branchKey: branch.branchKey,
+      identityConfidence: branch.identityConfidence,
+      upstreamTeamIds: branch.teamIds,
+    })),
+  });
   const releasableTeams = new Map(plan.releasableBranches.map((branch) => [
     branchSnapshotKey(branch.chapterId, branch.branchKey),
     branch.teamIds,
@@ -269,17 +349,20 @@ async function scanOneMultiTeamWork(
     }
   }
 
-  // Baseline and shadow modes intentionally advance the canonical branch snapshot. During shadow,
-  // legacy delivery remains authoritative, so advancing here prevents a replay when live cutover
-  // happens. Team-scoped baseline consumes history only for the new team while already-baselined
-  // teams may still release fresh branches from the same work.
+  // Finalization is deliberately after the successful chapter release/snapshot phase. A pending
+  // team can therefore never publish “translation completed” before its last observable chapters.
   await persistBranchSnapshot(env.DB, work.book_ref, relevant);
   await markTranslationsBaselined(env.DB, work.book_ref, plan.teamIdsToBaseline);
-  await updateWorkAfterSuccessfulScan(env.DB, work, relevant.map(({ branch }) => branch), scanClass, candidates.length > 0, now);
+  const completionInserted = await finalizeTeamCompletions(env, work, translations, completionPlan, mode);
+  if (completionInserted) persistedReleases += 1;
+
+  const completionReleaseDetected = mode === 'live' && completionPlan.notifyTeamIds.length > 0 ? 1 : 0;
+  const changed = candidates.length > 0 || completionPlan.finalizations.length > 0;
+  await updateWorkAfterSuccessfulScan(env.DB, work, relevant.map(({ branch }) => branch), scanClass, changed, now);
 
   return {
     fetchedWorks: 1,
-    detectedReleases: candidates.length,
+    detectedReleases: candidates.length + completionReleaseDetected,
     persistedReleases,
     ambiguousBranches,
   };
@@ -292,13 +375,19 @@ async function loadActionableTranslations(db: D1DatabaseLike, bookRef: string): 
            team.lifecycle_state,
            tt.presence_state,
            tt.semantic_status,
-           tt.baseline_ready
+           tt.baseline_ready,
+           tt.completion_pending,
+           tt.completion_revision
     FROM ranobelib_team_translations tt
     JOIN ranobelib_teams team ON team.id = tt.team_id
     WHERE tt.book_ref = ?
       AND tt.presence_state = 'active'
       AND team.lifecycle_state IN ('hidden','published')
-      AND (tt.baseline_ready = 0 OR (team.lifecycle_state = 'published' AND tt.semantic_status <> 'completed'))
+      AND (
+        tt.baseline_ready = 0
+        OR tt.completion_pending = 1
+        OR (team.lifecycle_state = 'published' AND tt.semantic_status <> 'completed')
+      )
     ORDER BY team.is_primary DESC, tt.team_id ASC
   `).bind(bookRef).all<TranslationRow>();
   return results;
@@ -384,10 +473,109 @@ async function persistBranchRelease(
     for (const statement of teamStatements) await statement.run();
   }
 
-  // The legacy release trigger may have provisionally inserted book-level recipients. Reconcile
-  // them only after release-team mappings exist, before the scanner returns and wakes Queue.
   await reconcileReleaseOutboxRecipients(env, releaseId);
   return inserted;
+}
+
+async function finalizeTeamCompletions(
+  env: MultiTeamScannerEnv,
+  work: DueWork,
+  translations: readonly TranslationRow[],
+  plan: TeamScopedCompletionPlan,
+  mode: MultiTeamScanMode,
+): Promise<boolean> {
+  if (plan.finalizations.length === 0) return false;
+
+  const finalizationStatements = plan.finalizations.map((row) => env.DB.prepare(`
+    UPDATE ranobelib_team_translations
+    SET semantic_status = 'completed',
+        completion_pending = 0,
+        completion_evidence = ?,
+        last_synced_at = CURRENT_TIMESTAMP,
+        sync_error = NULL,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE book_ref = ?
+      AND team_id = ?
+      AND completion_pending = 1
+  `).bind(`team-branch-finalized:${row.branchKey}`, work.book_ref, row.teamId));
+
+  if (mode === 'live' && plan.notifyTeamIds.length > 0) {
+    const revisions = new Map<number, number>();
+    for (const row of translations) {
+      const teamId = Number(row.internal_team_id);
+      const revision = Number(row.completion_revision);
+      if (Number.isSafeInteger(teamId) && teamId > 0) {
+        revisions.set(teamId, Number.isSafeInteger(revision) && revision >= 0 ? revision : 0);
+      }
+    }
+    return persistTeamCompletionRelease(
+      env,
+      work,
+      plan.notifyTeamIds,
+      revisions,
+      finalizationStatements,
+    );
+  }
+
+  await runStatements(env.DB, finalizationStatements);
+  return false;
+}
+
+async function persistTeamCompletionRelease(
+  env: MultiTeamScannerEnv,
+  work: DueWork,
+  notifyTeamIds: readonly number[],
+  revisions: ReadonlyMap<number, number>,
+  finalizationStatements: D1PreparedStatementLike[],
+): Promise<boolean> {
+  const teamIds = [...new Set(notifyTeamIds.filter((id) => Number.isSafeInteger(id) && id > 0))]
+    .sort((a, b) => a - b);
+  if (teamIds.length === 0) {
+    await runStatements(env.DB, finalizationStatements);
+    return false;
+  }
+
+  const revisionScope = teamIds.map((teamId) => `${teamId}@${revisions.get(teamId) ?? 0}`).join(',');
+  const releaseId = `translation-completed:v2:${work.book_ref}:${revisionScope}`;
+  const title = work.title?.trim() || work.slug?.trim() || work.book_ref;
+  const deliveryScopeKey = `completion:v2:teams:${teamIds.join(',')}`;
+  const insertRelease = env.DB.prepare(`
+    INSERT OR IGNORE INTO ranobelib_releases (
+      id, book_ref, title_snapshot, chapter_count,
+      first_chapter_id, first_volume, first_number,
+      last_chapter_id, last_volume, last_number,
+      summary, release_kind, delivery_scope_key, created_at
+    ) VALUES (?, ?, ?, 0, NULL, NULL, NULL, NULL, NULL, NULL,
+              'Перевод завершён', 'translation_completed', ?, CURRENT_TIMESTAMP)
+  `).bind(releaseId, work.book_ref, title, deliveryScopeKey);
+  const teamStatements = teamIds.map((teamId) => env.DB.prepare(`
+    INSERT OR IGNORE INTO ranobelib_release_teams (release_id, team_id)
+    VALUES (?, ?)
+  `).bind(releaseId, teamId));
+
+  let inserted = false;
+  if (env.DB.batch) {
+    const results = await env.DB.batch([insertRelease, ...teamStatements, ...finalizationStatements]);
+    inserted = runChanges(results[0]) > 0;
+  } else {
+    // Persist release + mappings before clearing pending. If a later update fails, the retry can
+    // reuse the deterministic release id and finish relation state without losing the event.
+    inserted = runChanges(await insertRelease.run()) > 0;
+    for (const statement of teamStatements) await statement.run();
+    for (const statement of finalizationStatements) await statement.run();
+  }
+
+  await reconcileReleaseOutboxRecipients(env, releaseId);
+  return inserted;
+}
+
+async function runStatements(db: D1DatabaseLike, statements: D1PreparedStatementLike[]): Promise<void> {
+  if (statements.length === 0) return;
+  if (db.batch) {
+    await db.batch(statements);
+    return;
+  }
+  for (const statement of statements) await statement.run();
 }
 
 async function persistBranchSnapshot(
@@ -439,7 +627,6 @@ async function persistBranchSnapshot(
       last_seen_at = CURRENT_TIMESTAMP
   `).bind(payload, bookRef).run();
 
-  // Replace the participating team set only for branches observed in this successful payload.
   for (const { branch, teamIds } of values) {
     await db.prepare(`
       DELETE FROM ranobelib_chapter_branch_teams
@@ -519,6 +706,30 @@ async function updateWorkAfterSuccessfulScan(
     changed ? 1 : 0,
     work.book_ref,
   ).run();
+}
+
+async function recordAwaitingFirstTeamBranch(
+  db: D1DatabaseLike,
+  work: DueWork,
+  scanClass: MultiTeamScanClass,
+): Promise<void> {
+  const previousMisses = Math.max(0, Math.floor(Number(work.consecutive_no_change ?? 0)));
+  const misses = previousMisses + 1;
+  const delay = computeMultiTeamNextCheckDelayMinutes({
+    scanClass,
+    changed: false,
+    consecutiveNoChange: misses,
+  });
+  await db.prepare(`
+    UPDATE ranobelib_titles
+    SET last_synced_at = CURRENT_TIMESTAMP,
+        consecutive_no_change = ?,
+        consecutive_failures = 0,
+        next_check_at = datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes'),
+        scan_priority = MAX(scan_priority - 1, 0),
+        sync_error = NULL
+    WHERE book_ref = ?
+  `).bind(misses, delay, work.book_ref).run();
 }
 
 async function scheduleNextWorkCheck(

@@ -23,7 +23,8 @@ function db() {
         row = {
           ciphertext: values[0], iv: values[1], key_version: keyVersion, access_expires_at: values[2],
           state: values[3], last_validated_at: values[4], last_refreshed_at: values[5],
-          last_error: values[6], updated_at: '2026-09-11T12:00:00.000Z',
+          refresh_failures: values[6] ?? 0, last_refresh_failure_at: values[7] ?? null,
+          last_error: values[8] ?? null, updated_at: '2026-09-11T12:00:00.000Z',
         };
       }
       if (/DELETE FROM ranobelib_auth_credentials/i.test(sql)) row = null;
@@ -79,17 +80,21 @@ test('validated import returns health metadata without echoing token values', as
   assert.equal(response.status, 200);
   const text = await response.text();
   assert.doesNotMatch(text, /admin-access-secret|admin-refresh-secret|accessToken|refreshToken/);
-  assert.equal(JSON.parse(text).auth.state, 'active');
+  const body = JSON.parse(text);
+  assert.equal(body.auth.state, 'active');
+  assert.equal(body.auth.encryptionState, 'dedicated');
 });
 
-test('validated import uses Telegram bot secret when dedicated encryption key is absent', async () => {
+test('validated import is unavailable when dedicated encryption key is absent', async () => {
   const env = baseEnv(db());
   delete env.RANOBELIB_TOKEN_ENCRYPTION_KEY;
+  let validations = 0;
   const response = await handleRanobeLibAuthAdmin(await request('PUT', TOKEN_BUNDLE), env, {
-    fetchImpl: async () => Response.json({ data: { id: 11931299 } }),
+    fetchImpl: async () => { validations += 1; return Response.json({ data: { id: 11931299 } }); },
   });
-  assert.equal(response.status, 200);
-  assert.equal((await response.json()).auth.state, 'active');
+  assert.equal(response.status, 503);
+  assert.equal(validations, 0);
+  assert.match((await response.json()).error, /dedicated credential encryption key/i);
 });
 
 test('malformed bundles fail without storing or exposing submitted secrets', async () => {

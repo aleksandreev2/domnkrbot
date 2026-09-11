@@ -113,7 +113,11 @@ test('getChapterBranches falls back safely when branch_id is missing', async () 
   const branches = await client.getChapterBranches('10--x');
 
   assert.equal(branches.length, 3);
-  assert.equal(branches[0].identityConfidence, 'fallback');
+  const fallback = branches.filter((branch) => branch.identityConfidence === 'fallback');
+  assert.equal(fallback.length, 1);
+  assert.deepEqual(fallback[0].teamIds, [77]);
+  assert.equal(fallback[0].releasedAt, '2026-09-10T10:00:00Z');
+
   const ambiguous = branches.filter((branch) => branch.identityConfidence === 'ambiguous');
   assert.equal(ambiguous.length, 2);
   assert.notEqual(ambiguous[0].branchKey, ambiguous[1].branchKey);
