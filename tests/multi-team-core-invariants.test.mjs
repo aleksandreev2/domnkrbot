@@ -80,6 +80,17 @@ test('team discovery reconciliation only changes relationships in the team being
   assert.deepEqual(result.activate, ['12--returning', '13--new']);
 });
 
+test('team discovery treats current catalog membership as active while preserving confirmed completion', async () => {
+  const source = await readFile(new URL('../src/ranobelib-multi-team-discovery.ts', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(source, /SELECT \?, book_ref, 'active', 'unknown'/);
+  assert.match(source, /SELECT \?, book_ref, 'active', 'active'/);
+  assert.match(
+    source,
+    /WHEN ranobelib_team_translations\.semantic_status = 'completed' THEN 'completed'[\s\S]*ELSE 'active'/,
+  );
+});
+
 test('scanner keeps baseline and shadow non-delivering and uses branch-aware team mappings', async () => {
   const source = await readFile(new URL('../src/ranobelib-multi-team-scanner.ts', import.meta.url), 'utf8');
 

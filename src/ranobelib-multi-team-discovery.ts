@@ -204,15 +204,18 @@ async function upsertTeamTranslationRows(
       team_id, book_ref, presence_state, semantic_status, baseline_ready,
       notification_subscriber_count, last_seen_at, last_synced_at, sync_error, updated_at
     )
-    SELECT ?, book_ref, 'active', 'unknown', 0, 0,
+    SELECT ?, book_ref, 'active', 'active', 0, 0,
            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, NULL, CURRENT_TIMESTAMP
     FROM incoming
     WHERE book_ref IS NOT NULL AND book_ref != ''
     ON CONFLICT(team_id, book_ref) DO UPDATE SET
       presence_state = 'active',
+      -- Current membership in this exact team's RanobeLib catalog is attributable team evidence
+      -- that the relationship is actionable. It is not completion evidence: a previously confirmed
+      -- completion remains final until a stronger team-specific signal explicitly reopens it.
       semantic_status = CASE
         WHEN ranobelib_team_translations.semantic_status = 'completed' THEN 'completed'
-        ELSE ranobelib_team_translations.semantic_status
+        ELSE 'active'
       END,
       last_seen_at = CURRENT_TIMESTAMP,
       last_synced_at = CURRENT_TIMESTAMP,
