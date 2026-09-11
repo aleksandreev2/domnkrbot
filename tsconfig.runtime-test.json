@@ -66,6 +66,10 @@
     "src/telegram-team-catalog.ts",
     "src/telegram-team-notification-ux.ts",
     "src/telegram-team-onboarding.ts",
-    "src/telegram-team-admin.ts"
+    "src/telegram-team-admin.ts",
+    "src/telegram-partner-collaboration-ux.ts",
+    "src/telegram-partner-team-screen.ts",
+    "src/telegram-partner-collaboration-runtime.ts",
+    "src/telegram-multi-team-gateway.ts"
   ]
 }
