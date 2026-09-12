@@ -6,12 +6,18 @@ const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('title API reads primary-team translation state and does not hide completed titles', async () => {
   const source = await read('../src/reader-runtime.ts');
-  assert.match(source, /ranobelib_team_translations/);
-  assert.match(source, /ranobelib_teams/);
-  assert.match(source, /semantic_status\s+AS\s+translation_semantic_status/i);
-  assert.match(source, /translation_status_label/i);
-  assert.match(source, /presence_state\s*=\s*'active'/i);
-  assert.doesNotMatch(source, /getTitle[\s\S]*?WHERE\s+book_ref=\?\s+AND\s+is_active=1\s+LIMIT\s+1/i);
+  const getTitleStart = source.indexOf('async function getTitle');
+  const getChapterStart = source.indexOf('async function getChapter');
+  assert.ok(getTitleStart >= 0 && getChapterStart > getTitleStart, 'getTitle source block must be discoverable');
+  const getTitleSource = source.slice(getTitleStart, getChapterStart);
+
+  assert.match(getTitleSource, /ranobelib_team_translations/);
+  assert.match(getTitleSource, /ranobelib_teams/);
+  assert.match(getTitleSource, /semantic_status\s+AS\s+translation_semantic_status/i);
+  assert.match(getTitleSource, /translation_status_label/i);
+  assert.match(getTitleSource, /presence_state\s*=\s*'active'/i);
+  assert.match(getTitleSource, /WHERE\s+t\.book_ref=\?\s+AND\s+\(t\.is_active=1\s+OR\s+tt\.book_ref\s+IS\s+NOT\s+NULL\)\s+LIMIT\s+1/i);
+  assert.doesNotMatch(getTitleSource, /WHERE\s+(?:t\.)?book_ref=\?\s+AND\s+(?:t\.)?is_active=1\s+LIMIT\s+1/i);
 });
 
 test('title UI renders the real synchronized translation status', async () => {
