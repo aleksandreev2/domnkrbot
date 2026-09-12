@@ -59,6 +59,7 @@ import {
 } from './telegram-webhook-routing.js';
 import { handleWebCollectionsApi, type WebCollectionsEnv } from './web-collections.js';
 import { handleWebReaderCommentsApi, type WebReaderCommentsEnv } from './web-reader-comments.js';
+import { handleWebReaderReactionsApi, type WebReaderReactionsEnv } from './web-reader-reactions.js';
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
@@ -90,6 +91,7 @@ type Env = PublicationCommentGateEnv
   & RanobeLibAuthAdminEnv
   & WebCollectionsEnv
   & WebReaderCommentsEnv
+  & WebReaderReactionsEnv
   & {
     RANOBELIB_TEAM_REF?: string;
     NOTIFICATION_QUEUE?: QueueProducerLike;
@@ -179,6 +181,9 @@ export default {
 
     const readerCommentsResponse = await handleWebReaderCommentsApi(request, env);
     if (readerCommentsResponse) return readerCommentsResponse;
+
+    const readerReactionsResponse = await handleWebReaderReactionsApi(request, env);
+    if (readerReactionsResponse) return readerReactionsResponse;
 
     const collectionsResponse = await handleWebCollectionsApi(request, env);
     if (collectionsResponse) return collectionsResponse;
