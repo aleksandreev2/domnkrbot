@@ -35,8 +35,19 @@ test('title client preserves real API/session/reader behavior under NekromantLib
   assert.match(js, /readerUrl/);
   assert.match(js, /localStorage/);
   assert.match(js, /readerAvailable/);
-  assert.match(js, /volume-block/);
   assert.match(js, /chapter-row/);
+});
+
+test('chapter list follows the flat RanobeLib title-tab hierarchy without fake download actions', async () => {
+  const html = await read('../public/title/index.html');
+  const js = await read('../public/title.js');
+  assert.match(html, /class="chapter-sort-menu"/);
+  assert.match(html, />Сортировать</);
+  assert.doesNotMatch(html, />Скачать</);
+  assert.match(js, /chapter-row-copy/);
+  assert.match(js, /chapter-row-prefix/);
+  assert.match(js, /chapter-row-name/);
+  assert.doesNotMatch(js, /class="volume-block"/);
 });
 
 test('title detail has isolated responsive parity styles', async () => {
@@ -45,7 +56,8 @@ test('title detail has isolated responsive parity styles', async () => {
   assert.match(css, /\.title-detail-hero\s*\{/);
   assert.match(css, /\.title-meta-grid\s*\{/);
   assert.match(css, /\.title-tabs\s*\{/);
-  assert.match(css, /\.volume-block\s*\{/);
+  assert.match(css, /\.chapter-sort-menu\s*\{/);
+  assert.match(css, /\.chapter-row-copy\s*\{/);
   assert.match(css, /\.chapter-row\s*\{/);
   assert.match(css, /@media\s*\(max-width:\s*720px\)/);
   assert.match(css, /:focus-visible/);
