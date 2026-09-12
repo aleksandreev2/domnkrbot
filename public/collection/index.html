@@ -8,10 +8,10 @@
   <meta name="description" content="Подборка тайтлов НекромантЛиб.">
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
-  <link rel="stylesheet" href="/collection.css?v=20260912-owner1">
+  <link rel="stylesheet" href="/collection.css?v=20260912-comments1">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/collection.js?v=20260912-owner1"></script>
+  <script defer src="/collection.js?v=20260912-comments1"></script>
 </head>
 <body class="nl-body collection-detail-body">
   <header class="site-header nl-header">
@@ -58,6 +58,25 @@
           <div id="collectionGroups" class="collection-groups" aria-live="polite">
             <div class="collection-detail-loading"><span></span><span></span><span></span></div>
           </div>
+
+          <section class="collection-comments-section" aria-labelledby="collectionCommentsHeading">
+            <div class="collection-section-heading collection-comments-heading">
+              <div><h2 id="collectionCommentsHeading">Комментарии</h2><p>Обсуждение этой подборки.</p></div>
+              <span id="commentCount" class="collection-comment-count">0</span>
+            </div>
+            <form id="commentForm" class="surface collection-comment-form">
+              <label for="commentBody">Ваш комментарий</label>
+              <textarea id="commentBody" maxlength="2000" rows="3" placeholder="Поделитесь мнением о подборке"></textarea>
+              <div class="collection-comment-form-foot">
+                <span id="commentLoginHint">Войдите через Telegram, чтобы оставить комментарий.</span>
+                <button id="commentSubmit" class="collection-primary" type="submit">Отправить</button>
+              </div>
+              <div id="commentError" class="collection-form-error hidden" role="alert"></div>
+            </form>
+            <div id="collectionComments" class="collection-comments" aria-live="polite">
+              <div class="collection-comments-status">Загрузка комментариев…</div>
+            </div>
+          </section>
         </section>
 
         <aside class="surface collection-detail-aside">
