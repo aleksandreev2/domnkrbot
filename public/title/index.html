@@ -8,10 +8,10 @@
   <meta name="description" content="Тайтл НекромантЛиб: описание, перевод команды «Дом Некроманта», прогресс чтения и список глав.">
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
-  <link rel="stylesheet" href="/title.css?v=20260912-title2">
+  <link rel="stylesheet" href="/title.css?v=20260913-title4">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/title.js?v=20260912-title3"></script>
+  <script defer src="/title.js?v=20260913-title4"></script>
 </head>
 <body class="nl-body title-detail-body">
   <header class="site-header nl-header">
@@ -39,78 +39,80 @@
       <div id="titleLoading" class="surface title-loading"><i data-lucide="loader-circle"></i><strong>Загружаем тайтл</strong><span>Получаем описание и список глав.</span></div>
 
       <div id="titleApp" class="hidden">
-        <div class="title-detail-layout">
-          <div class="title-detail-primary">
-            <section class="surface title-detail-hero">
-              <div class="title-cover-panel">
-                <div class="title-cover-frame"><img id="titleCover" src="/brand/team-logo.webp" alt="Обложка тайтла"></div>
-                <div class="title-team-chip"><i data-lucide="languages"></i><span>Перевод: <strong>Дом Некроманта</strong></span></div>
-              </div>
+        <div class="title-detail-layout title-media-shell">
+          <aside class="title-cover-column">
+            <div class="title-cover-frame"><img id="titleCover" src="/brand/team-logo.webp" alt="Обложка тайтла"></div>
+          </aside>
 
-              <div class="title-detail-copy">
-                <div id="titleKicker" class="title-kicker">РАНОБЭ · ПЕРЕВОД КОМАНДЫ</div>
-                <h1 id="titleName">—</h1>
-                <div id="titleOriginal" class="title-original">Перевод команды «Дом Некроманта»</div>
-
-                <div class="title-meta-grid" aria-label="Информация о тайтле">
-                  <div class="title-meta-item"><span>Статус перевода</span><strong id="translationStatus">Проверяем…</strong></div>
-                  <div class="title-meta-item"><span>Глав</span><strong id="titleChapterCount">—</strong></div>
-                  <div class="title-meta-item"><span>Последняя</span><strong id="titleLatest">—</strong></div>
-                  <div class="title-meta-item"><span>Обновлено</span><strong id="titleUpdated">—</strong></div>
-                  <div class="title-meta-item title-meta-reader"><span>Читалка</span><strong id="readerStatus">Проверяем…</strong></div>
-                </div>
-
-                <div class="title-actions">
-                  <a id="continueReading" class="title-primary-action" href="#chapters"><i data-lucide="book-open"></i><span>К списку глав</span></a>
-                  <a class="title-secondary-action" href="#chapters"><i data-lucide="list"></i><span>Все главы</span></a>
-                </div>
-
-                <div class="title-progress-card">
-                  <div class="title-progress-head"><span id="readingProgressText">Чтение ещё не начато</span><strong id="readingProgressPercent">0%</strong></div>
-                  <div class="title-progress-track"><span id="readingProgressBar"></span></div>
-                </div>
-              </div>
-            </section>
-
-            <nav class="title-tabs" aria-label="Разделы тайтла"><a class="active" href="#about">Описание</a><a href="#chapters">Главы</a></nav>
-
-            <section id="about" class="surface title-description-card">
-              <div class="title-section-heading"><div><h2>Описание</h2><p>Аннотация проекта</p></div></div>
-              <div id="titleDescription" class="title-description">Описание пока отсутствует.</div>
-            </section>
-
-            <section id="chapters" class="title-chapters-section">
-              <div class="title-section-heading chapter-toolbar">
-                <div><h2>Главы</h2><p>Доступные главы перевода</p></div>
-                <div class="chapter-controls">
-                  <label class="chapter-search"><i data-lucide="search"></i><input id="chapterSearch" type="search" placeholder="Номер или название главы" aria-label="Поиск главы"></label>
-                  <details class="chapter-sort-menu">
-                    <summary class="chapter-sort-trigger"><i data-lucide="arrow-up-down"></i><span>Сортировать</span></summary>
-                    <div class="chapter-sort-options" role="group" aria-label="Сортировка глав">
-                      <button id="sortNew" class="active" type="button">Сначала новые</button>
-                      <button id="sortOld" type="button">Сначала старые</button>
-                    </div>
-                  </details>
-                </div>
-              </div>
-              <div id="chapterList" class="chapter-list" aria-live="polite"></div>
-            </section>
+          <div class="title-actions title-actions-stack">
+            <a id="continueReading" class="title-primary-action title-read-progress" href="#chapters" aria-label="Начать читать">
+              <i data-lucide="book-open"></i>
+              <span class="title-read-progress-copy"><strong id="readingProgressText">0 / 0</strong><small id="readingProgressAction">Начать читать</small></span>
+              <span id="readingProgressPercent" class="title-read-progress-percent">0%</span>
+            </a>
+            <button id="titlePlanButton" class="title-secondary-action title-plan-button" type="button" disabled aria-disabled="true" title="Нативные планы тайтлов пока не подключены">
+              <i data-lucide="bookmark"></i><span>Добавить в планы</span>
+            </button>
           </div>
 
-          <aside class="title-detail-rail">
-            <section class="surface title-source-card">
-              <h2>О переводе</h2>
-              <dl>
-                <div><dt>Команда</dt><dd>Дом Некроманта</dd></div>
-                <div><dt>Статус</dt><dd id="translationStatusAside">—</dd></div>
-                <div><dt>Источник</dt><dd id="titleSource">—</dd></div>
-                <div><dt>Глав</dt><dd id="titleChapterCountAside">—</dd></div>
-                <div><dt>Обновление</dt><dd id="titleUpdatedAside">—</dd></div>
-              </dl>
-              <a class="title-team-link" href="https://t.me/domnekromanta" target="_blank" rel="noreferrer"><i data-lucide="send"></i><span>Telegram команды</span></a>
+          <section class="surface title-meta-grid title-facts-paper" aria-label="Информация о тайтле">
+            <div class="title-meta-item"><span>Глав</span><strong id="titleChapterCount">—</strong></div>
+            <div class="title-meta-item"><span>Перевод</span><strong id="translationStatus">Проверяем…</strong></div>
+            <div class="title-meta-item"><span>Последняя</span><strong id="titleLatest">—</strong></div>
+            <div class="title-meta-item"><span>Обновлено</span><strong id="titleUpdated">—</strong></div>
+            <div class="title-meta-item"><span>Источник</span><strong id="titleSource">—</strong></div>
+            <div class="title-meta-item"><span>Тексты</span><strong id="readerStatus">Проверяем…</strong></div>
+          </section>
+
+          <section class="title-detail-hero title-name-block">
+            <h1 id="titleName">—</h1>
+            <div id="titleOriginal" class="title-original hidden"></div>
+          </section>
+
+          <section class="title-rating-slot" aria-disabled="true" aria-label="Рейтинг тайтла пока недоступен">
+            <span>Рейтинг тайтла</span>
+            <strong>—</strong>
+            <small>Нет собственных оценок</small>
+          </section>
+
+          <section class="surface title-media-content">
+            <nav class="title-tabs" role="tablist" aria-label="Разделы тайтла">
+              <button type="button" role="tab" data-title-tab="about" aria-selected="false" aria-controls="titleAboutPanel">О тайтле</button>
+              <button type="button" role="tab" data-title-tab="chapters" class="active" aria-selected="true" aria-controls="titleChaptersPanel">Главы</button>
+              <button type="button" role="tab" data-title-tab="comments" disabled aria-disabled="true" title="Комментарии к тайтлу пока не подключены">Комментарии</button>
+              <button type="button" role="tab" data-title-tab="discussions" disabled aria-disabled="true" title="Обсуждения пока не подключены">Обсуждения</button>
+              <button type="button" role="tab" data-title-tab="reviews" disabled aria-disabled="true" title="Отзывы пока не подключены">Отзывы</button>
+            </nav>
+
+            <section id="titleAboutPanel" class="title-tab-panel hidden" role="tabpanel">
+              <div class="title-description-card">
+                <div class="title-section-heading"><div><h2>Описание</h2></div></div>
+                <div id="titleDescription" class="title-description">Описание пока отсутствует.</div>
+              </div>
+              <div class="title-translator-card">
+                <span>Переводчики</span>
+                <a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer"><img src="/brand/team-logo.webp" alt="" width="34" height="34"><strong>Дом Некроманта</strong></a>
+              </div>
             </section>
-            <section class="surface title-reader-card"><i data-lucide="bookmark-check"></i><div><strong>Прогресс чтения</strong><span>Отмечается автоматически в этой читалке.</span></div></section>
-          </aside>
+
+            <section id="titleChaptersPanel" class="title-tab-panel" role="tabpanel">
+              <div id="chapters" class="title-chapters-section">
+                <div class="title-section-heading chapter-toolbar">
+                  <label class="chapter-search"><i data-lucide="search"></i><input id="chapterSearch" type="search" placeholder="Номер или название главы" aria-label="Поиск главы"></label>
+                  <div class="chapter-controls">
+                    <details class="chapter-sort-menu">
+                      <summary class="chapter-sort-trigger"><i data-lucide="arrow-up-down"></i><span>Сортировать</span></summary>
+                      <div class="chapter-sort-options" role="group" aria-label="Сортировка глав">
+                        <button id="sortNew" class="active" type="button">Сначала новые</button>
+                        <button id="sortOld" type="button">Сначала старые</button>
+                      </div>
+                    </details>
+                  </div>
+                </div>
+                <div id="chapterList" class="chapter-list" aria-live="polite"></div>
+              </div>
+            </section>
+          </section>
         </div>
       </div>
     </div>
