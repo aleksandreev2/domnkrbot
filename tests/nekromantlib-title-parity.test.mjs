@@ -23,7 +23,7 @@ test('title shell follows captured cover-actions-facts-header-tabs hierarchy', a
     'DOM must preserve a deterministic captured hierarchy');
 });
 
-test('title tabs reproduce captured labels while unsupported title-level social tabs stay disabled', async () => {
+test('title tabs reproduce captured labels while only native title social tabs are enabled', async () => {
   const html = await read('../public/title/index.html');
   const labels = ['О тайтле','Главы','Комментарии','Обсуждения','Отзывы'];
   let cursor = -1;
@@ -34,8 +34,7 @@ test('title tabs reproduce captured labels while unsupported title-level social 
   }
   assert.match(html, /data-title-tab="about"/);
   assert.match(html, /data-title-tab="chapters"[^>]*aria-selected="true"/);
-  assert.match(html, />Комментарии<\/button>/);
-  assert.match(html, /data-title-tab="comments"[^>]*disabled/);
+  assert.match(html, /data-title-tab="comments"(?![^>]*disabled)/);
   assert.match(html, /data-title-tab="discussions"[^>]*disabled/);
   assert.match(html, /data-title-tab="reviews"[^>]*disabled/);
   assert.doesNotMatch(html, />Скачать</);
