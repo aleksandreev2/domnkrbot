@@ -60,6 +60,7 @@ import {
 import { handleWebCollectionsApi, type WebCollectionsEnv } from './web-collections.js';
 import { handleWebReaderCommentsApi, type WebReaderCommentsEnv } from './web-reader-comments.js';
 import { handleWebReaderReactionsApi, type WebReaderReactionsEnv } from './web-reader-reactions.js';
+import { handleWebTitleStateApi, type WebTitleStateEnv } from './web-title-state.js';
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
@@ -92,6 +93,7 @@ type Env = PublicationCommentGateEnv
   & WebCollectionsEnv
   & WebReaderCommentsEnv
   & WebReaderReactionsEnv
+  & WebTitleStateEnv
   & {
     RANOBELIB_TEAM_REF?: string;
     NOTIFICATION_QUEUE?: QueueProducerLike;
@@ -184,6 +186,9 @@ export default {
 
     const readerReactionsResponse = await handleWebReaderReactionsApi(request, env);
     if (readerReactionsResponse) return readerReactionsResponse;
+
+    const titleStateResponse = await handleWebTitleStateApi(request, env);
+    if (titleStateResponse) return titleStateResponse;
 
     const collectionsResponse = await handleWebCollectionsApi(request, env);
     if (collectionsResponse) return collectionsResponse;
