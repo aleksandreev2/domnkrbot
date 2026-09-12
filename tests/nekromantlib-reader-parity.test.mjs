@@ -36,6 +36,7 @@ test('reader settings expose the controls visible in the captured RanobeLib sett
     'Отступ между абзацами',
     'Ширина контейнера',
   ]) assert.match(html, new RegExp(label));
+  assert.equal((html.match(/data-theme="/g)||[]).length,6);
 });
 
 test('reader client keeps real chapter delivery/progress and loads a real contents list', async () => {
@@ -49,6 +50,7 @@ test('reader client keeps real chapter delivery/progress and loads a real conten
   assert.match(js, /renderChapterList/);
   assert.match(js, /readerChapters/);
   assert.match(js, /readerSettings/);
+  for (const color of ['#f2f2f3','#212529','#dce5e2','#27262b','#f5f1e5','#28282a','#e5cf9d','#262425','#434751','#dbdbdb','#141414','#dddddd']) assert.match(js,new RegExp(color,'i'));
 });
 
 test('reader parity stylesheet preserves captured default geometry and colors', async () => {
@@ -65,5 +67,6 @@ test('reader parity stylesheet preserves captured default geometry and colors', 
   assert.match(css, /\.reader-topbar\s*\{[^}]*position:\s*sticky[^}]*height:\s*48px/is);
   assert.match(css, /\.reader-popup-panel\s*\{[^}]*max-width:\s*440px/is);
   assert.match(css, /\.reader-popup-overlay\s*\{[^}]*rgba\(0,\s*0,\s*0,\s*\.6\)/is);
+  assert.match(css, /\.reader-chapter-row\s*\{[^}]*height:\s*40px/is);
   assert.match(css, /@media\s*\(max-width:\s*650px\)[^{]*\{[\s\S]*?min-width:\s*90vw/i);
 });
