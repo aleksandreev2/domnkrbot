@@ -4,7 +4,7 @@
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
   const API_TIMEOUT_MS=10000;
   const params=new URLSearchParams(location.search);
-  const state={id:(params.get('id')||'').trim(),bootstrap:null,collection:null,items:[],catalog:[],catalogLoaded:false};
+  const state={id:(params.get('id')||'').trim(),bootstrap:null,collection:null,items:[],catalog:[],catalogLoaded:false,editingBookRef:''};
 
   async function api(path,options={}){
     const controller=new AbortController();
@@ -30,8 +30,7 @@
     if(bootstrapResult.status==='fulfilled'){state.bootstrap=bootstrapResult.value;renderSession();}
     else renderSessionError();
     if(collectionResult.status==='fulfilled'){
-      state.collection=collectionResult.value?.collection||null;
-      state.items=Array.isArray(collectionResult.value?.items)?collectionResult.value.items:[];
+      applyCollectionPayload(collectionResult.value);
       renderCollection();
     }else renderFatal(collectionResult.reason?.message||'Не удалось загрузить коллекцию.');
   }
@@ -44,8 +43,24 @@
     $('#addTitleCancel')?.addEventListener('click',closeAddDialog);
     $('#addTitleForm')?.addEventListener('submit',submitTitle);
     $('#titleSearch')?.addEventListener('input',renderTitlePicker);
+    $('#editCollectionButton')?.addEventListener('click',openCollectionEditor);
+    $('#editCollectionClose')?.addEventListener('click',closeCollectionEditor);
+    $('#editCollectionCancel')?.addEventListener('click',closeCollectionEditor);
+    $('#editCollectionForm')?.addEventListener('submit',submitCollectionEdit);
+    $('#deleteCollectionButton')?.addEventListener('click',openDeleteDialog);
+    $('#deleteCollectionClose')?.addEventListener('click',closeDeleteDialog);
+    $('#deleteCollectionCancel')?.addEventListener('click',closeDeleteDialog);
+    $('#deleteCollectionForm')?.addEventListener('submit',submitCollectionDelete);
+    $('#editItemClose')?.addEventListener('click',closeItemEditor);
+    $('#editItemCancel')?.addEventListener('click',closeItemEditor);
+    $('#editItemForm')?.addEventListener('submit',submitItemEdit);
     $('#collectionGroups')?.addEventListener('click',handleGroupClick);
     window.addEventListener('keydown',(event)=>{if(event.key==='Escape')$('#primaryNav')?.classList.remove('open');});
+  }
+
+  function applyCollectionPayload(payload){
+    state.collection=payload?.collection||state.collection;
+    state.items=Array.isArray(payload?.items)?payload.items:state.items;
   }
 
   function renderCollection(){
@@ -75,23 +90,25 @@
   function titleCard(item){
     const cover=esc(item.coverUrl||'/brand/team-logo.webp');const title=esc(item.title||item.bookRef||'Без названия');
     const note=item.note?`<p class="collection-item-note">${esc(item.note)}</p>`:'';
-    const remove=state.collection?.isOwner?`<button class="collection-item-remove" type="button" data-remove-ref="${esc(item.bookRef||'')}" aria-label="Удалить ${title}"><i data-lucide="trash-2"></i></button>`:'';
-    return `<article class="collection-item-card"><a class="collection-item-link" href="/title/?ref=${encodeURIComponent(item.bookRef||'')}"><img loading="lazy" src="${cover}" alt="Обложка ${title}"><span class="collection-item-copy"><strong>${title}</strong><small>${Number(item.chapterCount||0)} глав</small>${note}</span></a>${remove}</article>`;
+    const controls=state.collection?.isOwner?`<div class="collection-item-edit"><button type="button" data-edit-ref="${esc(item.bookRef||'')}" aria-label="Настроить ${title}"><i data-lucide="pencil"></i></button><button type="button" class="collection-item-remove" data-remove-ref="${esc(item.bookRef||'')}" aria-label="Удалить ${title}"><i data-lucide="trash-2"></i></button></div>`:'';
+    return `<article class="collection-item-card"><a class="collection-item-link" href="/title/?ref=${encodeURIComponent(item.bookRef||'')}"><img loading="lazy" src="${cover}" alt="Обложка ${title}"><span class="collection-item-copy"><strong>${title}</strong><small>${Number(item.chapterCount||0)} глав</small>${note}</span></a>${controls}</article>`;
   }
 
   async function handleGroupClick(event){
+    const editButton=event.target.closest('[data-edit-ref]');
+    if(editButton&&state.collection?.isOwner){openItemEditor(editButton.dataset.editRef||'');return;}
     const button=event.target.closest('[data-remove-ref]');if(!button||!state.collection?.isOwner)return;
     const bookRef=button.dataset.removeRef||'';if(!bookRef)return;
     button.disabled=true;
     try{
       const payload=await api(`/api/collections/${encodeURIComponent(state.id)}/items`,{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({bookRef})});
-      state.collection=payload.collection||state.collection;state.items=Array.isArray(payload.items)?payload.items:[];renderCollection();
+      applyCollectionPayload(payload);renderCollection();
     }catch(error){button.disabled=false;showInlineError(error?.message||'Не удалось удалить тайтл.');}
   }
 
   async function openAddDialog(){
     if(!state.collection?.isOwner)return;
-    clearAddError();
+    clearError('#addTitleError');
     const dialog=$('#addTitleDialog');if(typeof dialog?.showModal==='function')dialog.showModal();
     if(!state.catalogLoaded){
       setPickerMessage('Загрузка каталога…');
@@ -100,12 +117,12 @@
         const richer=Array.isArray(payload?.catalogTitles)?payload.catalogTitles:null;
         state.catalog=richer??(Array.isArray(payload?.titles)?payload.titles:[]);
         state.catalogLoaded=true;renderTitlePicker();
-      }catch(error){showAddError(error?.message||'Не удалось загрузить каталог.');setPickerMessage('Каталог недоступен');}
+      }catch(error){showError('#addTitleError',error?.message||'Не удалось загрузить каталог.');setPickerMessage('Каталог недоступен');}
     }else renderTitlePicker();
     setTimeout(()=>$('#titleSearch')?.focus(),0);refreshIcons();
   }
 
-  function closeAddDialog(){const dialog=$('#addTitleDialog');if(dialog?.open)dialog.close();clearAddError();}
+  function closeAddDialog(){closeDialog('#addTitleDialog');clearError('#addTitleError');}
 
   function renderTitlePicker(){
     const picker=$('#titlePicker');if(!picker)return;
@@ -120,16 +137,70 @@
   function setPickerMessage(message){const picker=$('#titlePicker');if(picker){picker.disabled=true;picker.innerHTML=`<option value="">${esc(message)}</option>`;}}
 
   async function submitTitle(event){
-    event.preventDefault();clearAddError();
-    const bookRef=$('#titlePicker')?.value||'';if(!bookRef){showAddError('Выберите тайтл.');return;}
+    event.preventDefault();clearError('#addTitleError');
+    const bookRef=$('#titlePicker')?.value||'';if(!bookRef){showError('#addTitleError','Выберите тайтл.');return;}
     const groupName=($('#groupName')?.value||'').trim();const note=($('#titleNote')?.value||'').trim();
-    const submit=$('#addTitleSubmit');if(submit){submit.disabled=true;submit.textContent='Добавление…';}
+    const submit=$('#addTitleSubmit');setBusy(submit,true,'Добавление…');
     try{
       const payload=await api(`/api/collections/${encodeURIComponent(state.id)}/items`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({bookRef,groupName,note})});
-      state.collection=payload.collection||state.collection;state.items=Array.isArray(payload.items)?payload.items:[];
-      $('#addTitleForm')?.reset();closeAddDialog();renderCollection();
-    }catch(error){showAddError(error?.message||'Не удалось добавить тайтл.');}
-    finally{if(submit){submit.disabled=false;submit.textContent='Добавить';}}
+      applyCollectionPayload(payload);$('#addTitleForm')?.reset();closeAddDialog();renderCollection();
+    }catch(error){showError('#addTitleError',error?.message||'Не удалось добавить тайтл.');}
+    finally{setBusy(submit,false,'Добавить');}
+  }
+
+  function openCollectionEditor(){
+    if(!state.collection?.isOwner)return;
+    const title=$('#editCollectionTitle'),description=$('#editCollectionDescription'),visibility=$('#editCollectionPublic');
+    if(title)title.value=state.collection.title||'';
+    if(description)description.value=state.collection.description||'';
+    if(visibility)visibility.checked=Boolean(state.collection.isPublic);
+    clearError('#editCollectionError');openDialog('#editCollectionDialog');setTimeout(()=>title?.focus(),0);
+  }
+  function closeCollectionEditor(){closeDialog('#editCollectionDialog');clearError('#editCollectionError');}
+
+  async function submitCollectionEdit(event){
+    event.preventDefault();clearError('#editCollectionError');
+    if(!state.collection?.isOwner)return;
+    const title=($('#editCollectionTitle')?.value||'').trim();
+    const description=($('#editCollectionDescription')?.value||'').trim();
+    const isPublic=Boolean($('#editCollectionPublic')?.checked);
+    if(!title){showError('#editCollectionError','Введите название коллекции.');return;}
+    const submit=$('#editCollectionSubmit');setBusy(submit,true,'Сохранение…');
+    try{
+      const payload=await api(`/api/collections/${encodeURIComponent(state.id)}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({title,description,isPublic})});
+      applyCollectionPayload(payload);closeCollectionEditor();renderCollection();
+    }catch(error){showError('#editCollectionError',error?.message||'Не удалось сохранить коллекцию.');}
+    finally{setBusy(submit,false,'Сохранить');}
+  }
+
+  function openDeleteDialog(){if(state.collection?.isOwner){clearError('#deleteCollectionError');openDialog('#deleteCollectionDialog');}}
+  function closeDeleteDialog(){closeDialog('#deleteCollectionDialog');clearError('#deleteCollectionError');}
+  async function submitCollectionDelete(event){
+    event.preventDefault();if(!state.collection?.isOwner)return;
+    const submit=$('#deleteCollectionConfirm');setBusy(submit,true,'Удаление…');
+    try{
+      await api(`/api/collections/${encodeURIComponent(state.id)}`,{method:'DELETE'});
+      location.assign('/collections/?tab=mine');
+    }catch(error){showError('#deleteCollectionError',error?.message||'Не удалось удалить коллекцию.');setBusy(submit,false,'Удалить');}
+  }
+
+  function openItemEditor(bookRef){
+    const item=state.items.find((entry)=>entry.bookRef===bookRef);if(!item)return;
+    state.editingBookRef=bookRef;setText('#editItemTitle',item.title||bookRef);
+    const group=$('#editItemGroup'),note=$('#editItemNote');if(group)group.value=item.groupName||'';if(note)note.value=item.note||'';
+    clearError('#editItemError');openDialog('#editItemDialog');setTimeout(()=>group?.focus(),0);
+  }
+  function closeItemEditor(){state.editingBookRef='';closeDialog('#editItemDialog');clearError('#editItemError');}
+  async function submitItemEdit(event){
+    event.preventDefault();clearError('#editItemError');
+    const bookRef=state.editingBookRef;if(!bookRef||!state.collection?.isOwner)return;
+    const groupName=($('#editItemGroup')?.value||'').trim();const note=($('#editItemNote')?.value||'').trim();
+    const submit=$('#editItemSubmit');setBusy(submit,true,'Сохранение…');
+    try{
+      const payload=await api(`/api/collections/${encodeURIComponent(state.id)}/items`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({bookRef,groupName,note})});
+      applyCollectionPayload(payload);closeItemEditor();renderCollection();
+    }catch(error){showError('#editItemError',error?.message||'Не удалось изменить тайтл.');}
+    finally{setBusy(submit,false,'Сохранить');}
   }
 
   function renderFatal(message){
@@ -138,9 +209,12 @@
     $('#ownerActions')?.classList.add('hidden');refreshIcons();
   }
 
+  function openDialog(selector){const dialog=$(selector);if(typeof dialog?.showModal==='function')dialog.showModal();refreshIcons();}
+  function closeDialog(selector){const dialog=$(selector);if(dialog?.open)dialog.close();}
   function showInlineError(message){const host=$('#collectionGroups');if(!host)return;const note=document.createElement('div');note.className='collection-inline-error';note.textContent=message;host.prepend(note);setTimeout(()=>note.remove(),4500);}
-  function showAddError(message){const host=$('#addTitleError');if(host){host.textContent=message;host.classList.remove('hidden');}}
-  function clearAddError(){const host=$('#addTitleError');if(host){host.textContent='';host.classList.add('hidden');}}
+  function showError(selector,message){const host=$(selector);if(host){host.textContent=message;host.classList.remove('hidden');}}
+  function clearError(selector){const host=$(selector);if(host){host.textContent='';host.classList.add('hidden');}}
+  function setBusy(button,busy,label){if(button){button.disabled=busy;button.textContent=label;}}
   function setText(selector,value){const node=$(selector);if(node)node.textContent=value;}
 
   function renderSession(){
