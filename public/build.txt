@@ -5,3 +5,12 @@ domnkr-build-20260909-telegram-perf2
 domnkr-build-20260909-telegram-perf3
 domnkr-build-20260910-multiteam-v1
 domnkr-build-20260911-ranobelib-import1
+domnkr-build-20260912-nekromantlib-home1
+domnkr-build-20260912-nekromantlib-catalog1
+domnkr-build-20260912-nekromantlib-status1
+domnkr-build-20260912-nekromantlib-collections1
+domnkr-build-20260912-nekromantlib-collections2
+domnkr-build-20260912-nekromantlib-collection-detail1
+domnkr-build-20260912-nekromantlib-collection-owner1
+domnkr-build-20260912-nekromantlib-collection-comments1
+domnkr-build-20260912-nekromantlib-reader1

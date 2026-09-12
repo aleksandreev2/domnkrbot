@@ -33,6 +33,11 @@ export type RanobeLibTitleCard = {
   last_release_at: string | null;
 };
 
+export type RanobeLibCatalogTitleCard = RanobeLibTitleCard & {
+  translation_semantic_status: 'active' | 'completed' | 'unknown';
+  translation_status_label: string | null;
+};
+
 export type RanobeLibReleaseCard = {
   id: string;
   book_ref: string;
@@ -51,6 +56,7 @@ export type RanobeLibReleaseCard = {
 export type RanobeLibHomeData = {
   teamRef: string;
   titles: RanobeLibTitleCard[];
+  catalogTitles: RanobeLibCatalogTitleCard[];
   releases: RanobeLibReleaseCard[];
   stats: {
     activeTitles: number;
@@ -154,7 +160,13 @@ async function initializeSchema(env: RanobeLibRuntimeEnv): Promise<void> {
 
 export async function getRanobeLibHome(env: RanobeLibRuntimeEnv): Promise<RanobeLibHomeData> {
   const teamRef = teamRefFor(env);
-  const [{ results: titleRows }, { results: releaseRows }, counts, syncState] = await Promise.all([
+  const [
+    { results: titleRows },
+    { results: catalogTitleRows },
+    { results: releaseRows },
+    counts,
+    syncState,
+  ] = await Promise.all([
     env.DB.prepare(`
       SELECT book_ref, url, title, summary, cover_url, chapter_count, latest_chapter_id,
              latest_volume, latest_number, latest_name, last_synced_at, last_release_at
@@ -163,6 +175,21 @@ export async function getRanobeLibHome(env: RanobeLibRuntimeEnv): Promise<Ranobe
       ORDER BY COALESCE(last_release_at, last_synced_at) DESC, title COLLATE NOCASE ASC
       LIMIT 80
     `).all<RanobeLibTitleCard>(),
+    env.DB.prepare(`
+      SELECT t.book_ref, t.url, t.title, t.summary, t.cover_url, t.chapter_count,
+             t.latest_chapter_id, t.latest_volume, t.latest_number, t.latest_name,
+             t.last_synced_at, t.last_release_at,
+             tt.semantic_status AS translation_semantic_status,
+             t.translation_status_label
+      FROM ranobelib_titles t
+      JOIN ranobelib_teams team ON team.is_primary = 1
+      JOIN ranobelib_team_translations tt
+        ON tt.team_id = team.id AND tt.book_ref = t.book_ref
+      WHERE t.snapshot_ready = 1
+        AND tt.presence_state = 'active'
+      ORDER BY COALESCE(t.last_release_at, t.last_synced_at) DESC, t.title COLLATE NOCASE ASC
+      LIMIT 250
+    `).all<RanobeLibCatalogTitleCard>(),
     env.DB.prepare(`
       SELECT r.id, r.book_ref, t.url, COALESCE(t.title, r.title_snapshot) AS title,
              t.cover_url, r.chapter_count, r.first_volume, r.first_number,
@@ -181,6 +208,7 @@ export async function getRanobeLibHome(env: RanobeLibRuntimeEnv): Promise<Ranobe
   return {
     teamRef,
     titles: titleRows.map(normalizeTitleCard),
+    catalogTitles: catalogTitleRows.map(normalizeCatalogTitleCard),
     releases: releaseRows.map(normalizeReleaseCard),
     stats: counts,
     sync: {
@@ -281,6 +309,18 @@ function normalizeTitleCard(row: RanobeLibTitleCard): RanobeLibTitleCard {
     ...row,
     chapter_count: numberFrom(row.chapter_count, 0),
     latest_chapter_id: nullableNumber(row.latest_chapter_id),
+  };
+}
+
+function normalizeCatalogTitleCard(row: RanobeLibCatalogTitleCard): RanobeLibCatalogTitleCard {
+  const title = normalizeTitleCard(row);
+  const status = row.translation_semantic_status;
+  return {
+    ...title,
+    translation_semantic_status: status === 'active' || status === 'completed' ? status : 'unknown',
+    translation_status_label: typeof row.translation_status_label === 'string' && row.translation_status_label.trim()
+      ? row.translation_status_label.trim()
+      : null,
   };
 }
 
