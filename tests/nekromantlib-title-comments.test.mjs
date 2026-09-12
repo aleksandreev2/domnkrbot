@@ -53,12 +53,14 @@ test('live v2 routes native title comments before the base worker', async () => 
   assert.match(source, /if \(titleCommentsResponse\) return titleCommentsResponse/);
 });
 
-test('title comments tab exposes captured hierarchy and native interaction hooks', async () => {
+test('title comments tab exposes captured hierarchy and isolated native interaction hooks', async () => {
   const html = await read('../public/title/index.html');
-  const js = await read('../public/title.js');
-  const css = await read('../public/title.css');
+  const js = await read('../public/title-comments.js');
+  const css = await read('../public/title-comments.css');
 
   assert.match(html, /data-title-tab="comments"(?![^>]*disabled)/);
+  assert.match(html, /title-comments\.css/);
+  assert.match(html, /title-comments\.js/);
   for (const text of ['Новые','Настройки','Правила','Написать комментарий...']) assert.match(html, new RegExp(text));
   for (const id of ['titleCommentsPanel','titleCommentForm','titleCommentText','titleCommentsList','titleCommentsMessage','titleReplyTarget']) {
     assert.match(html, new RegExp(`id="${id}"`));
