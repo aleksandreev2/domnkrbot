@@ -25,6 +25,8 @@
     const cover=$('#titleCover');if(cover){cover.src=title.cover_url||'/brand/team-logo.webp';cover.alt=`Обложка ${title.title||'тайтла'}`;}
     setText('#titleOriginal','Перевод команды «Дом Некроманта»');
     setText('#titleSource',sourceLabel(title.url));
+    const status=translationLabel(title);
+    setText('#translationStatus',status);setText('#translationStatusAside',status);
     const chapterCount=Number(title.chapter_count||state.data?.chapters?.length||0);
     const updated=dateRelative(title.last_release_at||title.last_synced_at)||'—';
     setText('#titleChapterCount',String(chapterCount));setText('#titleChapterCountAside',String(chapterCount));
@@ -44,6 +46,7 @@
   function lastRead(){try{return localStorage.getItem(`domnkr:reader:${ref}:last`);}catch{return null;}}
   function readerUrl(chapter){return`/reader/?ref=${encodeURIComponent(ref)}&chapter=${encodeURIComponent(chapter)}`;}
   function latestLabel(title){return[title.latest_volume?`Том ${title.latest_volume}`:'',title.latest_number?`Глава ${title.latest_number}`:''].filter(Boolean).join(' · ')||'—';}
+  function translationLabel(title){const label=String(title.translation_status_label||'').trim();if(label)return label;switch(String(title.translation_semantic_status||'')){case'active':return'Продолжается';case'completed':return'Завершён';default:return'Неизвестно';}}
   function sourceLabel(value){if(!value)return'Источник не указан';try{const url=new URL(value);return url.hostname.replace(/^www\./,'');}catch{return String(value);}}
   function dateRelative(value){if(!value)return'';const time=new Date(value).getTime();if(!Number.isFinite(time))return'';const mins=Math.max(1,Math.round((Date.now()-time)/60000));if(mins<60)return`${mins} мин. назад`;const h=Math.round(mins/60);if(h<24)return`${h} ч. назад`;const d=Math.round(h/24);return`${d} дн. назад`;}
   function setText(selector,value){const node=$(selector);if(node)node.textContent=value;}
