@@ -8,10 +8,10 @@
   <meta name="description" content="Подборка тайтлов НекромантЛиб.">
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
-  <link rel="stylesheet" href="/collection.css?v=20260912-detail1">
+  <link rel="stylesheet" href="/collection.css?v=20260912-owner1">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/collection.js?v=20260912-detail1"></script>
+  <script defer src="/collection.js?v=20260912-owner1"></script>
 </head>
 <body class="nl-body collection-detail-body">
   <header class="site-header nl-header">
@@ -45,6 +45,10 @@
         </div>
         <div id="ownerActions" class="collection-owner-actions hidden">
           <button id="addTitleButton" class="collection-primary" type="button"><i data-lucide="plus"></i><span>Добавить тайтл</span></button>
+          <div class="collection-owner-menu">
+            <button id="editCollectionButton" class="collection-secondary" type="button"><i data-lucide="pencil"></i><span>Изменить</span></button>
+            <button id="deleteCollectionButton" class="collection-danger" type="button"><i data-lucide="trash-2"></i><span>Удалить</span></button>
+          </div>
         </div>
       </section>
 
@@ -79,6 +83,38 @@
       <label>Заметка<textarea id="titleNote" maxlength="1000" rows="3" placeholder="Необязательный комментарий к тайтлу"></textarea></label>
       <div id="addTitleError" class="collection-form-error hidden" role="alert"></div>
       <div class="collection-dialog-actions"><button id="addTitleCancel" class="collection-secondary" type="button">Отмена</button><button id="addTitleSubmit" class="collection-primary" type="submit">Добавить</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="editCollectionDialog" class="collection-dialog">
+    <form id="editCollectionForm" class="collection-edit-form">
+      <button id="editCollectionClose" class="nl-icon-button collection-dialog-close" type="button" aria-label="Закрыть"><i data-lucide="x"></i></button>
+      <div class="collection-dialog-heading"><i data-lucide="pencil"></i><div><h2>Изменить коллекцию</h2><p>Название, описание и доступ.</p></div></div>
+      <label>Название<input id="editCollectionTitle" maxlength="120" required autocomplete="off"></label>
+      <label>Описание<textarea id="editCollectionDescription" maxlength="4000" rows="5"></textarea></label>
+      <label class="collection-edit-visibility"><input id="editCollectionPublic" type="checkbox"><span><strong>Публичная коллекция</strong><small>Видна другим пользователям во вкладке «Новые».</small></span></label>
+      <div id="editCollectionError" class="collection-form-error hidden" role="alert"></div>
+      <div class="collection-dialog-actions"><button id="editCollectionCancel" class="collection-secondary" type="button">Отмена</button><button id="editCollectionSubmit" class="collection-primary" type="submit">Сохранить</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="editItemDialog" class="collection-dialog">
+    <form id="editItemForm" class="collection-edit-form">
+      <button id="editItemClose" class="nl-icon-button collection-dialog-close" type="button" aria-label="Закрыть"><i data-lucide="x"></i></button>
+      <div class="collection-dialog-heading"><i data-lucide="list-tree"></i><div><h2>Настроить тайтл</h2><p id="editItemTitle">Тайтл</p></div></div>
+      <label>Группа<input id="editItemGroup" maxlength="100" autocomplete="off" placeholder="Без группы"></label>
+      <label>Заметка<textarea id="editItemNote" maxlength="1000" rows="4"></textarea></label>
+      <div id="editItemError" class="collection-form-error hidden" role="alert"></div>
+      <div class="collection-dialog-actions"><button id="editItemCancel" class="collection-secondary" type="button">Отмена</button><button id="editItemSubmit" class="collection-primary" type="submit">Сохранить</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="deleteCollectionDialog" class="collection-dialog collection-delete-dialog">
+    <form id="deleteCollectionForm" class="collection-edit-form">
+      <button id="deleteCollectionClose" class="nl-icon-button collection-dialog-close" type="button" aria-label="Закрыть"><i data-lucide="x"></i></button>
+      <div class="collection-dialog-heading"><i data-lucide="triangle-alert"></i><div><h2>Удалить коллекцию?</h2><p>Тайтлы останутся в НекромантЛиб, но сама подборка будет удалена.</p></div></div>
+      <div id="deleteCollectionError" class="collection-form-error hidden" role="alert"></div>
+      <div class="collection-dialog-actions"><button id="deleteCollectionCancel" class="collection-secondary" type="button">Отмена</button><button id="deleteCollectionConfirm" class="collection-danger" type="submit">Удалить</button></div>
     </form>
   </dialog>
 
