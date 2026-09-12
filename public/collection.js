@@ -4,7 +4,7 @@
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
   const API_TIMEOUT_MS=10000;
   const params=new URLSearchParams(location.search);
-  const state={id:(params.get('id')||'').trim(),bootstrap:null,collection:null,items:[],catalog:[],catalogLoaded:false,editingBookRef:''};
+  const state={id:(params.get('id')||'').trim(),bootstrap:null,collection:null,items:[],catalog:[],catalogLoaded:false,editingBookRef:'',comments:[],commentsLoaded:false};
 
   async function api(path,options={}){
     const controller=new AbortController();
@@ -21,7 +21,7 @@
   }
 
   async function boot(){
-    bind();refreshIcons();
+    bind();refreshIcons();renderCommentComposer();
     if(!state.id){renderFatal('Коллекция не указана.');return;}
     const [bootstrapResult,collectionResult]=await Promise.allSettled([
       api('/api/bootstrap'),
@@ -32,6 +32,7 @@
     if(collectionResult.status==='fulfilled'){
       applyCollectionPayload(collectionResult.value);
       renderCollection();
+      void loadComments();
     }else renderFatal(collectionResult.reason?.message||'Не удалось загрузить коллекцию.');
   }
 
@@ -55,6 +56,8 @@
     $('#editItemCancel')?.addEventListener('click',closeItemEditor);
     $('#editItemForm')?.addEventListener('submit',submitItemEdit);
     $('#collectionGroups')?.addEventListener('click',handleGroupClick);
+    $('#commentForm')?.addEventListener('submit',submitComment);
+    $('#collectionComments')?.addEventListener('click',handleCommentClick);
     window.addEventListener('keydown',(event)=>{if(event.key==='Escape')$('#primaryNav')?.classList.remove('open');});
   }
 
@@ -75,7 +78,7 @@
     setText('#collectionItemCount',titleCountLabel(state.items.length));setText('#collectionCountAside',String(state.items.length));
     setText('#collectionUpdatedAside',formatDate(item.updatedAt));
     $('#ownerActions')?.classList.toggle('hidden',!item.isOwner);
-    renderGroups();refreshIcons();
+    renderGroups();renderCommentComposer();refreshIcons();
   }
 
   function renderGroups(){
@@ -203,9 +206,68 @@
     finally{setBusy(submit,false,'Сохранить');}
   }
 
+  async function loadComments(){
+    state.commentsLoaded=false;renderComments();
+    try{
+      const payload=await api(`/api/collections/${encodeURIComponent(state.id)}/comments`);
+      state.comments=Array.isArray(payload?.comments)?payload.comments:[];state.commentsLoaded=true;renderComments();
+    }catch(error){
+      state.commentsLoaded=true;renderComments(error?.message||'Не удалось загрузить комментарии.');
+    }
+  }
+
+  function renderComments(errorMessage=''){
+    const host=$('#collectionComments');if(!host)return;
+    setText('#commentCount',String(state.comments.length));
+    if(errorMessage){host.innerHTML=`<div class="collection-comments-status collection-comments-error"><i data-lucide="triangle-alert"></i><span>${esc(errorMessage)}</span></div>`;refreshIcons();return;}
+    if(!state.commentsLoaded){host.innerHTML='<div class="collection-comments-status">Загрузка комментариев…</div>';return;}
+    if(!state.comments.length){host.innerHTML='<div class="collection-comments-status"><i data-lucide="message-circle"></i><span>Комментариев пока нет. Будьте первым.</span></div>';refreshIcons();return;}
+    host.innerHTML=state.comments.map(commentCard).join('');refreshIcons();
+  }
+
+  function commentCard(comment){
+    const author=comment?.author?.username?`@${comment.author.username}`:(comment?.author?.firstName||'Пользователь');
+    const remove=comment?.canDelete?`<button class="collection-comment-delete" type="button" data-comment-id="${esc(comment.id||'')}" aria-label="Удалить комментарий"><i data-lucide="trash-2"></i></button>`:'';
+    const own=comment?.isOwn?'<span class="collection-comment-own">Вы</span>':'';
+    return `<article class="collection-comment-card"><div class="collection-comment-meta"><div><strong>${esc(author)}</strong>${own}<time datetime="${esc(comment.createdAt||'')}">${esc(formatDateTime(comment.createdAt))}</time></div>${remove}</div><p>${esc(comment.body||'')}</p></article>`;
+  }
+
+  function renderCommentComposer(){
+    const user=state.bootstrap?.user||null;const body=$('#commentBody'),submit=$('#commentSubmit'),hint=$('#commentLoginHint');
+    if(body)body.disabled=!user;if(submit)submit.disabled=!user;
+    if(hint)hint.textContent=user?'Комментарий будет опубликован от вашего Telegram-профиля.':'Войдите через Telegram, чтобы оставить комментарий.';
+  }
+
+  async function submitComment(event){
+    event.preventDefault();clearError('#commentError');
+    if(!state.bootstrap?.user){showError('#commentError','Требуется вход через Telegram.');return;}
+    const body=($('#commentBody')?.value||'').trim();
+    if(!body){showError('#commentError','Введите текст комментария.');return;}
+    if(body.length>3000){showError('#commentError','Комментарий не должен превышать 3000 символов.');return;}
+    const submit=$('#commentSubmit');setBusy(submit,true,'Отправка…');
+    try{
+      const payload=await api(`/api/collections/${encodeURIComponent(state.id)}/comments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body})});
+      state.comments=Array.isArray(payload?.comments)?payload.comments:state.comments;state.commentsLoaded=true;
+      const field=$('#commentBody');if(field)field.value='';renderComments();
+    }catch(error){showError('#commentError',error?.message||'Не удалось отправить комментарий.');}
+    finally{setBusy(submit,false,'Отправить');renderCommentComposer();}
+  }
+
+  async function handleCommentClick(event){
+    const button=event.target.closest('[data-comment-id]');if(!button)return;
+    const commentId=button.dataset.commentId||'';if(!commentId)return;
+    button.disabled=true;clearError('#commentError');
+    try{
+      const payload=await api(`/api/collections/${encodeURIComponent(state.id)}/comments`,{method:'DELETE',headers:{'content-type':'application/json'},body:JSON.stringify({commentId})});
+      state.comments=Array.isArray(payload?.comments)?payload.comments:state.comments;state.commentsLoaded=true;renderComments();
+    }catch(error){button.disabled=false;showError('#commentError',error?.message||'Не удалось удалить комментарий.');}
+  }
+
   function renderFatal(message){
     setText('#collectionTitle','Коллекция недоступна');setText('#collectionDescription',message);
     const host=$('#collectionGroups');if(host)host.innerHTML=emptyState('triangle-alert','Не удалось открыть коллекцию',message);
+    const comments=$('#collectionComments');if(comments)comments.innerHTML=`<div class="collection-comments-status collection-comments-error">${esc(message)}</div>`;
+    const commentBody=$('#commentBody'),commentSubmit=$('#commentSubmit');if(commentBody)commentBody.disabled=true;if(commentSubmit)commentSubmit.disabled=true;
     $('#ownerActions')?.classList.add('hidden');refreshIcons();
   }
 
@@ -221,13 +283,14 @@
     const user=state.bootstrap?.user;$('#adminLink')?.classList.toggle('hidden',!Boolean(state.bootstrap?.isAdmin));$('#logoutButton')?.classList.toggle('hidden',!user);
     const account=$('#accountName'),panel=$('#loginPanel');
     if(user){if(account)account.textContent=user.username?`@${user.username}`:user.firstName;if(panel)panel.innerHTML='<span class="login-ready">Telegram-сессия активна</span>';}
-    else{if(account)account.textContent='Войти';mountTelegramLogin();}refreshIcons();
+    else{if(account)account.textContent='Войти';mountTelegramLogin();}renderCommentComposer();refreshIcons();
   }
-  function renderSessionError(){const account=$('#accountName');if(account)account.textContent='Войти';const panel=$('#loginPanel');if(panel)panel.innerHTML='<span class="login-ready">Авторизация временно недоступна</span>';}
+  function renderSessionError(){const account=$('#accountName');if(account)account.textContent='Войти';const panel=$('#loginPanel');if(panel)panel.innerHTML='<span class="login-ready">Авторизация временно недоступна</span>';renderCommentComposer();}
   function mountTelegramLogin(){const host=$('#telegramLogin');if(!host||host.dataset.ready==='1')return;const bot=state.bootstrap?.botUsername;if(!bot){host.textContent='BOT_USERNAME не настроен.';return;}host.dataset.ready='1';host.innerHTML='';const script=document.createElement('script');script.async=true;script.src='https://telegram.org/js/telegram-widget.js?22';script.dataset.telegramLogin=bot;script.dataset.size='large';script.dataset.userpic='false';script.dataset.authUrl=`${location.origin}/auth/telegram/callback`;script.dataset.requestAccess='write';host.append(script);}
 
   function titleCountLabel(count){const mod10=count%10,mod100=count%100;const word=mod10===1&&mod100!==11?'тайтл':mod10>=2&&mod10<=4&&(mod100<12||mod100>14)?'тайтла':'тайтлов';return`${count} ${word}`;}
   function formatDate(value){if(!value)return'—';const date=new Date(value);return Number.isNaN(date.getTime())?'—':new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short',year:'numeric'}).format(date);}
+  function formatDateTime(value){if(!value)return'—';const date=new Date(value);return Number.isNaN(date.getTime())?'—':new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}).format(date);}
   function emptyState(icon,title,message){return`<div class="collection-detail-empty"><i data-lucide="${icon}"></i><strong>${esc(title)}</strong><span>${esc(message)}</span></div>`;}
 
   document.addEventListener('DOMContentLoaded',boot);
