@@ -8,10 +8,10 @@
   <meta name="description" content="Тайтл НекромантЛиб: описание, перевод команды «Дом Некроманта», прогресс чтения и список глав.">
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
-  <link rel="stylesheet" href="/title.css?v=20260913-title4">
+  <link rel="stylesheet" href="/title.css?v=20260913-title5">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/title.js?v=20260913-title4"></script>
+  <script defer src="/title.js?v=20260913-title5"></script>
 </head>
 <body class="nl-body title-detail-body">
   <header class="site-header nl-header">
@@ -50,9 +50,20 @@
               <span class="title-read-progress-copy"><strong id="readingProgressText">0 / 0</strong><small id="readingProgressAction">Начать читать</small></span>
               <span id="readingProgressPercent" class="title-read-progress-percent">0%</span>
             </a>
-            <button id="titlePlanButton" class="title-secondary-action title-plan-button" type="button" disabled aria-disabled="true" title="Нативные планы тайтлов пока не подключены">
-              <i data-lucide="bookmark"></i><span>Добавить в планы</span>
-            </button>
+            <div class="title-plan-control">
+              <button id="titlePlanButton" class="title-secondary-action title-plan-button" type="button" disabled aria-disabled="true" aria-expanded="false" aria-controls="titlePlanMenu">
+                <i data-lucide="bookmark"></i><span>Добавить в планы</span><i class="title-plan-chevron" data-lucide="chevron-down"></i>
+              </button>
+              <div id="titlePlanMenu" class="title-plan-menu hidden" role="menu" aria-label="Статус тайтла">
+                <button type="button" data-list-status="reading" role="menuitem">Читаю</button>
+                <button type="button" data-list-status="planned" role="menuitem">В планах</button>
+                <button type="button" data-list-status="dropped" role="menuitem">Брошено</button>
+                <button type="button" data-list-status="completed" role="menuitem">Прочитано</button>
+                <button type="button" data-list-status="favorite" role="menuitem">Любимые</button>
+                <button type="button" data-list-status="other" role="menuitem">Другое</button>
+                <button class="title-plan-clear" type="button" data-list-status="" role="menuitem">Убрать из списка</button>
+              </div>
+            </div>
           </div>
 
           <section class="surface title-meta-grid title-facts-paper" aria-label="Информация о тайтле">
@@ -69,10 +80,16 @@
             <div id="titleOriginal" class="title-original hidden"></div>
           </section>
 
-          <section class="title-rating-slot" aria-disabled="true" aria-label="Рейтинг тайтла пока недоступен">
+          <section class="title-rating-slot" aria-disabled="true" aria-label="Рейтинг тайтла">
             <span>Рейтинг тайтла</span>
-            <strong>—</strong>
-            <small>Нет собственных оценок</small>
+            <strong id="titleRatingValue">—</strong>
+            <small id="titleRatingVotes">0 оценок</small>
+            <button id="titleMyRatingButton" class="title-my-rating-button" type="button" disabled aria-disabled="true" aria-expanded="false" aria-controls="titleRatingPicker">Моя оценка: —</button>
+            <div id="titleRatingPicker" class="title-rating-picker hidden" role="group" aria-label="Поставить оценку">
+              <button type="button" data-title-rating="1">1</button><button type="button" data-title-rating="2">2</button><button type="button" data-title-rating="3">3</button><button type="button" data-title-rating="4">4</button><button type="button" data-title-rating="5">5</button>
+              <button type="button" data-title-rating="6">6</button><button type="button" data-title-rating="7">7</button><button type="button" data-title-rating="8">8</button><button type="button" data-title-rating="9">9</button><button type="button" data-title-rating="10">10</button>
+              <button class="title-rating-clear" type="button" data-title-rating="">Снять</button>
+            </div>
           </section>
 
           <section class="surface title-media-content">
@@ -93,6 +110,17 @@
                 <span>Переводчики</span>
                 <a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer"><img src="/brand/team-logo.webp" alt="" width="34" height="34"><strong>Дом Некроманта</strong></a>
               </div>
+              <section id="titleListStats" class="title-list-stats" aria-label="Списки читателей">
+                <div class="title-list-stats-heading"><h3>В списках у <strong id="titleListTotal">0</strong> человек</h3></div>
+                <div class="title-list-stat-grid">
+                  <div data-list-stat="reading"><span>Читаю</span><strong>0</strong></div>
+                  <div data-list-stat="planned"><span>В планах</span><strong>0</strong></div>
+                  <div data-list-stat="dropped"><span>Брошено</span><strong>0</strong></div>
+                  <div data-list-stat="completed"><span>Прочитано</span><strong>0</strong></div>
+                  <div data-list-stat="favorite"><span>Любимые</span><strong>0</strong></div>
+                  <div data-list-stat="other"><span>Другое</span><strong>0</strong></div>
+                </div>
+              </section>
             </section>
 
             <section id="titleChaptersPanel" class="title-tab-panel" role="tabpanel">
