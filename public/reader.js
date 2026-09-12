@@ -12,9 +12,29 @@
   let data=null;
   let titleData=null;
   let chapterSort='new';
+  let commentSort='new';
+  let commentSession=null;
+  let comments=[];
+  let replyTo=null;
+  let commentLoginMounted=false;
 
-  async function api(path){const response=await fetch(path,{credentials:'same-origin'});const body=await response.json().catch(()=>null);if(!response.ok)throw new Error(body?.error||`HTTP ${response.status}`);return body;}
-  async function boot(){bind();applyPrefs();refreshIcons();try{data=await api(`/api/reader/chapter?ref=${encodeURIComponent(ref)}&chapter=${encodeURIComponent(chapter)}`);render();markRead();}catch(error){renderError(error.message);}}
+  async function api(path,options={}){
+    const init={credentials:'same-origin',...options};
+    if(options.body&&!options.headers)init.headers={'content-type':'application/json'};
+    const response=await fetch(path,init);
+    const body=await response.json().catch(()=>null);
+    if(!response.ok)throw new Error(body?.error||`HTTP ${response.status}`);
+    return body;
+  }
+
+  async function boot(){
+    bind();applyPrefs();refreshIcons();
+    try{
+      data=await api(`/api/reader/chapter?ref=${encodeURIComponent(ref)}&chapter=${encodeURIComponent(chapter)}`);
+      render();markRead();
+      await Promise.allSettled([loadCommentSession(),loadComments()]);
+    }catch(error){renderError(error.message);}
+  }
 
   function bind(){
     $('#readerBack')?.addEventListener('click',()=>{location.href=titleUrl();});
@@ -35,8 +55,13 @@
     $('#hideImages')?.addEventListener('change',(event)=>{prefs.hideImages=event.currentTarget.checked;saveAndApply();});
     $('#hideHeading')?.addEventListener('change',(event)=>{prefs.hideHeading=event.currentTarget.checked;saveAndApply();});
     $('#resetReaderSettings')?.addEventListener('click',()=>{Object.assign(prefs,DEFAULT_PREFS);saveAndApply();});
+    $('#readerCommentSort')?.addEventListener('click',()=>{commentSort=commentSort==='new'?'old':'new';renderComments();});
+    $('#readerCommentForm')?.addEventListener('submit',submitComment);
+    $('#readerCommentCancelReply')?.addEventListener('click',()=>cancelReply());
+    $('#readerCommentText')?.addEventListener('input',syncCommentSubmit);
+    $('#readerCommentsList')?.addEventListener('click',handleCommentAction);
     window.addEventListener('scroll',updateScrollProgress,{passive:true});
-    window.addEventListener('keydown',(event)=>{if(event.key==='Escape')closeAllPopups();});
+    window.addEventListener('keydown',(event)=>{if(event.key==='Escape'){closeAllPopups();cancelReply();}});
   }
   function bindRange(selector,key,parse){$(selector)?.addEventListener('input',(event)=>{prefs[key]=parse(event.currentTarget.value);saveAndApply();});}
 
@@ -63,6 +88,128 @@
   function renderChapterList(){const host=$('#readerChapterList');if(!host||!titleData)return;let chapters=[...(titleData.chapters||[])];chapters.sort((a,b)=>Number(a.chapter_id)-Number(b.chapter_id));if(chapterSort==='new')chapters.reverse();const sortLabel=$('#chapterSortButton span');if(sortLabel)sortLabel.textContent=chapterSort==='new'?'Сначала новые':'Сначала старые';host.innerHTML=chapters.length?chapters.map((item)=>chapterListRow(item)).join(''):'<div class="reader-list-loading">Глав нет.</div>';refreshIcons();}
   function chapterListRow(item){const current=String(item.chapter_id)===String(chapter);const label=chapterLabel(item);const name=String(item.name||'').trim();const date=formatDate(item.first_seen_at);if(item.readerAvailable){return`<a class="reader-chapter-row${current?' is-active':''}" data-chapter-id="${escapeHtml(item.chapter_id)}" href="${readerUrl(item.chapter_id)}"><span><strong>${escapeHtml(label)}</strong>${name?`<small>${escapeHtml(name)}</small>`:''}</span><time>${escapeHtml(date)}</time></a>`;}return`<div class="reader-chapter-row is-unavailable${current?' is-active':''}" data-chapter-id="${escapeHtml(item.chapter_id)}"><span><strong>${escapeHtml(label)}</strong>${name?`<small>${escapeHtml(name)}</small>`:''}</span><time>${escapeHtml(date)}</time></div>`;}
 
+  async function loadCommentSession(){
+    try{commentSession=await api('/api/auth/session');}catch{commentSession={user:null,isAdmin:false,botUsername:null};}
+    syncCommentComposer();
+  }
+
+  async function loadComments(){
+    setCommentMessage('Загрузка комментариев…');
+    try{
+      const result=await api(`/api/reader/comments?ref=${encodeURIComponent(ref)}&chapter=${encodeURIComponent(chapter)}`);
+      comments=Array.isArray(result.comments)?result.comments:[];
+      renderComments();
+    }catch(error){comments=[];setCommentMessage(error.message||'Не удалось загрузить комментарии.');}
+  }
+
+  function syncCommentComposer(){
+    const textarea=$('#readerCommentText');
+    const loggedIn=Boolean(commentSession?.user);
+    if(textarea){textarea.disabled=!loggedIn;textarea.placeholder='Написать комментарий...';}
+    if(loggedIn){$('#readerCommentLogin')?.classList.add('hidden');}
+    else mountCommentLogin();
+    syncCommentSubmit();
+  }
+
+  function syncCommentSubmit(){
+    const button=$('#readerCommentSubmit');
+    const textarea=$('#readerCommentText');
+    if(button)button.disabled=!commentSession?.user||!String(textarea?.value||'').trim();
+  }
+
+  function mountCommentLogin(){
+    const host=$('#readerCommentLogin');if(!host)return;
+    host.classList.remove('hidden');
+    if(commentLoginMounted)return;
+    const bot=commentSession?.botUsername;
+    if(!bot){host.innerHTML='<span>Войдите через Telegram на главной странице, чтобы комментировать.</span><a href="/">Войти</a>';return;}
+    commentLoginMounted=true;
+    try{localStorage.setItem('domnkr:return-after-login',`${location.pathname}${location.search}`);}catch{}
+    host.innerHTML='<span>Войдите через Telegram, чтобы комментировать.</span>';
+    const widget=document.createElement('span');widget.className='reader-comment-login-widget';host.append(widget);
+    const script=document.createElement('script');script.async=true;script.src='https://telegram.org/js/telegram-widget.js?22';script.dataset.telegramLogin=bot;script.dataset.size='medium';script.dataset.userpic='false';script.dataset.authUrl=`${location.origin}/auth/telegram/callback`;script.dataset.requestAccess='write';widget.append(script);
+  }
+
+  function renderComments(){
+    const host=$('#readerCommentsList');if(!host)return;
+    const sortLabel=$('#readerCommentSort span');if(sortLabel)sortLabel.textContent=commentSort==='new'?'Новые':'Старые';
+    if(!comments.length){host.innerHTML='';setCommentMessage('Здесь пока нет комментариев.');refreshIcons();return;}
+    setCommentMessage('');
+    const byId=new Map(comments.map((item)=>[String(item.id),item]));
+    const children=new Map();const roots=[];
+    for(const item of comments){const parent=String(item.parentCommentId||'');if(parent&&byId.has(parent)){if(!children.has(parent))children.set(parent,[]);children.get(parent).push(item);}else roots.push(item);}
+    const newest=(a,b)=>dateValue(b.createdAt)-dateValue(a.createdAt)||String(b.id).localeCompare(String(a.id));
+    const oldest=(a,b)=>dateValue(a.createdAt)-dateValue(b.createdAt)||String(a.id).localeCompare(String(b.id));
+    roots.sort(commentSort==='new'?newest:oldest);
+    for(const list of children.values())list.sort(oldest);
+    host.innerHTML=roots.map((item)=>renderComment(item,children,0)).join('');
+    refreshIcons();
+  }
+
+  function renderComment(item,children,depth){
+    const id=escapeHtml(item.id||'');
+    const author=commentAuthor(item);
+    const initial=escapeHtml((author.replace(/^@/,'').trim()[0]||'Н').toLocaleUpperCase('ru-RU'));
+    const time=escapeHtml(dateRelative(item.createdAt)||formatDate(item.createdAt));
+    const body=item.deleted?'<em class="reader-comment-deleted">Комментарий удалён</em>':escapeHtml(item.body||'').replace(/\n/g,'<br>');
+    const reply=!item.deleted?`<button class="reader-comment-control" type="button" data-comment-action="reply" data-comment-id="${id}">ответить</button>`:'';
+    const remove=item.canDelete?`<button class="reader-comment-control" type="button" data-comment-action="delete" data-comment-id="${id}">удалить</button>`:'';
+    const upActive=Number(item.myVote)===1?' is-active':'';const downActive=Number(item.myVote)===-1?' is-active':'';
+    const votes=item.deleted?'':`<div class="reader-comment-vote"><button class="reader-comment-vote-button up${upActive}" type="button" data-comment-action="up" data-comment-id="${id}" aria-label="Плюс"><i data-lucide="arrow-up"></i></button><span>${Number(item.score)||0}</span><button class="reader-comment-vote-button down${downActive}" type="button" data-comment-action="down" data-comment-id="${id}" aria-label="Минус"><i data-lucide="arrow-down"></i></button></div>`;
+    const childHtml=(children.get(String(item.id))||[]).map((child)=>renderComment(child,children,Math.min(depth+1,6))).join('');
+    return `<article class="reader-comment${item.deleted?' is-deleted':''}" data-comment-id="${id}" style="--reader-comment-depth:${Math.min(depth,6)}"><div class="reader-comment-body"><div class="reader-comment-head"><span class="reader-comment-avatar" aria-hidden="true">${initial}</span><strong class="reader-comment-author">${escapeHtml(author)}</strong><time class="reader-comment-time">${time}</time></div><div class="reader-comment-content">${body}</div><div class="reader-comment-controls">${reply}<button class="reader-comment-control" type="button" disabled>жалоба</button>${remove}${votes}</div></div>${childHtml?`<div class="reader-comment-children">${childHtml}</div>`:''}</article>`;
+  }
+
+  function commentAuthor(item){const username=String(item?.author?.username||'').trim();if(username)return`@${username}`;return String(item?.author?.firstName||'Читатель').trim()||'Читатель';}
+
+  async function submitComment(event){
+    event.preventDefault();
+    if(!commentSession?.user){mountCommentLogin();return;}
+    const textarea=$('#readerCommentText');const text=String(textarea?.value||'').trim();if(!text)return;
+    setCommentMessage('Отправляем комментарий…');
+    try{
+      const result=await api('/api/reader/comments',{method:'POST',body:JSON.stringify({bookRef:ref,chapterId:Number(chapter),body:text,parentCommentId:replyTo?.id||null})});
+      comments=Array.isArray(result.comments)?result.comments:[];
+      if(textarea)textarea.value='';cancelReply(false);renderComments();syncCommentSubmit();
+    }catch(error){setCommentMessage(error.message||'Не удалось отправить комментарий.');}
+  }
+
+  function handleCommentAction(event){
+    const button=event.target.closest?.('[data-comment-action]');if(!button)return;
+    const id=button.dataset.commentId;const action=button.dataset.commentAction;if(!id||!action)return;
+    if(action==='reply'){startReply(id);return;}
+    if(action==='delete'){void deleteComment(id);return;}
+    if(action==='up'||action==='down')void voteComment(id,action==='up'?1:-1);
+  }
+
+  function startReply(id){
+    const item=comments.find((comment)=>String(comment.id)===String(id));if(!item)return;
+    if(!commentSession?.user){mountCommentLogin();return;}
+    replyTo={id:String(item.id),name:commentAuthor(item)};
+    const target=$('#readerReplyTarget');if(target){target.classList.remove('hidden');const text=target.querySelector('span');if(text)text.textContent=`Ответ для ${replyTo.name}`;}
+    $('#readerCommentText')?.focus();refreshIcons();
+  }
+
+  function cancelReply(focus=false){
+    replyTo=null;const target=$('#readerReplyTarget');target?.classList.add('hidden');const text=target?.querySelector('span');if(text)text.textContent='';if(focus)$('#readerCommentText')?.focus();
+  }
+
+  async function deleteComment(id){
+    if(!commentSession?.user){mountCommentLogin();return;}
+    if(typeof confirm==='function'&&!confirm('Удалить комментарий?'))return;
+    setCommentMessage('Удаляем комментарий…');
+    try{const result=await api(`/api/reader/comments/${encodeURIComponent(id)}`,{method:'DELETE'});comments=Array.isArray(result.comments)?result.comments:[];renderComments();}catch(error){setCommentMessage(error.message||'Не удалось удалить комментарий.');}
+  }
+
+  async function voteComment(id,value){
+    if(!commentSession?.user){mountCommentLogin();return;}
+    const item=comments.find((comment)=>String(comment.id)===String(id));if(!item||item.deleted)return;
+    const next=Number(item.myVote)===value?0:value;
+    try{const result=await api(`/api/reader/comments/${encodeURIComponent(id)}/vote`,{method:'PUT',body:JSON.stringify({value:next})});comments=Array.isArray(result.comments)?result.comments:[];renderComments();}catch(error){setCommentMessage(error.message||'Не удалось поставить оценку.');}
+  }
+
+  function setCommentMessage(message){const node=$('#readerCommentsMessage');if(!node)return;node.textContent=String(message||'');node.classList.toggle('hidden',!message);}
+
   function openPopup(id){closeAllPopups();const root=id==='readerChapters'?$('#readerChaptersRoot'):$('#readerSettingsRoot');if(!root)return;root.classList.remove('hidden');root.setAttribute('aria-hidden','false');$('#readerApp')?.setAttribute('aria-hidden','true');document.body.classList.add('reader-popup-open');refreshIcons();}
   function closePopup(id){const root=id==='readerChapters'?$('#readerChaptersRoot'):$('#readerSettingsRoot');if(root){root.classList.add('hidden');root.setAttribute('aria-hidden','true');}if(!$('.reader-popup:not(.hidden)')){$('#readerApp')?.setAttribute('aria-hidden','false');document.body.classList.remove('reader-popup-open');}}
   function closeAllPopups(){$$('.reader-popup').forEach((root)=>{root.classList.add('hidden');root.setAttribute('aria-hidden','true');});$('#readerApp')?.setAttribute('aria-hidden','false');document.body.classList.remove('reader-popup-open');}
@@ -80,6 +227,8 @@
 
   function chapterLabel(item){const volume=String(item?.volume||'').trim();const number=String(item?.number||item?.chapter_id||'').trim();return`${volume?`Том ${volume} `:''}Глава ${number}`;}
   function formatDate(value){if(!value)return'';const date=new Date(value);if(!Number.isFinite(date.getTime()))return'';return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'}).format(date);}
+  function dateValue(value){const time=new Date(value||0).getTime();return Number.isFinite(time)?time:0;}
+  function dateRelative(value){if(!value)return'';const time=new Date(value).getTime();if(!Number.isFinite(time))return'';const seconds=Math.max(0,Math.floor((Date.now()-time)/1000));if(seconds<60)return'только что';const minutes=Math.floor(seconds/60);if(minutes<60)return`${minutes} мин. назад`;const hours=Math.floor(minutes/60);if(hours<24)return`${hours} ч. назад`;const days=Math.floor(hours/24);if(days<30)return`${days} дн. назад`;const months=Math.floor(days/30);if(months<12)return`${months} мес. назад`;return`${Math.floor(months/12)} г. назад`;}
   function fontFamily(value){if(!value||value==='default')return'Arial,Helvetica,sans-serif';return`"${String(value).replace(/["\\]/g,'')}",Arial,Helvetica,sans-serif`;}
   function setValue(selector,value){const node=$(selector);if(node)node.value=String(value);}function setOutput(selector,value){const node=$(selector);if(node)node.textContent=String(value);}
   function titleUrl(){return`/title/?ref=${encodeURIComponent(ref)}`;}function readerUrl(id){return`/reader/?ref=${encodeURIComponent(ref)}&chapter=${encodeURIComponent(id)}`;}
