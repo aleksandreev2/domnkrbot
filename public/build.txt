@@ -13,3 +13,4 @@ domnkr-build-20260912-nekromantlib-collections2
 domnkr-build-20260912-nekromantlib-collection-detail1
 domnkr-build-20260912-nekromantlib-collection-owner1
 domnkr-build-20260912-nekromantlib-collection-comments1
+domnkr-build-20260912-nekromantlib-reader1
