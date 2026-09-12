@@ -2,7 +2,7 @@
   const $=(selector,root=document)=>root.querySelector(selector);
   const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
-  const state={session:null,data:null,sort:'new'};
+  const state={session:null,data:null,sort:'new',activeTab:'chapters'};
   const ref=new URLSearchParams(location.search).get('ref')||'';
 
   async function api(path,options={}){const response=await fetch(path,{credentials:'same-origin',...options});const body=await response.json().catch(()=>null);if(!response.ok)throw new Error(body?.error||`HTTP ${response.status}`);return body;}
@@ -13,9 +13,17 @@
     $('#chapterSearch')?.addEventListener('input',renderChapters);
     $('#sortNew')?.addEventListener('click',()=>{state.sort='new';setSortButtons();closeSortMenu();renderChapters();});
     $('#sortOld')?.addEventListener('click',()=>{state.sort='old';setSortButtons();closeSortMenu();renderChapters();});
+    document.querySelectorAll('[data-title-tab]').forEach((button)=>button.addEventListener('click',()=>{if(!button.disabled)setTitleTab(button.dataset.titleTab||'');}));
     window.addEventListener('keydown',(event)=>{if(event.key==='Escape'){$('#primaryNav')?.classList.remove('open');closeSortMenu();}});
   }
   function closeSortMenu(){const menu=$('.chapter-sort-menu');if(menu?.open)menu.open=false;}
+  function setTitleTab(tab){
+    if(tab!=='about'&&tab!=='chapters')return;
+    state.activeTab=tab;
+    document.querySelectorAll('[data-title-tab]').forEach((button)=>{const active=button.dataset.titleTab===tab;button.classList.toggle('active',active);if(!button.disabled)button.setAttribute('aria-selected',String(active));});
+    $('#titleAboutPanel')?.classList.toggle('hidden',tab!=='about');
+    $('#titleChaptersPanel')?.classList.toggle('hidden',tab!=='chapters');
+  }
   function renderSession(){const user=state.session?.user;$('#adminLink')?.classList.toggle('hidden',!Boolean(state.session?.isAdmin));$('#logoutButton')?.classList.toggle('hidden',!user);const account=$('#accountName');const panel=$('#loginPanel');if(user){account.textContent=user.username?`@${user.username}`:user.firstName;panel.innerHTML='<span class="login-ready">Telegram-сессия активна</span>';}else{account.textContent='Войти';mountLogin();}refreshIcons();}
   function mountLogin(){const host=$('#telegramLogin');if(!host||host.dataset.ready==='1')return;const bot=state.session?.botUsername;if(!bot){host.textContent='BOT_USERNAME не настроен.';return;}host.dataset.ready='1';const script=document.createElement('script');script.async=true;script.src='https://telegram.org/js/telegram-widget.js?22';script.dataset.telegramLogin=bot;script.dataset.size='large';script.dataset.userpic='false';script.dataset.authUrl=`${location.origin}/auth/telegram/callback`;script.dataset.requestAccess='write';host.append(script);}
   function render(){
@@ -24,23 +32,31 @@
     $('#titleLoading')?.classList.add('hidden');$('#titleApp')?.classList.remove('hidden');
     setText('#titleName',title.title||'Без названия');
     const cover=$('#titleCover');if(cover){cover.src=title.cover_url||'/brand/team-logo.webp';cover.alt=`Обложка ${title.title||'тайтла'}`;}
-    setText('#titleOriginal','Перевод команды «Дом Некроманта»');
+    const secondary=$('#titleOriginal');if(secondary){secondary.textContent='';secondary.classList.add('hidden');}
     setText('#titleSource',sourceLabel(title.url));
     const status=translationLabel(title);
-    setText('#translationStatus',status);setText('#translationStatusAside',status);
+    setText('#translationStatus',status);
     const chapterCount=Number(title.chapter_count||state.data?.chapters?.length||0);
     const updated=dateRelative(title.last_release_at||title.last_synced_at)||'—';
-    setText('#titleChapterCount',String(chapterCount));setText('#titleChapterCountAside',String(chapterCount));
-    setText('#titleLatest',latestLabel(title));setText('#titleUpdated',updated);setText('#titleUpdatedAside',updated);
+    setText('#titleChapterCount',String(chapterCount));
+    setText('#titleLatest',latestLabel(title));setText('#titleUpdated',updated);
     setText('#titleDescription',title.summary||'Описание пока не получено из каталога.');
     const crumb=$('#breadcrumbs span');if(crumb)crumb.textContent=title.title||'Тайтл';
     const available=(state.data?.chapters||[]).filter((chapter)=>chapter.readerAvailable);
-    setText('#readerStatus',available.length?`${available.length} глав доступно`:'Тексты ещё не импортированы');
-    renderProgress();renderChapters();refreshIcons();
+    setText('#readerStatus',available.length?`${available.length} из ${chapterCount||available.length}`:'Тексты ещё не импортированы');
+    renderProgress();renderChapters();setTitleTab(state.activeTab);refreshIcons();
   }
-  function renderProgress(){const chapters=state.data?.chapters||[];const read=readSet();const readCount=chapters.filter((chapter)=>read.has(String(chapter.chapter_id))).length;const percent=chapters.length?Math.round(readCount/chapters.length*100):0;const bar=$('#readingProgressBar');if(bar)bar.style.width=`${percent}%`;setText('#readingProgressText',readCount?`${readCount} из ${chapters.length} глав прочитано`:'Чтение ещё не начато');setText('#readingProgressPercent',`${percent}%`);const continueReading=$('#continueReading');const last=lastRead();if(last){const chapter=chapters.find((item)=>String(item.chapter_id)===String(last));if(chapter&&continueReading){continueReading.href=readerUrl(chapter.chapter_id);continueReading.innerHTML=`<i data-lucide="book-open"></i><span>Продолжить · Глава ${esc(chapter.number)}</span>`;}}else{const firstAvailable=[...chapters].reverse().find((item)=>item.readerAvailable);if(firstAvailable&&continueReading){continueReading.href=readerUrl(firstAvailable.chapter_id);continueReading.innerHTML='<i data-lucide="book-open"></i><span>Начать читать</span>';}}}
-  function renderChapters(){const host=$('#chapterList');if(!host||!state.data)return;const query=($('#chapterSearch')?.value||'').trim().toLowerCase();let chapters=[...(state.data.chapters||[])];if(query)chapters=chapters.filter((chapter)=>`${chapter.number||''} ${chapter.name||''} ${chapter.volume||''}`.toLowerCase().includes(query));chapters.sort((a,b)=>Number(a.chapter_id)-Number(b.chapter_id));if(state.sort==='new')chapters.reverse();const read=readSet();host.innerHTML=chapters.length?chapters.map((chapter)=>chapterRow(chapter,read)).join(''):'<div class="surface title-loading"><i data-lucide="search-x"></i><strong>Главы не найдены</strong><span>Измените номер или название в поиске.</span></div>';refreshIcons();}
-  function chapterRow(chapter,read){const isRead=read.has(String(chapter.chapter_id));const href=chapter.readerAvailable?readerUrl(chapter.chapter_id):(state.data.title?.url||'#');const external=!chapter.readerAvailable&&state.data.title?.url;const prefix=chapterPrefix(chapter);const name=String(chapter.name||'').trim();return`<a class="chapter-row" href="${esc(href)}" ${external?'target="_blank" rel="noreferrer"':''}><span class="chapter-row-copy"><strong><span class="chapter-row-prefix">${esc(prefix)}</span>${name?`<span class="chapter-row-name">${esc(name)}</span>`:''}</strong><small>${chapter.readerAvailable?'Доступно в читалке':'Открыть источник перевода'}</small></span><time>${esc(dateRelative(chapter.first_seen_at)||'')}</time><span class="chapter-read">${isRead?'<i data-lucide="circle-check"></i> Прочитано':chapter.readerAvailable?'<i data-lucide="book-open"></i> В читалке':'<i data-lucide="external-link"></i> Источник'}</span>${chapter.readerAvailable&&!isRead?'<span class="chapter-new">Читать</span>':'<i data-lucide="ellipsis"></i>'}</a>`;}
+  function renderProgress(){
+    const chapters=state.data?.chapters||[];const read=readSet();const readCount=chapters.filter((chapter)=>read.has(String(chapter.chapter_id))).length;const percent=chapters.length?Math.round(readCount/chapters.length*100):0;
+    setText('#readingProgressText',`${readCount} / ${chapters.length}`);setText('#readingProgressPercent',`${percent}%`);
+    const continueReading=$('#continueReading');const action=$('#readingProgressAction');const last=lastRead();let target=null;let actionText='Начать читать';
+    if(last){const chapter=chapters.find((item)=>String(item.chapter_id)===String(last));if(chapter?.readerAvailable){target=chapter;actionText=`Продолжить · Глава ${chapter.number}`;}}
+    if(!target){target=[...chapters].reverse().find((item)=>item.readerAvailable)||null;}
+    if(continueReading){continueReading.href=target?readerUrl(target.chapter_id):'#chapters';continueReading.setAttribute('aria-label',target?actionText:'Доступных текстов пока нет');continueReading.classList.toggle('is-disabled',!target);}
+    if(action)action.textContent=target?actionText:'Тексты пока недоступны';
+  }
+  function renderChapters(){const host=$('#chapterList');if(!host||!state.data)return;const query=($('#chapterSearch')?.value||'').trim().toLowerCase();let chapters=[...(state.data.chapters||[])];if(query)chapters=chapters.filter((chapter)=>`${chapter.number||''} ${chapter.name||''} ${chapter.volume||''}`.toLowerCase().includes(query));chapters.sort((a,b)=>Number(a.chapter_id)-Number(b.chapter_id));if(state.sort==='new')chapters.reverse();const read=readSet();host.innerHTML=chapters.length?chapters.map((chapter)=>chapterRow(chapter,read)).join(''):'<div class="title-empty"><i data-lucide="search-x"></i><strong>Главы не найдены</strong><span>Измените номер или название в поиске.</span></div>';refreshIcons();}
+  function chapterRow(chapter,read){const isRead=read.has(String(chapter.chapter_id));const href=chapter.readerAvailable?readerUrl(chapter.chapter_id):(state.data.title?.url||'#');const external=!chapter.readerAvailable&&state.data.title?.url;const prefix=chapterPrefix(chapter);const name=String(chapter.name||'').trim();const stateIcon=isRead?'circle-check':chapter.readerAvailable?'book-open':'external-link';const stateLabel=isRead?'Прочитано':chapter.readerAvailable?'Открыть в читалке':'Открыть источник перевода';return`<a class="chapter-row" href="${esc(href)}" ${external?'target="_blank" rel="noreferrer"':''}><span class="chapter-row-copy"><strong><span class="chapter-row-prefix">${esc(prefix)}</span>${name?`<span class="chapter-row-name"> - ${esc(name)}</span>`:''}</strong></span><time>${esc(dateShort(chapter.first_seen_at))}</time><span class="chapter-read" title="${esc(stateLabel)}" aria-label="${esc(stateLabel)}"><i data-lucide="${stateIcon}"></i></span></a>`;}
   function chapterPrefix(chapter){const volume=String(chapter.volume||'').trim();const number=String(chapter.number||chapter.chapter_id||'').trim();return`${volume?`Том ${volume} `:''}Глава ${number}`;}
   function setSortButtons(){$('#sortNew')?.classList.toggle('active',state.sort==='new');$('#sortOld')?.classList.toggle('active',state.sort==='old');}
   function storageKey(){return`domnkr:reader:${ref}:read`;}
@@ -49,8 +65,9 @@
   function readerUrl(chapter){return`/reader/?ref=${encodeURIComponent(ref)}&chapter=${encodeURIComponent(chapter)}`;}
   function latestLabel(title){return[title.latest_volume?`Том ${title.latest_volume}`:'',title.latest_number?`Глава ${title.latest_number}`:''].filter(Boolean).join(' · ')||'—';}
   function translationLabel(title){const label=String(title.translation_status_label||'').trim();if(label)return label;switch(String(title.translation_semantic_status||'')){case'active':return'Продолжается';case'completed':return'Завершён';default:return'Неизвестно';}}
-  function sourceLabel(value){if(!value)return'Источник не указан';try{const url=new URL(value);return url.hostname.replace(/^www\./,'');}catch{return String(value);}}
+  function sourceLabel(value){if(!value)return'Не указан';try{const url=new URL(value);return url.hostname.replace(/^www\./,'');}catch{return String(value);}}
   function dateRelative(value){if(!value)return'';const time=new Date(value).getTime();if(!Number.isFinite(time))return'';const mins=Math.max(1,Math.round((Date.now()-time)/60000));if(mins<60)return`${mins} мин. назад`;const h=Math.round(mins/60);if(h<24)return`${h} ч. назад`;const d=Math.round(h/24);return`${d} дн. назад`;}
+  function dateShort(value){if(!value)return'';const date=new Date(value);if(!Number.isFinite(date.getTime()))return'';return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'}).format(date);}
   function setText(selector,value){const node=$(selector);if(node)node.textContent=value;}
   document.addEventListener('DOMContentLoaded',boot);
 })();
