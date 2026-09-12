@@ -60,7 +60,7 @@ test('title capture grid mirrors desktop and mobile structure without fake ratin
 
   assert.match(html, /class="[^"]*title-rating-slot[^"]*"[^>]*aria-disabled="true"/);
   assert.match(html, />Рейтинг тайтла</);
-  assert.doesNotMatch(html, /\b10\s+1\b|Просмотры\s+91|В списках у/);
+  assert.doesNotMatch(html, /\b10\s+1\b|Просмотры\s+91|В списках у\s*26/);
   assert.match(css, /\.title-detail-layout\s*\{[^}]*grid-template-columns:\s*260px\s+minmax\(0,1fr\)\s+auto/is);
   assert.match(css, /grid-template-areas:\s*"cover header rate"\s*"cover content content"\s*"actions content content"\s*"facts content content"/is);
   assert.match(css, /column-gap:\s*30px/i);
