@@ -15,6 +15,7 @@ test('NekromantLib home exposes the library shell and removes the legacy marketi
   assert.match(html, /id="proposalGrid"/);
   assert.match(html, /id="adminLink" class="admin-entry hidden"/);
   assert.match(html, /id="telegramLogin"/);
+  assert.match(html, /\/nekromantlib\.css\?v=/);
   assert.doesNotMatch(html, /id="hero"|ГЛАВНЫЙ ПЕРЕВОД|Истории, которые мы переводим сами/);
 });
 
@@ -30,7 +31,7 @@ test('NekromantLib home keeps existing data and authentication contracts', async
 });
 
 test('NekromantLib shell reserves responsive book covers and accessible mobile behavior', async () => {
-  const css = await read('../public/site.css');
+  const css = await read('../public/nekromantlib.css');
   assert.match(css, /\.nl-home-grid\s*\{/);
   assert.match(css, /\.release-feed\s*\{/);
   assert.match(css, /\.book-cover\s*\{[^}]*aspect-ratio\s*:/s);
