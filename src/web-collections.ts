@@ -230,6 +230,7 @@ export async function handleWebCollectionsApi(request: Request, env: WebCollecti
     if (request.method === 'POST') return createCollection(request, env);
     return json({ error: 'Method not allowed' }, 405);
   }
+  if (!route) return null;
   if (route.kind === 'items') {
     if (request.method === 'POST' || request.method === 'PATCH' || request.method === 'DELETE') {
       const response = await handleCollectionItemsMutation(request, env, route.id);
