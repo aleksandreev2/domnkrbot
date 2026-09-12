@@ -46,8 +46,9 @@ test('live v2 routes native reader reactions before base worker', async () => {
 test('reader closed reaction controls reproduce captured two-line states without copied counts', async () => {
   const html = await read('../public/reader/index.html');
   const js = await read('../public/reader.js');
-  const css = await read('../public/reader.css');
+  const css = await read('../public/reader-reactions.css');
 
+  assert.match(html, /href="\/reader-reactions\.css\?v=/);
   for (const id of ['readerThanksButton','readerThanksCount','readerRatingButton','readerRatingSummary','readerRatingPicker']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
