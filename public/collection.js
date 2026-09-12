@@ -218,7 +218,7 @@
 
   function renderComments(errorMessage=''){
     const host=$('#collectionComments');if(!host)return;
-    setText('#commentCount',String(state.comments.length));
+    setText('#commentsCount',String(state.comments.length));
     if(errorMessage){host.innerHTML=`<div class="collection-comments-status collection-comments-error"><i data-lucide="triangle-alert"></i><span>${esc(errorMessage)}</span></div>`;refreshIcons();return;}
     if(!state.commentsLoaded){host.innerHTML='<div class="collection-comments-status">Загрузка комментариев…</div>';return;}
     if(!state.comments.length){host.innerHTML='<div class="collection-comments-status"><i data-lucide="message-circle"></i><span>Комментариев пока нет. Будьте первым.</span></div>';refreshIcons();return;}
@@ -229,11 +229,11 @@
     const author=comment?.author?.username?`@${comment.author.username}`:(comment?.author?.firstName||'Пользователь');
     const remove=comment?.canDelete?`<button class="collection-comment-delete" type="button" data-comment-id="${esc(comment.id||'')}" aria-label="Удалить комментарий"><i data-lucide="trash-2"></i></button>`:'';
     const own=comment?.isOwn?'<span class="collection-comment-own">Вы</span>':'';
-    return `<article class="collection-comment-card"><div class="collection-comment-meta"><div><strong>${esc(author)}</strong>${own}<time datetime="${esc(comment.createdAt||'')}">${esc(formatDateTime(comment.createdAt))}</time></div>${remove}</div><p>${esc(comment.body||'')}</p></article>`;
+    return `<article class="collection-comment"><div class="collection-comment-meta"><div><strong>${esc(author)}</strong>${own}<time datetime="${esc(comment.createdAt||'')}">${esc(formatDateTime(comment.createdAt))}</time></div>${remove}</div><p>${esc(comment.body||'')}</p></article>`;
   }
 
   function renderCommentComposer(){
-    const user=state.bootstrap?.user||null;const body=$('#commentBody'),submit=$('#commentSubmit'),hint=$('#commentLoginHint');
+    const user=state.bootstrap?.user||null;const body=$('#commentText'),submit=$('#commentSubmit'),hint=$('#commentLoginHint');
     if(body)body.disabled=!user;if(submit)submit.disabled=!user;
     if(hint)hint.textContent=user?'Комментарий будет опубликован от вашего Telegram-профиля.':'Войдите через Telegram, чтобы оставить комментарий.';
   }
@@ -241,14 +241,14 @@
   async function submitComment(event){
     event.preventDefault();clearError('#commentError');
     if(!state.bootstrap?.user){showError('#commentError','Требуется вход через Telegram.');return;}
-    const body=($('#commentBody')?.value||'').trim();
+    const body=($('#commentText')?.value||'').trim();
     if(!body){showError('#commentError','Введите текст комментария.');return;}
     if(body.length>3000){showError('#commentError','Комментарий не должен превышать 3000 символов.');return;}
     const submit=$('#commentSubmit');setBusy(submit,true,'Отправка…');
     try{
       const payload=await api(`/api/collections/${encodeURIComponent(state.id)}/comments`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body})});
       state.comments=Array.isArray(payload?.comments)?payload.comments:state.comments;state.commentsLoaded=true;
-      const field=$('#commentBody');if(field)field.value='';renderComments();
+      const field=$('#commentText');if(field)field.value='';renderComments();
     }catch(error){showError('#commentError',error?.message||'Не удалось отправить комментарий.');}
     finally{setBusy(submit,false,'Отправить');renderCommentComposer();}
   }
@@ -267,7 +267,7 @@
     setText('#collectionTitle','Коллекция недоступна');setText('#collectionDescription',message);
     const host=$('#collectionGroups');if(host)host.innerHTML=emptyState('triangle-alert','Не удалось открыть коллекцию',message);
     const comments=$('#collectionComments');if(comments)comments.innerHTML=`<div class="collection-comments-status collection-comments-error">${esc(message)}</div>`;
-    const commentBody=$('#commentBody'),commentSubmit=$('#commentSubmit');if(commentBody)commentBody.disabled=true;if(commentSubmit)commentSubmit.disabled=true;
+    const commentText=$('#commentText'),commentSubmit=$('#commentSubmit');if(commentText)commentText.disabled=true;if(commentSubmit)commentSubmit.disabled=true;
     $('#ownerActions')?.classList.add('hidden');refreshIcons();
   }
 
