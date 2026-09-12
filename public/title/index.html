@@ -8,10 +8,10 @@
   <meta name="description" content="Тайтл НекромантЛиб: описание, перевод команды «Дом Некроманта», прогресс чтения и список глав.">
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
-  <link rel="stylesheet" href="/title.css?v=20260912-title1">
+  <link rel="stylesheet" href="/title.css?v=20260912-title2">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/title.js?v=20260912-title2"></script>
+  <script defer src="/title.js?v=20260912-title3"></script>
 </head>
 <body class="nl-body title-detail-body">
   <header class="site-header nl-header">
@@ -84,7 +84,13 @@
                 <div><h2>Главы</h2><p>Доступные главы перевода</p></div>
                 <div class="chapter-controls">
                   <label class="chapter-search"><i data-lucide="search"></i><input id="chapterSearch" type="search" placeholder="Номер или название главы" aria-label="Поиск главы"></label>
-                  <div class="chapter-sort" role="group" aria-label="Сортировка глав"><button id="sortNew" class="active" type="button">Новые</button><button id="sortOld" type="button">Старые</button></div>
+                  <details class="chapter-sort-menu">
+                    <summary class="chapter-sort-trigger"><i data-lucide="arrow-up-down"></i><span>Сортировать</span></summary>
+                    <div class="chapter-sort-options" role="group" aria-label="Сортировка глав">
+                      <button id="sortNew" class="active" type="button">Сначала новые</button>
+                      <button id="sortOld" type="button">Сначала старые</button>
+                    </div>
+                  </details>
                 </div>
               </div>
               <div id="chapterList" class="chapter-list" aria-live="polite"></div>
