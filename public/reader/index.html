@@ -7,10 +7,10 @@
   <title>Читалка · НекромантЛиб</title>
   <meta name="description" content="Читалка НекромантЛиб.">
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
-  <link rel="stylesheet" href="/reader.css?v=20260913-comments1">
+  <link rel="stylesheet" href="/reader.css?v=20260913-reactions1">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/reader.js?v=20260913-comments1"></script>
+  <script defer src="/reader.js?v=20260913-reactions1"></script>
 </head>
 <body class="reader-body">
   <div id="readerApp" class="reader-app">
@@ -50,12 +50,21 @@
         </div>
         <div class="reader-work-actions">
           <a id="readerSupportButton" class="reader-support-button" href="https://boosty.to/domnekromanta" target="_blank" rel="noreferrer"><i data-lucide="badge-russian-ruble"></i><span>Поддержать</span></a>
-          <button class="reader-thanks-button" type="button" disabled aria-label="Сказать спасибо пока недоступно"><i data-lucide="heart"></i><span>Сказать спасибо</span></button>
+          <button id="readerThanksButton" class="reader-thanks-button" type="button" aria-pressed="false">
+            <i data-lucide="heart"></i>
+            <span class="reader-reaction-copy"><span>Сказать спасибо</span><span id="readerThanksCount" class="reader-reaction-subline">поблагодарили 0</span></span>
+          </button>
         </div>
       </section>
 
       <section id="readerTranslationRating" class="reader-translation-rating" aria-label="Оценка перевода">
-        <button type="button" disabled aria-label="Оценка перевода пока недоступна"><i data-lucide="star"></i><span>Оценить перевод</span></button>
+        <button id="readerRatingButton" class="reader-rating-button" type="button" aria-expanded="false" aria-controls="readerRatingPicker">
+          <i data-lucide="star"></i>
+          <span class="reader-reaction-copy"><span>Оценить перевод</span><span id="readerRatingSummary" class="reader-reaction-subline">Средняя оценка: — (0)</span></span>
+        </button>
+        <div id="readerRatingPicker" class="reader-rating-picker hidden" aria-label="Выберите оценку перевода">
+          <button type="button" data-rating="1">1</button><button type="button" data-rating="2">2</button><button type="button" data-rating="3">3</button><button type="button" data-rating="4">4</button><button type="button" data-rating="5">5</button><button type="button" data-rating="6">6</button><button type="button" data-rating="7">7</button><button type="button" data-rating="8">8</button><button type="button" data-rating="9">9</button><button type="button" data-rating="10">10</button>
+        </div>
       </section>
 
       <nav class="reader-bottom-nav" aria-label="Переход между главами">
