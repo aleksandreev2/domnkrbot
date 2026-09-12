@@ -29,8 +29,8 @@ test('reader reactions API validates chapter scope and returns real aggregates p
   assert.match(source, /COUNT\(\*\)/i);
   assert.match(source, /AVG\(rating\)/i);
   assert.match(source, /rating < 1 \|\| rating > 10/);
-  assert.match(source, /request\.method === 'GET'/);
-  assert.match(source, /request\.method === 'PUT'/);
+  assert.match(source, /request\.method !== 'GET'/);
+  assert.match(source, /request\.method !== 'PUT'/);
   assert.match(source, /DELETE FROM reader_chapter_thanks/i);
   assert.match(source, /ON CONFLICT\(book_ref, chapter_id, user_telegram_id\) DO UPDATE SET/i);
 });
