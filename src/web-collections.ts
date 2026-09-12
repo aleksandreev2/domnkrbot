@@ -1,4 +1,5 @@
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
+import { handleCollectionItemsMutation, listCollectionItems } from './web-collection-items.js';
 import { getSessionUser, isSameOriginMutation, type WebAuthEnv, type WebTelegramUser } from './web-auth.js';
 
 export interface WebCollectionsEnv extends WebAuthEnv {
@@ -24,6 +25,8 @@ type CollectionInput = {
   isPublic?: unknown;
 };
 
+type CollectionRoute = { kind: 'collection' | 'items'; id: string };
+
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
   'cache-control': 'no-store',
@@ -37,13 +40,14 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: JSON_HEADERS });
 }
 
-function collectionIdFrom(pathname: string): string | null {
+function collectionRoute(pathname: string): CollectionRoute | null {
   if (!pathname.startsWith(COLLECTION_PREFIX)) return null;
-  const raw = pathname.slice(COLLECTION_PREFIX.length);
-  if (!raw || raw.includes('/')) return null;
+  const parts = pathname.slice(COLLECTION_PREFIX.length).split('/');
+  if (!parts[0] || parts.length > 2 || (parts.length === 2 && parts[1] !== 'items')) return null;
   try {
-    const value = decodeURIComponent(raw).trim();
-    return /^[a-f0-9-]{16,64}$/i.test(value) ? value : null;
+    const id = decodeURIComponent(parts[0]).trim();
+    if (!/^[a-f0-9-]{16,64}$/i.test(id)) return null;
+    return { kind: parts[1] === 'items' ? 'items' : 'collection', id };
   } catch {
     return null;
   }
@@ -68,9 +72,7 @@ function publicCollection(row: CollectionRow, viewerId: string | null) {
 
 async function readBody(request: Request): Promise<CollectionInput | Response> {
   const body = await request.json().catch(() => null);
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    return json({ error: 'Некорректное тело запроса.' }, 400);
-  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Некорректное тело запроса.' }, 400);
   return body as CollectionInput;
 }
 
@@ -109,13 +111,15 @@ async function upsertWebUser(env: WebCollectionsEnv, user: WebTelegramUser): Pro
       last_name = excluded.last_name,
       language_code = excluded.language_code,
       updated_at = CURRENT_TIMESTAMP
-  `).bind(
-    String(user.id),
-    user.username ?? null,
-    user.first_name,
-    user.last_name ?? '',
-    user.language_code ?? null,
-  ).run();
+  `).bind(String(user.id), user.username ?? null, user.first_name, user.last_name ?? '', user.language_code ?? null).run();
+}
+
+async function requireOwnedCollection(env: WebCollectionsEnv, id: string, ownerId: string): Promise<boolean> {
+  const row = await env.DB.prepare(`
+    SELECT id FROM web_collections
+    WHERE id = ? AND owner_telegram_id = ?
+  `).bind(id, ownerId).first<{ id: string }>();
+  return Boolean(row);
 }
 
 async function listCollections(request: Request, env: WebCollectionsEnv, url: URL): Promise<Response> {
@@ -123,28 +127,16 @@ async function listCollections(request: Request, env: WebCollectionsEnv, url: UR
   const viewerId = viewer ? String(viewer.id) : null;
   const mine = url.searchParams.get('mine') === '1';
   if (mine && !viewerId) return json({ error: 'Требуется вход через Telegram.' }, 401);
-
   const baseSelect = `
     SELECT c.id, c.owner_telegram_id, c.title, c.description, c.is_public, c.created_at, c.updated_at,
-           u.username AS owner_username, u.first_name AS owner_first_name,
-           COUNT(i.id) AS item_count
+           u.username AS owner_username, u.first_name AS owner_first_name, COUNT(i.id) AS item_count
     FROM web_collections c
     LEFT JOIN users u ON u.telegram_id = c.owner_telegram_id
     LEFT JOIN web_collection_items i ON i.collection_id = c.id
   `;
   const statement = mine
-    ? env.DB.prepare(`${baseSelect}
-        WHERE c.owner_telegram_id = ?
-        GROUP BY c.id
-        ORDER BY c.updated_at DESC, c.created_at DESC
-        LIMIT ${LIST_LIMIT}
-      `).bind(viewerId)
-    : env.DB.prepare(`${baseSelect}
-        WHERE c.is_public = 1
-        GROUP BY c.id
-        ORDER BY c.updated_at DESC, c.created_at DESC
-        LIMIT ${LIST_LIMIT}
-      `);
+    ? env.DB.prepare(`${baseSelect} WHERE c.owner_telegram_id = ? GROUP BY c.id ORDER BY c.updated_at DESC, c.created_at DESC LIMIT ${LIST_LIMIT}`).bind(viewerId)
+    : env.DB.prepare(`${baseSelect} WHERE c.is_public = 1 GROUP BY c.id ORDER BY c.updated_at DESC, c.created_at DESC LIMIT ${LIST_LIMIT}`);
   const { results } = await statement.all<CollectionRow>();
   return json({ collections: results.map((row) => publicCollection(row, viewerId)) });
 }
@@ -154,8 +146,7 @@ async function getCollection(request: Request, env: WebCollectionsEnv, id: strin
   const viewerId = viewer ? String(viewer.id) : null;
   const row = await env.DB.prepare(`
     SELECT c.id, c.owner_telegram_id, c.title, c.description, c.is_public, c.created_at, c.updated_at,
-           u.username AS owner_username, u.first_name AS owner_first_name,
-           COUNT(i.id) AS item_count
+           u.username AS owner_username, u.first_name AS owner_first_name, COUNT(i.id) AS item_count
     FROM web_collections c
     LEFT JOIN users u ON u.telegram_id = c.owner_telegram_id
     LEFT JOIN web_collection_items i ON i.collection_id = c.id
@@ -163,7 +154,8 @@ async function getCollection(request: Request, env: WebCollectionsEnv, id: strin
     GROUP BY c.id
   `).bind(id, viewerId ?? '').first<CollectionRow>();
   if (!row) return json({ error: 'Коллекция не найдена.' }, 404);
-  return json({ collection: publicCollection(row, viewerId) });
+  const items = await listCollectionItems(env, id);
+  return json({ collection: publicCollection(row, viewerId), items });
 }
 
 async function createCollection(request: Request, env: WebCollectionsEnv): Promise<Response> {
@@ -177,7 +169,6 @@ async function createCollection(request: Request, env: WebCollectionsEnv): Promi
   if (!title) return json({ error: `Название должно содержать от 1 до ${TITLE_MAX} символов.` }, 400);
   if (description === null) return json({ error: `Описание не должно превышать ${DESCRIPTION_MAX} символов.` }, 400);
   if (isPublic === null) return json({ error: 'Некорректная видимость коллекции.' }, 400);
-
   await upsertWebUser(env, user);
   const id = crypto.randomUUID();
   const ownerId = String(user.id);
@@ -188,8 +179,7 @@ async function createCollection(request: Request, env: WebCollectionsEnv): Promi
   const row = await env.DB.prepare(`
     SELECT c.id, c.owner_telegram_id, c.title, c.description, c.is_public, c.created_at, c.updated_at,
            u.username AS owner_username, u.first_name AS owner_first_name, 0 AS item_count
-    FROM web_collections c
-    LEFT JOIN users u ON u.telegram_id = c.owner_telegram_id
+    FROM web_collections c LEFT JOIN users u ON u.telegram_id = c.owner_telegram_id
     WHERE c.id = ? AND c.owner_telegram_id = ?
   `).bind(id, ownerId).first<CollectionRow>();
   return json({ collection: row ? publicCollection(row, ownerId) : null }, 201);
@@ -199,12 +189,7 @@ async function updateCollection(request: Request, env: WebCollectionsEnv, id: st
   const user = await requireUser(request, env);
   if (user instanceof Response) return user;
   const ownerId = String(user.id);
-  const current = await env.DB.prepare(`
-    SELECT id FROM web_collections
-    WHERE id = ? AND owner_telegram_id = ?
-  `).bind(id, ownerId).first<{ id: string }>();
-  if (!current) return json({ error: 'Коллекция не найдена.' }, 404);
-
+  if (!await requireOwnedCollection(env, id, ownerId)) return json({ error: 'Коллекция не найдена.' }, 404);
   const body = await readBody(request);
   if (body instanceof Response) return body;
   const title = body.title === undefined ? undefined : normalizedTitle(body.title);
@@ -214,21 +199,12 @@ async function updateCollection(request: Request, env: WebCollectionsEnv, id: st
   if (body.description !== undefined && description === null) return json({ error: `Описание не должно превышать ${DESCRIPTION_MAX} символов.` }, 400);
   if (body.isPublic !== undefined && isPublic === null) return json({ error: 'Некорректная видимость коллекции.' }, 400);
   if (title === undefined && description === undefined && isPublic === undefined) return json({ error: 'Нет изменений.' }, 400);
-
   await env.DB.prepare(`
     UPDATE web_collections
-    SET title = COALESCE(?, title),
-        description = COALESCE(?, description),
-        is_public = COALESCE(?, is_public),
-        updated_at = CURRENT_TIMESTAMP
+    SET title = COALESCE(?, title), description = COALESCE(?, description),
+        is_public = COALESCE(?, is_public), updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND owner_telegram_id = ?
-  `).bind(
-    title ?? null,
-    description ?? null,
-    isPublic === undefined ? null : isPublic ? 1 : 0,
-    id,
-    ownerId,
-  ).run();
+  `).bind(title ?? null, description ?? null, isPublic === undefined ? null : isPublic ? 1 : 0, id, ownerId).run();
   return getCollection(request, env, id);
 }
 
@@ -236,11 +212,7 @@ async function deleteCollection(request: Request, env: WebCollectionsEnv, id: st
   const user = await requireUser(request, env);
   if (user instanceof Response) return user;
   const ownerId = String(user.id);
-  const current = await env.DB.prepare(`
-    SELECT id FROM web_collections
-    WHERE id = ? AND owner_telegram_id = ?
-  `).bind(id, ownerId).first<{ id: string }>();
-  if (!current) return json({ error: 'Коллекция не найдена.' }, 404);
+  if (!await requireOwnedCollection(env, id, ownerId)) return json({ error: 'Коллекция не найдена.' }, 404);
   await env.DB.prepare(`
     DELETE FROM web_collections
     WHERE id = ? AND owner_telegram_id = ?
@@ -250,18 +222,24 @@ async function deleteCollection(request: Request, env: WebCollectionsEnv, id: st
 
 export async function handleWebCollectionsApi(request: Request, env: WebCollectionsEnv): Promise<Response | null> {
   const url = new URL(request.url);
-  const id = collectionIdFrom(url.pathname);
+  const route = collectionRoute(url.pathname);
   const isRoot = url.pathname === '/api/collections';
-  if (!isRoot && !id) return null;
-
+  if (!isRoot && !route) return null;
   if (isRoot) {
     if (request.method === 'GET') return listCollections(request, env, url);
     if (request.method === 'POST') return createCollection(request, env);
     return json({ error: 'Method not allowed' }, 405);
   }
-
-  if (request.method === 'GET') return getCollection(request, env, id!);
-  if (request.method === 'PATCH') return updateCollection(request, env, id!);
-  if (request.method === 'DELETE') return deleteCollection(request, env, id!);
+  if (route.kind === 'items') {
+    if (request.method === 'POST' || request.method === 'PATCH' || request.method === 'DELETE') {
+      const response = await handleCollectionItemsMutation(request, env, route.id);
+      if (!response.ok) return response;
+      return getCollection(request, env, route.id);
+    }
+    return json({ error: 'Method not allowed' }, 405);
+  }
+  if (request.method === 'GET') return getCollection(request, env, route.id);
+  if (request.method === 'PATCH') return updateCollection(request, env, route.id);
+  if (request.method === 'DELETE') return deleteCollection(request, env, route.id);
   return json({ error: 'Method not allowed' }, 405);
 }
