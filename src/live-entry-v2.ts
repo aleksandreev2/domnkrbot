@@ -60,6 +60,7 @@ import {
 import { handleWebCollectionsApi, type WebCollectionsEnv } from './web-collections.js';
 import { handleWebReaderCommentsApi, type WebReaderCommentsEnv } from './web-reader-comments.js';
 import { handleWebReaderReactionsApi, type WebReaderReactionsEnv } from './web-reader-reactions.js';
+import { handleWebTitleCommentsApi, type WebTitleCommentsEnv } from './web-title-comments.js';
 import { handleWebTitleStateApi, type WebTitleStateEnv } from './web-title-state.js';
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
@@ -93,6 +94,7 @@ type Env = PublicationCommentGateEnv
   & WebCollectionsEnv
   & WebReaderCommentsEnv
   & WebReaderReactionsEnv
+  & WebTitleCommentsEnv
   & WebTitleStateEnv
   & {
     RANOBELIB_TEAM_REF?: string;
@@ -186,6 +188,9 @@ export default {
 
     const readerReactionsResponse = await handleWebReaderReactionsApi(request, env);
     if (readerReactionsResponse) return readerReactionsResponse;
+
+    const titleCommentsResponse = await handleWebTitleCommentsApi(request, env);
+    if (titleCommentsResponse) return titleCommentsResponse;
 
     const titleStateResponse = await handleWebTitleStateApi(request, env);
     if (titleStateResponse) return titleStateResponse;
@@ -327,8 +332,6 @@ export default {
         return;
       }
 
-      // Until live delivery cutover, preserve the legacy primary-team discovery as authority while
-      // also refreshing the registered-team model for baseline/shadow verification.
       const legacy = rollout.delivery ? null : await discoverRanobeLibTeam(env);
       const multiTeam = await discoverRegisteredRanobeLibTeams(env);
       console.log('RanobeLib team discovery complete', {
