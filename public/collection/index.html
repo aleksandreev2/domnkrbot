@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f2f3f5">
+  <title>Коллекция · НекромантЛиб</title>
+  <meta name="description" content="Подборка тайтлов НекромантЛиб.">
+  <link rel="stylesheet" href="/site.css?v=20260819-reader1">
+  <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
+  <link rel="stylesheet" href="/collection.css?v=20260912-detail1">
+  <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
+  <script defer src="/ui-icons.js?v=20260820-icons3"></script>
+  <script defer src="/collection.js?v=20260912-detail1"></script>
+</head>
+<body class="nl-body collection-detail-body">
+  <header class="site-header nl-header">
+    <div class="nl-shell nl-header-inner">
+      <button class="mobile-menu-button nl-icon-button" id="mobileMenuButton" type="button" aria-label="Открыть меню"><i data-lucide="menu"></i></button>
+      <a class="nl-brand" href="/" aria-label="НекромантЛиб — главная"><img src="/brand/team-logo.webp" alt="" width="40" height="40"><span>НекромантЛиб</span></a>
+      <nav class="primary-nav nl-nav" id="primaryNav" aria-label="Основная навигация">
+        <a href="/catalog/">Каталог</a>
+        <a class="active" href="/collections/">Коллекции</a>
+        <a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Форум</a>
+      </nav>
+      <div class="header-actions nl-header-actions">
+        <a class="nl-header-action" href="/propose/"><i data-lucide="circle-plus"></i><span>Добавить</span></a>
+        <a id="adminLink" class="admin-entry hidden" href="/admin/"><i data-lucide="shield-cog"></i><span>Admin</span></a>
+        <details class="account-menu nl-account"><summary><i data-lucide="user-round"></i><span id="accountName">Войти</span><i class="nl-chevron" data-lucide="chevron-down"></i></summary><div id="loginPanel" class="login-panel nl-login-panel"><div id="telegramLogin"></div></div></details>
+        <button id="logoutButton" class="nl-icon-button hidden" type="button" aria-label="Выйти"><i data-lucide="log-out"></i></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="collection-detail-main">
+    <div class="nl-shell">
+      <a class="collection-back" href="/collections/"><i data-lucide="arrow-left"></i><span>Все коллекции</span></a>
+
+      <section id="collectionHero" class="surface collection-detail-hero">
+        <div class="collection-detail-copy">
+          <div class="collection-detail-kicker"><span id="collectionVisibility">Коллекция</span><span id="collectionItemCount">0 тайтлов</span></div>
+          <h1 id="collectionTitle">Загрузка…</h1>
+          <p id="collectionDescription">Получаем данные коллекции.</p>
+          <div class="collection-detail-owner"><i data-lucide="user-round"></i><span>Автор: <strong id="collectionOwner">—</strong></span></div>
+        </div>
+        <div id="ownerActions" class="collection-owner-actions hidden">
+          <button id="addTitleButton" class="collection-primary" type="button"><i data-lucide="plus"></i><span>Добавить тайтл</span></button>
+        </div>
+      </section>
+
+      <div class="collection-detail-grid">
+        <section class="collection-detail-content" aria-labelledby="collectionItemsHeading">
+          <div class="collection-section-heading"><div><h2 id="collectionItemsHeading">Тайтлы</h2><p>Подборка разбита на группы автора.</p></div></div>
+          <div id="collectionGroups" class="collection-groups" aria-live="polite">
+            <div class="collection-detail-loading"><span></span><span></span><span></span></div>
+          </div>
+        </section>
+
+        <aside class="surface collection-detail-aside">
+          <h2>О коллекции</h2>
+          <dl>
+            <div><dt>Автор</dt><dd id="collectionOwnerAside">—</dd></div>
+            <div><dt>Доступ</dt><dd id="collectionVisibilityAside">—</dd></div>
+            <div><dt>Тайтлов</dt><dd id="collectionCountAside">0</dd></div>
+            <div><dt>Обновлено</dt><dd id="collectionUpdatedAside">—</dd></div>
+          </dl>
+        </aside>
+      </div>
+    </div>
+  </main>
+
+  <dialog id="addTitleDialog" class="collection-dialog">
+    <form id="addTitleForm" class="collection-add-form">
+      <button id="addTitleClose" class="nl-icon-button collection-dialog-close" type="button" aria-label="Закрыть"><i data-lucide="x"></i></button>
+      <div class="collection-dialog-heading"><i data-lucide="book-plus"></i><div><h2>Добавить тайтл</h2><p>Выберите перевод из каталога НекромантЛиб.</p></div></div>
+      <label>Поиск<input id="titleSearch" type="search" autocomplete="off" placeholder="Название тайтла"></label>
+      <label>Тайтл<select id="titlePicker" required><option value="">Загрузка каталога…</option></select></label>
+      <label>Группа<input id="groupName" maxlength="100" autocomplete="off" placeholder="Например, Лучшее или Без группы"></label>
+      <label>Заметка<textarea id="titleNote" maxlength="1000" rows="3" placeholder="Необязательный комментарий к тайтлу"></textarea></label>
+      <div id="addTitleError" class="collection-form-error hidden" role="alert"></div>
+      <div class="collection-dialog-actions"><button id="addTitleCancel" class="collection-secondary" type="button">Отмена</button><button id="addTitleSubmit" class="collection-primary" type="submit">Добавить</button></div>
+    </form>
+  </dialog>
+
+  <footer class="nl-footer"><div class="nl-shell nl-footer-inner"><a class="nl-brand nl-footer-brand" href="/"><img src="/brand/team-logo.webp" alt="" width="34" height="34"><span>НекромантЛиб</span></a><nav aria-label="Ссылки в подвале"><a href="/catalog/">Каталог</a><a href="/collections/">Коллекции</a><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Дом Некроманта</a></nav><small>© 2026 НекромантЛиб</small></div></footer>
+</body>
+</html>
