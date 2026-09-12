@@ -2,7 +2,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const source = await readFile(new URL('../src/web-collections.ts', import.meta.url), 'utf8');
+const [collections, items] = await Promise.all([
+  readFile(new URL('../src/web-collections.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/web-collection-items.ts', import.meta.url), 'utf8'),
+]);
+const source = `${collections}\n${items}`;
 
 test('collection detail loads real item/title metadata', () => {
   assert.match(source, /web_collection_items\s+i/i);
