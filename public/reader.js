@@ -17,6 +17,7 @@
   let comments=[];
   let replyTo=null;
   let commentLoginMounted=false;
+  let readerReactions=null;
 
   async function api(path,options={}){
     const init={credentials:'same-origin',...options};
@@ -32,7 +33,7 @@
     try{
       data=await api(`/api/reader/chapter?ref=${encodeURIComponent(ref)}&chapter=${encodeURIComponent(chapter)}`);
       render();markRead();
-      await Promise.allSettled([loadCommentSession(),loadComments()]);
+      await Promise.allSettled([loadCommentSession(),loadComments(),loadReaderReactions()]);
     }catch(error){renderError(error.message);}
   }
 
@@ -55,13 +56,16 @@
     $('#hideImages')?.addEventListener('change',(event)=>{prefs.hideImages=event.currentTarget.checked;saveAndApply();});
     $('#hideHeading')?.addEventListener('change',(event)=>{prefs.hideHeading=event.currentTarget.checked;saveAndApply();});
     $('#resetReaderSettings')?.addEventListener('click',()=>{Object.assign(prefs,DEFAULT_PREFS);saveAndApply();});
+    $('#readerThanksButton')?.addEventListener('click',()=>void toggleReaderThanks());
+    $('#readerRatingButton')?.addEventListener('click',toggleRatingPicker);
+    $$('[data-rating]').forEach((button)=>button.addEventListener('click',()=>void setReaderRating(Number(button.dataset.rating))));
     $('#readerCommentSort')?.addEventListener('click',()=>{commentSort=commentSort==='new'?'old':'new';renderComments();});
     $('#readerCommentForm')?.addEventListener('submit',submitComment);
     $('#readerCommentCancelReply')?.addEventListener('click',()=>cancelReply());
     $('#readerCommentText')?.addEventListener('input',syncCommentSubmit);
     $('#readerCommentsList')?.addEventListener('click',handleCommentAction);
     window.addEventListener('scroll',updateScrollProgress,{passive:true});
-    window.addEventListener('keydown',(event)=>{if(event.key==='Escape'){closeAllPopups();cancelReply();}});
+    window.addEventListener('keydown',(event)=>{if(event.key==='Escape'){closeAllPopups();cancelReply();closeRatingPicker();}});
   }
   function bindRange(selector,key,parse){$(selector)?.addEventListener('input',(event)=>{prefs[key]=parse(event.currentTarget.value);saveAndApply();});}
 
@@ -91,6 +95,65 @@
   async function loadCommentSession(){
     try{commentSession=await api('/api/auth/session');}catch{commentSession={user:null,isAdmin:false,botUsername:null};}
     syncCommentComposer();
+  }
+
+  async function loadReaderReactions(){
+    try{
+      readerReactions=await api(`/api/reader/reactions?ref=${encodeURIComponent(ref)}&chapter=${encodeURIComponent(chapter)}`);
+      renderReaderReactions();
+    }catch{
+      readerReactions={thanksCount:0,thanked:false,ratingAverage:null,ratingCount:0,myRating:null};
+      renderReaderReactions();
+    }
+  }
+
+  function renderReaderReactions(){
+    const state=readerReactions||{thanksCount:0,thanked:false,ratingAverage:null,ratingCount:0,myRating:null};
+    const thanks=$('#readerThanksCount');if(thanks)thanks.textContent=`поблагодарили ${Number(state.thanksCount)||0}`;
+    const thanksButton=$('#readerThanksButton');if(thanksButton){thanksButton.classList.toggle('is-active',Boolean(state.thanked));thanksButton.setAttribute('aria-pressed',state.thanked?'true':'false');}
+    const average=state.ratingAverage==null?'—':Number(state.ratingAverage).toFixed(1);
+    const summary=$('#readerRatingSummary');if(summary)summary.textContent=`Средняя оценка: ${average} (${Number(state.ratingCount)||0})`;
+    $$('[data-rating]').forEach((button)=>button.classList.toggle('is-active',Number(button.dataset.rating)===Number(state.myRating)));
+    refreshIcons();
+  }
+
+  function ensureReactionUser(){
+    if(commentSession?.user)return true;
+    mountCommentLogin();
+    $('#readerCommentLogin')?.scrollIntoView({block:'center',behavior:reducedMotion()?'auto':'smooth'});
+    return false;
+  }
+
+  async function toggleReaderThanks(){
+    if(!ensureReactionUser())return;
+    const current=Boolean(readerReactions?.thanked);
+    try{
+      readerReactions=await api('/api/reader/reactions/thanks',{method:'PUT',body:JSON.stringify({bookRef:ref,chapterId:Number(chapter),value:!current})});
+      renderReaderReactions();
+    }catch(error){setCommentMessage(error.message||'Не удалось сохранить благодарность.');}
+  }
+
+  function toggleRatingPicker(){
+    if(!ensureReactionUser())return;
+    const picker=$('#readerRatingPicker');if(!picker)return;
+    const opening=picker.classList.contains('hidden');
+    picker.classList.toggle('hidden',!opening);
+    $('#readerRatingButton')?.setAttribute('aria-expanded',opening?'true':'false');
+    if(opening)picker.querySelector('.is-active,[data-rating]')?.focus();
+  }
+
+  function closeRatingPicker(){
+    $('#readerRatingPicker')?.classList.add('hidden');
+    $('#readerRatingButton')?.setAttribute('aria-expanded','false');
+  }
+
+  async function setReaderRating(value){
+    if(!ensureReactionUser())return;
+    if(!Number.isInteger(value)||value<1||value>10)return;
+    try{
+      readerReactions=await api('/api/reader/reactions/rating',{method:'PUT',body:JSON.stringify({bookRef:ref,chapterId:Number(chapter),value})});
+      renderReaderReactions();closeRatingPicker();
+    }catch(error){setCommentMessage(error.message||'Не удалось сохранить оценку.');}
   }
 
   async function loadComments(){
