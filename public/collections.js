@@ -83,7 +83,8 @@
     const owner=item.owner?.username?`@${item.owner.username}`:(item.owner?.firstName||'Пользователь');
     const privacy=item.isPublic?'Публичная':'Приватная';
     const description=item.description?`<p>${esc(item.description)}</p>`:'<p class="collection-card-muted">Без описания</p>';
-    return `<article class="collection-card" data-collection-id="${esc(item.id||'')}"><div class="collection-card-head"><span class="collection-card-icon"><i data-lucide="layers-3"></i></span><span class="collection-card-privacy">${privacy}</span></div><h3>${esc(item.title||'Без названия')}</h3>${description}<div class="collection-card-meta"><span>${esc(owner)}</span><span>${Number(item.itemCount||0)} тайтлов</span></div>${item.isOwner?'<span class="collection-owner-badge">Ваша коллекция</span>':''}</article>`;
+    const href=`/collection/?id=${encodeURIComponent(item.id||'')}`;
+    return `<article class="collection-card" data-collection-id="${esc(item.id||'')}"><a class="collection-card-main" href="${href}"><div class="collection-card-head"><span class="collection-card-icon"><i data-lucide="layers-3"></i></span><span class="collection-card-privacy">${privacy}</span></div><h3>${esc(item.title||'Без названия')}</h3>${description}<div class="collection-card-meta"><span>${esc(owner)}</span><span>${Number(item.itemCount||0)} тайтлов</span></div></a>${item.isOwner?'<span class="collection-owner-badge">Ваша коллекция</span>':''}</article>`;
   }
 
   function openCreateDialog(){
