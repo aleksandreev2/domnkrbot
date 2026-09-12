@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="/catalog.css?v=20260912-catalog1">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/catalog.js?v=20260912-catalog1"></script>
+  <script defer src="/catalog.js?v=20260912-status1"></script>
 </head>
 <body class="nl-body catalog-body">
   <header class="site-header nl-header">
@@ -60,7 +60,7 @@
           <div class="filter-block filter-muted"><div class="filter-title">Возрастной рейтинг</div><div class="filter-chip-row"><span>6+</span><span>12+</span><span>16+</span><span>18+</span></div></div>
           <div class="filter-block filter-muted"><div class="filter-title">Тип</div><div class="filter-check-list"><span>Япония</span><span>Корея</span><span>Китай</span><span>Английский</span><span>Авторский</span><span>Фанфик</span></div></div>
           <div class="filter-block filter-muted"><div class="filter-title">Статус тайтла</div><div class="filter-check-list"><span>Онгоинг</span><span>Завершён</span><span>Анонс</span><span>Приостановлен</span></div></div>
-          <div class="filter-block filter-muted"><div class="filter-title">Статус перевода</div><div class="filter-check-list"><span>Продолжается</span><span>Завершён</span><span>Заморожен</span><span>Заброшен</span></div></div>
+          <fieldset class="filter-block translation-status-filter"><legend>Статус перевода</legend><div class="filter-radio-list"><label><input type="radio" name="translationStatus" value="" checked><span>Любой</span></label><label><input type="radio" name="translationStatus" value="active"><span>Продолжается</span></label><label><input type="radio" name="translationStatus" value="completed"><span>Завершён</span></label><label><input type="radio" name="translationStatus" value="unknown"><span>Неизвестно</span></label><label class="filter-option-disabled" title="Статус пока не синхронизируется"><input type="radio" disabled><span>Заморожен</span></label><label class="filter-option-disabled" title="Статус пока не синхронизируется"><input type="radio" disabled><span>Заброшен</span></label></div></fieldset>
 
           <div class="catalog-filter-actions"><button id="resetFilters" class="filter-reset" type="button">Сбросить</button><button id="applyFilters" class="filter-apply" type="button">Применить</button></div>
         </aside>
