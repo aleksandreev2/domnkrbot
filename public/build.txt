@@ -7,3 +7,4 @@ domnkr-build-20260910-multiteam-v1
 domnkr-build-20260911-ranobelib-import1
 domnkr-build-20260912-nekromantlib-home1
 domnkr-build-20260912-nekromantlib-catalog1
+domnkr-build-20260912-nekromantlib-status1
