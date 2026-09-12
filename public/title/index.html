@@ -9,9 +9,11 @@
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
   <link rel="stylesheet" href="/title.css?v=20260913-title5">
+  <link rel="stylesheet" href="/title-comments.css?v=20260913-comments1">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
   <script defer src="/title.js?v=20260913-title5"></script>
+  <script defer src="/title-comments.js?v=20260913-comments1"></script>
 </head>
 <body class="nl-body title-detail-body">
   <header class="site-header nl-header">
@@ -96,7 +98,7 @@
             <nav class="title-tabs" role="tablist" aria-label="Разделы тайтла">
               <button type="button" role="tab" data-title-tab="about" aria-selected="false" aria-controls="titleAboutPanel">О тайтле</button>
               <button type="button" role="tab" data-title-tab="chapters" class="active" aria-selected="true" aria-controls="titleChaptersPanel">Главы</button>
-              <button type="button" role="tab" data-title-tab="comments" disabled aria-disabled="true" title="Комментарии к тайтлу пока не подключены">Комментарии</button>
+              <button type="button" role="tab" data-title-tab="comments" aria-selected="false" aria-controls="titleCommentsPanel">Комментарии</button>
               <button type="button" role="tab" data-title-tab="discussions" disabled aria-disabled="true" title="Обсуждения пока не подключены">Обсуждения</button>
               <button type="button" role="tab" data-title-tab="reviews" disabled aria-disabled="true" title="Отзывы пока не подключены">Отзывы</button>
             </nav>
@@ -139,6 +141,28 @@
                 </div>
                 <div id="chapterList" class="chapter-list" aria-live="polite"></div>
               </div>
+            </section>
+
+            <section id="titleCommentsPanel" class="title-tab-panel title-comments-shell hidden" role="tabpanel" aria-label="Комментарии к тайтлу">
+              <div class="title-comments-toolbar">
+                <div class="title-comments-sort" role="group" aria-label="Сортировка комментариев">
+                  <button id="titleCommentsNew" class="active" type="button">Новые</button>
+                  <button id="titleCommentsTop" type="button">Лучшие</button>
+                </div>
+                <details class="title-comments-info"><summary>Настройки</summary><div>Показываются только комментарии НекромантЛиб. Сортировку можно менять между новыми и лучшими.</div></details>
+                <details class="title-comments-info"><summary>Правила</summary><div>Обсуждайте тайтл по теме, без спама и оскорблений. Жалобы сохраняются для модерации.</div></details>
+              </div>
+              <div id="titleReplyTarget" class="title-reply-target hidden" aria-live="polite"></div>
+              <form id="titleCommentForm" class="title-comment-composer">
+                <textarea id="titleCommentText" rows="3" maxlength="3000" placeholder="Написать комментарий..." aria-label="Комментарий" disabled></textarea>
+                <div class="title-comment-composer-actions">
+                  <span id="titleCommentLoginHint">Войдите через Telegram, чтобы комментировать.</span>
+                  <button id="titleReplyCancel" class="hidden" type="button">Отмена</button>
+                  <button id="titleCommentSubmit" type="submit" disabled>Отправить</button>
+                </div>
+              </form>
+              <div id="titleCommentsMessage" class="title-comments-message" role="status" aria-live="polite"></div>
+              <div id="titleCommentsList" class="title-comments-list"></div>
             </section>
           </section>
         </div>
