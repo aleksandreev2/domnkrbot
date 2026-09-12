@@ -96,7 +96,7 @@
     if(!state.bootstrap?.user||location.pathname!=='/')return false;
     try{
       const target=localStorage.getItem('domnkr:return-after-login');
-      if(target==='/propose/'){
+      if(target&&target.startsWith('/')&&!target.startsWith('//')){
         localStorage.removeItem('domnkr:return-after-login');
         location.replace(target);return true;
       }
