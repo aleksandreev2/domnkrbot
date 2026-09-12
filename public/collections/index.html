@@ -8,10 +8,10 @@
   <meta name="description" content="Коллекции НекромантЛиб — подборки переводов команды «Дом Некроманта».">
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
-  <link rel="stylesheet" href="/collections.css?v=20260912-collections1">
+  <link rel="stylesheet" href="/collections.css?v=20260912-collections2">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/collections.js?v=20260912-collections1"></script>
+  <script defer src="/collections.js?v=20260912-collections2"></script>
 </head>
 <body class="nl-body collections-body">
   <header class="site-header nl-header">
@@ -47,26 +47,24 @@
       <section class="surface collections-panel" aria-labelledby="collectionsHeading">
         <div class="collections-panel-head">
           <h2 id="collectionsHeading">Новые</h2>
-          <span id="collectionsCount">0 коллекций</span>
+          <span id="collectionsCount">Загрузка…</span>
         </div>
         <div id="collectionsList" class="collections-list" aria-live="polite">
-          <div class="collections-empty">
-            <i data-lucide="library-big"></i>
-            <strong>Коллекций пока нет</strong>
-            <span>Здесь появятся подборки НекромантЛиб. Собственные коллекции подключим через безопасный CRUD.</span>
-          </div>
+          <div class="collections-loading"><span></span><span></span><span></span></div>
         </div>
       </section>
     </div>
   </main>
 
-  <dialog id="collectionNotice" class="collection-notice">
-    <form method="dialog">
-      <button class="nl-icon-button collection-notice-close" value="close" aria-label="Закрыть"><i data-lucide="x"></i></button>
-      <i class="collection-notice-icon" data-lucide="sparkles"></i>
-      <h2>Создание коллекций</h2>
-      <p id="collectionNoticeText">Форма создания появится после подключения серверного CRUD. Текущий экран уже использует вашу Telegram-сессию и не создаёт фиктивных данных.</p>
-      <button class="collections-create" value="close">Понятно</button>
+  <dialog id="collectionDialog" class="collection-notice collection-dialog">
+    <form id="collectionForm" class="collection-form">
+      <button id="collectionClose" class="nl-icon-button collection-notice-close" type="button" aria-label="Закрыть"><i data-lucide="x"></i></button>
+      <div class="collection-form-heading"><i data-lucide="layers-3"></i><div><h2>Новая коллекция</h2><p>Соберите собственную подборку тайтлов.</p></div></div>
+      <label>Название<input id="collectionTitle" name="title" maxlength="120" required autocomplete="off" placeholder="Например, Лучшее фэнтези"></label>
+      <label>Описание<textarea id="collectionDescription" name="description" maxlength="4000" rows="5" placeholder="Коротко расскажите, что объединяет тайтлы"></textarea></label>
+      <label class="collection-visibility"><input id="collectionPublic" type="checkbox" checked><span><strong>Публичная коллекция</strong><small>Будет видна во вкладке «Новые».</small></span></label>
+      <div id="collectionFormError" class="collection-form-error hidden" role="alert"></div>
+      <div class="collection-form-actions"><button id="collectionCancel" class="collection-secondary" type="button">Отмена</button><button id="collectionSubmit" class="collections-create" type="submit">Создать</button></div>
     </form>
   </dialog>
 
