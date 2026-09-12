@@ -1,4 +1,5 @@
 import type { D1DatabaseLike } from './ranobelib-runtime.js';
+import { handleCollectionCommentsMutation, listCollectionComments } from './web-collection-comments.js';
 import { handleCollectionItemsMutation, listCollectionItems } from './web-collection-items.js';
 import { getSessionUser, isSameOriginMutation, type WebAuthEnv, type WebTelegramUser } from './web-auth.js';
 
@@ -25,7 +26,7 @@ type CollectionInput = {
   isPublic?: unknown;
 };
 
-type CollectionRoute = { kind: 'collection' | 'items'; id: string };
+type CollectionRoute = { kind: 'collection' | 'items' | 'comments'; id: string };
 
 const JSON_HEADERS = {
   'content-type': 'application/json; charset=utf-8',
@@ -43,11 +44,12 @@ function json(data: unknown, status = 200): Response {
 function collectionRoute(pathname: string): CollectionRoute | null {
   if (!pathname.startsWith(COLLECTION_PREFIX)) return null;
   const parts = pathname.slice(COLLECTION_PREFIX.length).split('/');
-  if (!parts[0] || parts.length > 2 || (parts.length === 2 && parts[1] !== 'items')) return null;
+  if (!parts[0] || parts.length > 2 || (parts.length === 2 && parts[1] !== 'items' && parts[1] !== 'comments')) return null;
   try {
     const id = decodeURIComponent(parts[0]).trim();
     if (!/^[a-f0-9-]{16,64}$/i.test(id)) return null;
-    return { kind: parts[1] === 'items' ? 'items' : 'collection', id };
+    const kind: CollectionRoute['kind'] = parts[1] === 'items' ? 'items' : parts[1] === 'comments' ? 'comments' : 'collection';
+    return { kind, id };
   } catch {
     return null;
   }
@@ -236,6 +238,13 @@ export async function handleWebCollectionsApi(request: Request, env: WebCollecti
       const response = await handleCollectionItemsMutation(request, env, route.id);
       if (!response.ok) return response;
       return getCollection(request, env, route.id);
+    }
+    return json({ error: 'Method not allowed' }, 405);
+  }
+  if (route.kind === 'comments') {
+    if (request.method === 'GET') return listCollectionComments(request, env, route.id);
+    if (request.method === 'POST' || request.method === 'DELETE') {
+      return handleCollectionCommentsMutation(request, env, route.id);
     }
     return json({ error: 'Method not allowed' }, 405);
   }
