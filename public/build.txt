@@ -10,3 +10,5 @@ domnkr-build-20260912-nekromantlib-catalog1
 domnkr-build-20260912-nekromantlib-status1
 domnkr-build-20260912-nekromantlib-collections1
 domnkr-build-20260912-nekromantlib-collections2
+domnkr-build-20260912-nekromantlib-collection-detail1
+domnkr-build-20260912-nekromantlib-collection-owner1
