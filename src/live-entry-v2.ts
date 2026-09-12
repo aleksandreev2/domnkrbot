@@ -57,6 +57,7 @@ import {
   classifyTelegramWebhookUpdate,
   type TelegramWebhookRoute,
 } from './telegram-webhook-routing.js';
+import { handleWebCollectionsApi, type WebCollectionsEnv } from './web-collections.js';
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
@@ -86,6 +87,7 @@ type Env = PublicationCommentGateEnv
   & ChannelMembershipEnv
   & NotificationDeliveryEnv
   & RanobeLibAuthAdminEnv
+  & WebCollectionsEnv
   & {
     RANOBELIB_TEAM_REF?: string;
     NOTIFICATION_QUEUE?: QueueProducerLike;
@@ -172,6 +174,9 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/ranobelib') {
       return json(await getRanobeLibHome(env));
     }
+
+    const collectionsResponse = await handleWebCollectionsApi(request, env);
+    if (collectionsResponse) return collectionsResponse;
 
     const membershipAppealWebhook = await handleChannelMembershipAppealWebhook(request, env, ctx);
     if (membershipAppealWebhook) return membershipAppealWebhook;
