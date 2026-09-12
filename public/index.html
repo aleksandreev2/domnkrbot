@@ -3,60 +3,111 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#f7f4ee">
-  <title>Дом Некроманта · Переводы и читалка</title>
-  <meta name="description" content="Переводы ранобэ и веб-новелл команды «Дом Некроманта»: каталог, последние главы, заявки сообщества и будущая собственная читалка.">
+  <meta name="theme-color" content="#f2f3f5">
+  <title>НекромантЛиб — новеллы и переводы</title>
+  <meta name="description" content="НекромантЛиб — каталог, обновления и читалка переводов команды «Дом Некроманта».">
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
+  <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
   <script defer src="/site.js?v=20260820-reader2"></script>
 </head>
-<body>
-  <header class="site-header">
-    <div class="shell header-inner">
-      <button class="mobile-menu-button" id="mobileMenuButton" type="button" aria-label="Открыть меню"><i data-lucide="menu"></i></button>
-      <a class="site-brand" href="/"><img src="/brand/team-logo.webp" alt="" width="58" height="58"><span>Дом<br>Некроманта</span></a>
-      <nav class="primary-nav" id="primaryNav" aria-label="Основная навигация">
-        <a href="#translations">Читать</a><a href="#translations">Каталог</a><a href="#updates">Последние главы</a><a href="/propose/">Предложить тайтл</a>
+<body class="nl-body">
+  <header class="site-header nl-header">
+    <div class="nl-shell nl-header-inner">
+      <button class="mobile-menu-button nl-icon-button" id="mobileMenuButton" type="button" aria-label="Открыть меню"><i data-lucide="menu"></i></button>
+      <a class="nl-brand" href="/" aria-label="НекромантЛиб — главная">
+        <img src="/brand/team-logo.webp" alt="" width="40" height="40">
+        <span>НекромантЛиб</span>
+      </a>
+      <nav class="primary-nav nl-nav" id="primaryNav" aria-label="Основная навигация">
+        <a class="active" href="#catalog">Каталог</a>
+        <button class="nl-nav-button" id="searchNavButton" type="button">Поиск</button>
+        <a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Форум</a>
       </nav>
-      <div class="header-actions">
-        <a class="telegram-link" href="https://t.me/domnekromanta" target="_blank" rel="noreferrer"><i data-lucide="send"></i><span>Telegram</span></a>
-        <div class="search-wrap"><i data-lucide="search"></i><input id="titleSearch" type="search" autocomplete="off" placeholder="Поиск по тайтлам…" aria-label="Поиск по тайтлам"><div id="searchResults" class="search-results hidden"></div></div>
+      <div class="header-actions nl-header-actions">
+        <div class="search-wrap nl-search">
+          <i data-lucide="search"></i>
+          <input id="titleSearch" type="search" autocomplete="off" placeholder="Найти тайтл" aria-label="Поиск по тайтлам">
+          <div id="searchResults" class="search-results hidden"></div>
+        </div>
+        <a class="nl-header-action" href="/propose/" aria-label="Предложить тайтл"><i data-lucide="circle-plus"></i><span>Добавить</span></a>
         <a id="adminLink" class="admin-entry hidden" href="/admin/"><i data-lucide="shield-cog"></i><span>Admin</span></a>
-        <details class="account-menu"><summary><i data-lucide="user-round"></i><span id="accountName">Войти</span></summary><div id="loginPanel" class="login-panel"><div id="telegramLogin"></div></div></details>
-        <button id="logoutButton" class="icon-button hidden" type="button" aria-label="Выйти"><i data-lucide="log-out"></i></button>
+        <details class="account-menu nl-account">
+          <summary><i data-lucide="user-round"></i><span id="accountName">Войти</span><i class="nl-chevron" data-lucide="chevron-down"></i></summary>
+          <div id="loginPanel" class="login-panel nl-login-panel"><div id="telegramLogin"></div></div>
+        </details>
+        <button id="logoutButton" class="nl-icon-button hidden" type="button" aria-label="Выйти"><i data-lucide="log-out"></i></button>
       </div>
     </div>
   </header>
 
-  <main>
-    <section class="home-hero" id="hero">
-      <div id="heroBackdrop" class="hero-backdrop" aria-hidden="true"></div>
-      <div class="hero-shade" aria-hidden="true"></div>
-      <div class="shell hero-grid">
-        <a id="heroCoverLink" class="hero-cover-wrap" href="#translations"><span class="gold-badge">ГЛАВНЫЙ ПЕРЕВОД</span><img id="heroCover" src="/brand/team-logo.webp" alt="Обложка выбранного тайтла"></a>
-        <div class="hero-copy">
-          <span id="heroMeta" class="hero-meta">ДОМ НЕКРОМАНТА · ПЕРЕВОДЫ</span>
-          <h1 id="heroTitle">Истории, которые мы переводим сами</h1>
-          <div id="heroOriginal" class="hero-original">Собственная площадка команды переводчиков</div>
-          <p id="heroSummary">Каталог команды загружается. Здесь появится главный активный перевод, последние главы и переход к собственной читалке.</p>
-          <div class="hero-facts"><div><i data-lucide="circle-dot"></i><span>Статус перевода<strong>Переводится</strong></span></div><div><i data-lucide="book-open-check"></i><span>Последняя глава<strong id="heroChapter">—</strong></span></div></div>
-          <div class="hero-buttons"><a id="heroRead" class="button gold" href="#translations">Читать <i data-lucide="book-open"></i></a><a id="heroDetails" class="button outline-light" href="#translations">Подробнее <i data-lucide="chevron-right"></i></a></div>
-        </div>
+  <main class="nl-main">
+    <div class="nl-shell nl-home-grid">
+      <div class="nl-home-primary">
+        <section class="surface nl-section updates-panel" aria-labelledby="latestHeading">
+          <div class="section-head nl-section-head">
+            <div><h1 id="latestHeading">Последние главы</h1><p>Свежие обновления переводов «Дом Некроманта»</p></div>
+            <a href="#catalog">Все тайтлы <i data-lucide="chevron-right"></i></a>
+          </div>
+          <div id="releaseFeed" class="release-feed" aria-live="polite">
+            <div class="release-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div>
+          </div>
+        </section>
+
+        <section class="surface nl-section" id="catalog" aria-labelledby="catalogHeading">
+          <div class="section-head nl-section-head">
+            <div><h2 id="catalogHeading">Новинки</h2><p id="catalogCount">Каталог загружается</p></div>
+            <a href="#catalog">По популярности <i data-lucide="sliders-horizontal"></i></a>
+          </div>
+          <div id="titleGrid" class="book-grid nl-book-grid">
+            <div class="book-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+          </div>
+        </section>
+
+        <section class="surface nl-section" id="community" aria-labelledby="communityHeading">
+          <div class="section-head nl-section-head">
+            <div><h2 id="communityHeading">Предложения читателей</h2><p>Что перевести следующим</p></div>
+            <a href="/propose/">Предложить тайтл <i data-lucide="circle-plus"></i></a>
+          </div>
+          <div id="proposalGrid" class="proposal-grid nl-proposal-grid">
+            <div class="proposal-loading" aria-hidden="true"><span></span><span></span><span></span></div>
+          </div>
+        </section>
       </div>
-    </section>
 
-    <section class="content-section" id="updates">
-      <div class="shell"><div class="section-head"><h2>Последние обновления</h2><a href="#translations">Смотреть все обновления <i data-lucide="chevron-right"></i></a></div><div id="releaseGrid" class="book-grid updates-grid"><div class="loading-cards"><span></span><span></span><span></span><span></span><span></span><span></span></div></div></div>
-    </section>
+      <aside class="home-rail" aria-label="Боковая панель">
+        <section class="surface rail-section">
+          <div class="rail-tabs" aria-label="Активность"><strong>Сейчас обновляется</strong></div>
+          <div id="activeRail" class="rail-title-list"><div class="rail-skeleton"><span></span><span></span><span></span></div></div>
+        </section>
 
-    <section class="content-section translations-section" id="translations">
-      <div class="shell"><div class="section-head"><h2>Наши переводы</h2><span id="catalogCount" class="section-muted">Каталог команды</span></div><div id="titleGrid" class="book-grid"><div class="loading-cards"><span></span><span></span><span></span><span></span><span></span><span></span></div></div></div>
-    </section>
+        <section class="surface rail-section">
+          <div class="rail-tabs"><strong>Наши переводы</strong></div>
+          <div id="newRail" class="rail-title-list"><div class="rail-skeleton"><span></span><span></span><span></span></div></div>
+        </section>
 
-    <section class="community-strip" id="community"><div class="shell"><div class="section-head"><div><h2>Что переводить дальше?</h2><p>Голосуйте за тайтлы, которые хотите увидеть в нашем переводе.</p></div><a class="button gold" href="/propose/">Предложить тайтл</a></div><div id="proposalGrid" class="proposal-grid"><div class="proposal-loading"><span></span><span></span><span></span></div></div></div></section>
+        <a class="telegram-card" href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">
+          <span class="telegram-card-icon"><i data-lucide="send"></i></span>
+          <span><strong>Telegram-канал</strong><small>Новости переводов, релизы и общение</small></span>
+          <i data-lucide="arrow-up-right"></i>
+        </a>
+
+        <section class="surface rail-section team-card">
+          <div class="team-card-head"><img src="/brand/team-logo.webp" alt="" width="42" height="42"><div><strong>Дом Некроманта</strong><small>Команда перевода</small></div></div>
+          <p>НекромантЛиб использует каталог и главы нашей команды. Авторизация и уведомления связаны с Telegram-ботом.</p>
+          <a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Открыть канал <i data-lucide="chevron-right"></i></a>
+        </section>
+      </aside>
+    </div>
   </main>
 
-  <footer class="site-footer"><div class="shell footer-grid"><div class="footer-about"><a class="site-brand footer-brand" href="/"><img src="/brand/team-logo.webp" alt="" width="50" height="50"><span>Дом Некроманта</span></a><p>Мы переводим истории, в которых живут миры. Спасибо, что читаете вместе с нами.</p><small>© 2026 Дом Некроманта</small></div><div><strong>Навигация</strong><a href="#translations">Читать</a><a href="#translations">Каталог</a><a href="#updates">Последние главы</a><a href="/propose/">Предложить тайтл</a></div><div><strong>Мы в Telegram</strong><p>Анонсы глав, новости, общение и больше контента в нашем официальном канале.</p><a class="button footer-button" href="https://t.me/domnekromanta" target="_blank" rel="noreferrer"><i data-lucide="send"></i>Перейти в Telegram</a></div><div><strong>О проекте</strong><p>Команда переводчиков, редакторов и энтузиастов. Переводим качественно и с любовью к историям.</p><b>@domnekromanta</b></div></div></footer>
+  <footer class="nl-footer">
+    <div class="nl-shell nl-footer-inner">
+      <a class="nl-brand nl-footer-brand" href="/"><img src="/brand/team-logo.webp" alt="" width="34" height="34"><span>НекромантЛиб</span></a>
+      <nav aria-label="Ссылки в подвале"><a href="#catalog">Каталог</a><a href="/propose/">Добавить тайтл</a><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Дом Некроманта</a></nav>
+      <small>© 2026 НекромантЛиб</small>
+    </div>
+  </footer>
 </body>
 </html>
