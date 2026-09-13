@@ -335,6 +335,34 @@ async function bulkUpsertTitles(
           THEN 0
         ELSE 1
       END
+    -- Skip rows where every assignment above would reproduce the stored value. Pending completions
+    -- are always written because their final-scan wake-up is intentionally re-armed.
+    WHERE ranobelib_titles.translation_completion_pending = 1
+       OR excluded.ranobelib_id IS NOT ranobelib_titles.ranobelib_id
+       OR excluded.slug IS NOT ranobelib_titles.slug
+       OR excluded.url IS NOT ranobelib_titles.url
+       OR COALESCE(excluded.title, ranobelib_titles.title) IS NOT ranobelib_titles.title
+       OR COALESCE(excluded.cover_url, ranobelib_titles.cover_url) IS NOT ranobelib_titles.cover_url
+       OR (excluded.translation_status_id IS NOT NULL
+         AND excluded.translation_status_id IS NOT ranobelib_titles.translation_status_id)
+       OR (excluded.translation_status_label IS NOT NULL
+         AND excluded.translation_status_label IS NOT ranobelib_titles.translation_status_label)
+       OR (excluded.translation_is_completed IS NOT NULL
+         AND excluded.translation_is_completed IS NOT ranobelib_titles.translation_is_completed)
+       OR (excluded.translation_status_checked_at IS NOT NULL
+         AND excluded.translation_status_checked_at IS NOT ranobelib_titles.translation_status_checked_at)
+       OR (COALESCE(excluded.translation_is_completed, ranobelib_titles.translation_is_completed, 0) = 1
+         AND ranobelib_titles.next_check_at IS NOT NULL)
+       OR (CASE
+             WHEN COALESCE(excluded.translation_is_completed, ranobelib_titles.translation_is_completed, 0) = 1
+               THEN 0
+             ELSE 1
+           END) IS NOT ranobelib_titles.is_active
+       OR (CASE
+             WHEN COALESCE(excluded.translation_is_completed, ranobelib_titles.translation_is_completed, 0) = 1
+               THEN 0
+             ELSE excluded.notification_subscriber_count
+           END) IS NOT ranobelib_titles.notification_subscriber_count
   `).bind(payload).run();
 }
 

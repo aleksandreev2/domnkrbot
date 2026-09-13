@@ -292,8 +292,51 @@ async function upsertWorkRows(db: D1DatabaseLike, books: RanobeLibTeamBookRef[])
       url = excluded.url,
       title = COALESCE(excluded.title, ranobelib_titles.title),
       cover_url = COALESCE(excluded.cover_url, ranobelib_titles.cover_url)
+    WHERE COALESCE(excluded.ranobelib_id, ranobelib_titles.ranobelib_id) IS NOT ranobelib_titles.ranobelib_id
+       OR COALESCE(excluded.slug, ranobelib_titles.slug) IS NOT ranobelib_titles.slug
+       OR excluded.url IS NOT ranobelib_titles.url
+       OR COALESCE(excluded.title, ranobelib_titles.title) IS NOT ranobelib_titles.title
+       OR COALESCE(excluded.cover_url, ranobelib_titles.cover_url) IS NOT ranobelib_titles.cover_url
   `).bind(payload).run();
 }
+
+const NEXT_SEMANTIC_STATUS = `CASE
+        WHEN excluded.completion_pending = 1
+          AND ranobelib_team_translations.semantic_status = 'completed'
+          AND ranobelib_team_translations.completion_pending = 0
+          THEN 'completed'
+        WHEN excluded.completion_pending = 1 THEN 'active'
+        WHEN excluded.completion_evidence = 'team-catalog:active' THEN 'active'
+        ELSE ranobelib_team_translations.semantic_status
+      END`;
+
+const NEXT_COMPLETION_EVIDENCE = `CASE
+        WHEN excluded.completion_pending = 1
+          AND ranobelib_team_translations.semantic_status = 'completed'
+          AND ranobelib_team_translations.completion_pending = 0
+          THEN ranobelib_team_translations.completion_evidence
+        WHEN excluded.completion_pending = 1 THEN excluded.completion_evidence
+        WHEN excluded.completion_evidence = 'team-catalog:active' THEN excluded.completion_evidence
+        ELSE ranobelib_team_translations.completion_evidence
+      END`;
+
+const NEXT_COMPLETION_PENDING = `CASE
+        WHEN excluded.completion_pending = 1
+          AND ranobelib_team_translations.semantic_status = 'completed'
+          AND ranobelib_team_translations.completion_pending = 0
+          THEN 0
+        WHEN excluded.completion_pending = 1 THEN 1
+        WHEN excluded.completion_evidence = 'team-catalog:active' THEN 0
+        ELSE ranobelib_team_translations.completion_pending
+      END`;
+
+const NEXT_COMPLETION_REVISION = `CASE
+        WHEN excluded.completion_pending = 1
+          AND ranobelib_team_translations.semantic_status <> 'completed'
+          AND ranobelib_team_translations.completion_pending = 0
+          THEN ranobelib_team_translations.completion_revision + 1
+        ELSE ranobelib_team_translations.completion_revision
+      END`;
 
 async function upsertTeamTranslationRows(
   db: D1DatabaseLike,
@@ -332,44 +375,22 @@ async function upsertTeamTranslationRows(
     WHERE book_ref IS NOT NULL AND book_ref != ''
     ON CONFLICT(team_id, book_ref) DO UPDATE SET
       presence_state = 'active',
-      semantic_status = CASE
-        WHEN excluded.completion_pending = 1
-          AND ranobelib_team_translations.semantic_status = 'completed'
-          AND ranobelib_team_translations.completion_pending = 0
-          THEN 'completed'
-        WHEN excluded.completion_pending = 1 THEN 'active'
-        WHEN excluded.completion_evidence = 'team-catalog:active' THEN 'active'
-        ELSE ranobelib_team_translations.semantic_status
-      END,
-      completion_evidence = CASE
-        WHEN excluded.completion_pending = 1
-          AND ranobelib_team_translations.semantic_status = 'completed'
-          AND ranobelib_team_translations.completion_pending = 0
-          THEN ranobelib_team_translations.completion_evidence
-        WHEN excluded.completion_pending = 1 THEN excluded.completion_evidence
-        WHEN excluded.completion_evidence = 'team-catalog:active' THEN excluded.completion_evidence
-        ELSE ranobelib_team_translations.completion_evidence
-      END,
-      completion_pending = CASE
-        WHEN excluded.completion_pending = 1
-          AND ranobelib_team_translations.semantic_status = 'completed'
-          AND ranobelib_team_translations.completion_pending = 0
-          THEN 0
-        WHEN excluded.completion_pending = 1 THEN 1
-        WHEN excluded.completion_evidence = 'team-catalog:active' THEN 0
-        ELSE ranobelib_team_translations.completion_pending
-      END,
-      completion_revision = CASE
-        WHEN excluded.completion_pending = 1
-          AND ranobelib_team_translations.semantic_status <> 'completed'
-          AND ranobelib_team_translations.completion_pending = 0
-          THEN ranobelib_team_translations.completion_revision + 1
-        ELSE ranobelib_team_translations.completion_revision
-      END,
+      semantic_status = ${NEXT_SEMANTIC_STATUS},
+      completion_evidence = ${NEXT_COMPLETION_EVIDENCE},
+      completion_pending = ${NEXT_COMPLETION_PENDING},
+      completion_revision = ${NEXT_COMPLETION_REVISION},
       last_seen_at = CURRENT_TIMESTAMP,
       last_synced_at = CURRENT_TIMESTAMP,
       sync_error = NULL,
       updated_at = CURRENT_TIMESTAMP
+    -- Unchanged relations are not rewritten just to refresh timestamps; the team-level sync
+    -- heartbeat records that the catalog was checked.
+    WHERE ranobelib_team_translations.presence_state IS NOT 'active'
+       OR ranobelib_team_translations.sync_error IS NOT NULL
+       OR (${NEXT_SEMANTIC_STATUS}) IS NOT ranobelib_team_translations.semantic_status
+       OR (${NEXT_COMPLETION_EVIDENCE}) IS NOT ranobelib_team_translations.completion_evidence
+       OR (${NEXT_COMPLETION_PENDING}) IS NOT ranobelib_team_translations.completion_pending
+       OR (${NEXT_COMPLETION_REVISION}) IS NOT ranobelib_team_translations.completion_revision
   `).bind(payload, teamId).run();
 
   // A team-scoped completion transition always receives a prompt final chapter poll even when the
@@ -385,6 +406,7 @@ async function upsertTeamTranslationRows(
         AND tt.presence_state = 'active'
         AND tt.completion_pending = 1
     )
+      AND (next_check_at IS NULL OR next_check_at > CURRENT_TIMESTAMP OR scan_priority < 20)
   `).bind(teamId).run();
 }
 

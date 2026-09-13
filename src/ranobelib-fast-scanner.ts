@@ -96,8 +96,8 @@ export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT):
            consecutive_no_change, consecutive_failures, last_change_at, next_check_at, scan_priority,
            notification_subscriber_count, translation_completion_pending
     FROM ranobelib_titles
-    WHERE notification_subscriber_count > 0
-      AND (translation_completion_pending = 1 OR is_active = 1)
+    WHERE (translation_completion_pending = 1
+        OR (notification_subscriber_count > 0 AND is_active = 1))
       AND (next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
     ORDER BY translation_completion_pending DESC,
              COALESCE(next_check_at, '') ASC,
