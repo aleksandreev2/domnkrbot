@@ -96,8 +96,8 @@ export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT):
            consecutive_no_change, consecutive_failures, last_change_at, next_check_at, scan_priority,
            notification_subscriber_count, translation_completion_pending
     FROM ranobelib_titles
-    WHERE (translation_completion_pending = 1 OR (is_active = 1
-      AND (snapshot_ready = 0 OR notification_subscriber_count > 0)))
+    WHERE notification_subscriber_count > 0
+      AND (translation_completion_pending = 1 OR is_active = 1)
       AND (next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
     ORDER BY translation_completion_pending DESC,
              COALESCE(next_check_at, '') ASC,
@@ -110,23 +110,9 @@ export async function selectDueTitles(env: ScannerEnv, limit = FAST_SCAN_LIMIT):
 }
 
 export async function selectIdleTitles(env: ScannerEnv, limit = IDLE_SCAN_LIMIT): Promise<DueTitle[]> {
-  const safeLimit = clampScanLimit(limit, IDLE_SCAN_LIMIT);
-  const { results } = await env.DB.prepare(`
-    SELECT book_ref, ranobelib_id, slug, url, title, cover_url, snapshot_ready,
-           consecutive_no_change, consecutive_failures, last_change_at, next_check_at, scan_priority,
-           notification_subscriber_count, translation_completion_pending
-    FROM ranobelib_titles
-    WHERE is_active = 1
-      AND translation_completion_pending = 0
-      AND snapshot_ready = 1
-      AND notification_subscriber_count = 0
-      AND (next_check_at IS NULL OR next_check_at <= CURRENT_TIMESTAMP)
-    ORDER BY COALESCE(next_check_at, '') ASC,
-             scan_priority DESC,
-             book_ref ASC
-    LIMIT ?
-  `).bind(safeLimit).all<DueTitle>();
-  return results.slice(0, safeLimit);
+  void env;
+  void limit;
+  return [];
 }
 
 export async function scanDueRanobeLibTitles(
