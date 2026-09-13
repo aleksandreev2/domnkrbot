@@ -340,6 +340,14 @@ async function scanOneMultiTeamWork(
       upstreamTeamIds: branch.teamIds,
     })),
   });
+  const pendingCompletionTeamIds = new Set(translations
+    .filter((row) => Number(row.completion_pending) === 1 && row.semantic_status !== 'completed')
+    .map((row) => Number(row.internal_team_id))
+    .filter((teamId) => Number.isSafeInteger(teamId) && teamId > 0));
+  const finalizedCompletionTeamIds = new Set(completionPlan.finalizations.map((row) => row.teamId));
+  const unresolvedCompletion = [...pendingCompletionTeamIds]
+    .some((teamId) => !finalizedCompletionTeamIds.has(teamId));
+
   const releasableTeams = new Map(plan.releasableBranches.map((branch) => [
     branchSnapshotKey(branch.chapterId, branch.branchKey),
     branch.teamIds,
@@ -366,7 +374,11 @@ async function scanOneMultiTeamWork(
   const completionReleaseDetected = mode === 'live' && completionPlan.notifyTeamIds.length > 0 ? 1 : 0;
   const changed = candidates.length > 0 || completionPlan.finalizations.length > 0;
   if (mode !== 'shadow') {
-    await updateWorkAfterSuccessfulScan(env.DB, work, relevant.map(({ branch }) => branch), scanClass, changed, now);
+    if (unresolvedCompletion) {
+      await updateWorkAfterUnresolvedCompletion(env.DB, work, relevant.map(({ branch }) => branch));
+    } else {
+      await updateWorkAfterSuccessfulScan(env.DB, work, relevant.map(({ branch }) => branch), scanClass, changed, now);
+    }
   }
 
   return {
@@ -434,6 +446,49 @@ function groupReleaseCandidates(
   return [...groups.values()]
     .map((group) => ({ ...group, chapters: [...group.chapters].sort(compareBranchesByChapter) }))
     .sort((a, b) => compareBranchesByChapter(a.chapters[0]!, b.chapters[0]!));
+}
+
+async function updateWorkAfterUnresolvedCompletion(
+  db: D1DatabaseLike,
+  work: DueWork,
+  branches: RanobeLibChapterBranch[],
+): Promise<void> {
+  const uniqueChapters = new Map<number, RanobeLibChapterBranch>();
+  for (const branch of branches) uniqueChapters.set(branch.chapterId, branch);
+  const ordered = [...uniqueChapters.values()].sort(compareBranchesByChapter);
+  const latest = ordered[ordered.length - 1] ?? null;
+  const previousMisses = Math.max(0, Math.floor(Number(work.consecutive_no_change ?? 0)));
+  const attempt = Math.max(0, Math.floor(Number(work.consecutive_failures ?? 0))) + 1;
+  const delay = computePendingCompletionRetryDelayMinutes(attempt);
+  const error = `completion_pending: unresolved final branch (attempt ${attempt})`;
+
+  await db.prepare(`
+    UPDATE ranobelib_titles
+    SET chapter_count = ?,
+        latest_chapter_id = ?,
+        latest_volume = ?,
+        latest_number = ?,
+        latest_name = ?,
+        snapshot_ready = 1,
+        last_synced_at = CURRENT_TIMESTAMP,
+        consecutive_no_change = ?,
+        consecutive_failures = ?,
+        next_check_at = datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes'),
+        scan_priority = MAX(scan_priority - 1, 0),
+        sync_error = ?
+    WHERE book_ref = ?
+  `).bind(
+    ordered.length,
+    latest?.chapterId ?? null,
+    latest?.volume ?? null,
+    latest?.number ?? null,
+    latest?.name ?? null,
+    previousMisses + 1,
+    attempt,
+    delay,
+    error,
+    work.book_ref,
+  ).run();
 }
 
 async function updateWorkAfterSuccessfulScan(
