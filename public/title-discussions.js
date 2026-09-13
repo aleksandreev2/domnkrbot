@@ -49,11 +49,18 @@
     ensureStyles();ensureDiscussionSurface();bindTabs();bindComposer();
     try{state.session=await api('/api/auth/session');}catch{state.session=null;}
     renderComposer();
-    const section=new URLSearchParams(location.search).get('section');
-    if(section==='discussions'){
+    if(new URLSearchParams(location.search).get('section')==='discussions')activateInitialDiscussionWhenReady();
+  }
+
+  function activateInitialDiscussionWhenReady(attempt=0){
+    if(new URLSearchParams(location.search).get('section')!=='discussions')return;
+    const app=$('#titleApp');
+    if(app&&!app.classList.contains('hidden')){
       activateDiscussionsTab();
-      await loadTitleDiscussions();
+      if(!state.loaded)void loadTitleDiscussions();
+      return;
     }
+    if(attempt<100)setTimeout(()=>activateInitialDiscussionWhenReady(attempt+1),50);
   }
 
   function bindTabs(){
