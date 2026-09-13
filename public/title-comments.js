@@ -13,37 +13,15 @@
   }
 
   async function boot(){
-    bindTabs();bindComposer();bindList();bindSort();
+    bindComposer();bindList();bindSort();
+    document.addEventListener('title-tab-change',handleTitleTabChange);
     try{state.session=await api('/api/auth/session');}catch{state.session=null;}
     renderComposer();
+    if(new URLSearchParams(location.search).get('section')==='comments')void loadTitleComments();
   }
 
-  function bindTabs(){
-    document.querySelectorAll('[data-title-tab]').forEach((button)=>{
-      button.addEventListener('click',()=>{
-        const tab=button.dataset.titleTab||'';
-        if(tab==='comments'){
-          activateCommentsTab();
-          if(!state.loaded)void loadTitleComments();
-        }else{
-          $('#titleCommentsPanel')?.classList.add('hidden');
-          const commentsTab=$('[data-title-tab="comments"]');
-          commentsTab?.classList.remove('active');
-          commentsTab?.setAttribute('aria-selected','false');
-        }
-      });
-    });
-  }
-
-  function activateCommentsTab(){
-    document.querySelectorAll('[data-title-tab]').forEach((button)=>{
-      const active=button.dataset.titleTab==='comments';
-      button.classList.toggle('active',active);
-      if(!button.disabled)button.setAttribute('aria-selected',String(active));
-    });
-    $('#titleAboutPanel')?.classList.add('hidden');
-    $('#titleChaptersPanel')?.classList.add('hidden');
-    $('#titleCommentsPanel')?.classList.remove('hidden');
+  function handleTitleTabChange(event){
+    if(event?.detail?.tab==='comments'&&!state.loaded)void loadTitleComments();
   }
 
   function bindComposer(){
