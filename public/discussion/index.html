@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f2f3f5">
+  <title>Обсуждение · НекромантЛиб</title>
+  <meta name="description" content="Обсуждение тайтла и ответы читателей НекромантЛиб.">
+  <link rel="stylesheet" href="/site.css?v=20260819-reader1">
+  <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
+  <link rel="stylesheet" href="/discussion.css?v=20260913-discussion1">
+  <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
+  <script defer src="/ui-icons.js?v=20260820-icons3"></script>
+  <script defer src="/discussion.js?v=20260913-discussion1"></script>
+</head>
+<body class="nl-body discussion-detail-body">
+  <header class="site-header nl-header">
+    <div class="nl-shell nl-header-inner">
+      <button class="mobile-menu-button nl-icon-button" id="mobileMenuButton" type="button" aria-label="Открыть меню"><i data-lucide="menu"></i></button>
+      <a class="nl-brand" href="/" aria-label="НекромантЛиб — главная"><img src="/brand/team-logo.webp" alt="" width="40" height="40"><span>НекромантЛиб</span></a>
+      <nav class="primary-nav nl-nav" id="primaryNav" aria-label="Основная навигация">
+        <a href="/catalog/">Каталог</a>
+        <a href="/collections/">Коллекции</a>
+        <a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Форум</a>
+      </nav>
+      <div class="header-actions nl-header-actions">
+        <a class="nl-header-action" href="/propose/"><i data-lucide="circle-plus"></i><span>Добавить</span></a>
+        <a id="adminLink" class="admin-entry hidden" href="/admin/"><i data-lucide="shield-cog"></i><span>Admin</span></a>
+        <details class="account-menu nl-account"><summary><i data-lucide="user-round"></i><span id="accountName">Войти</span><i class="nl-chevron" data-lucide="chevron-down"></i></summary><div id="loginPanel" class="login-panel nl-login-panel"><div id="telegramLogin"></div></div></details>
+        <button id="logoutButton" class="nl-icon-button hidden" type="button" aria-label="Выйти"><i data-lucide="log-out"></i></button>
+      </div>
+    </div>
+  </header>
+
+  <main class="discussion-page-main">
+    <div class="nl-shell discussion-page-shell">
+      <nav class="discussion-breadcrumbs" aria-label="Хлебные крошки">
+        <a href="/">Главная</a><i data-lucide="chevron-right"></i><a href="/catalog/">Каталог</a><i data-lucide="chevron-right"></i><a id="discussionTitleLink" href="/catalog/">Тайтл</a><i data-lucide="chevron-right"></i><span>Обсуждение</span>
+      </nav>
+
+      <div id="discussionLoading" class="surface discussion-loading"><i data-lucide="loader-circle"></i><strong>Загружаем обсуждение</strong><span>Получаем тему и ответы.</span></div>
+      <div id="discussionError" class="surface discussion-error hidden" role="alert"></div>
+
+      <div id="discussionApp" class="discussion-layout hidden">
+        <article class="surface discussion-thread-card">
+          <div class="discussion-thread-kicker"><span id="discussionCategory">Обсуждение тайтла</span><a id="discussionRelation" href="/catalog/">Связано с тайтлом</a></div>
+          <h1 id="discussionTitle">—</h1>
+          <div class="discussion-thread-meta"><strong id="discussionAuthor">Читатель</strong><time id="discussionCreated"></time></div>
+          <div id="discussionBody" class="discussion-thread-body"></div>
+        </article>
+
+        <section class="surface discussion-comments-card" aria-labelledby="discussionCommentsHeading">
+          <div class="discussion-comments-toolbar">
+            <div class="discussion-comments-heading"><h2 id="discussionCommentsHeading">Комментарии</h2><span id="discussionReplyCount">0</span></div>
+            <div class="discussion-comments-controls">
+              <button class="active" type="button" disabled>Новые</button>
+              <details><summary>Настройки</summary><div>Ответы показываются от новых к старым.</div></details>
+              <details><summary>Правила</summary><div>Обсуждайте тему по существу, без спама и оскорблений.</div></details>
+            </div>
+          </div>
+
+          <form id="discussionReplyForm" class="discussion-reply-composer">
+            <textarea id="discussionReplyText" rows="4" maxlength="6000" placeholder="Написать комментарий..." aria-label="Комментарий" disabled></textarea>
+            <div class="discussion-reply-actions"><span id="discussionReplyHint">Войдите через Telegram, чтобы ответить.</span><button id="discussionReplySubmit" type="submit" disabled>Отправить</button></div>
+          </form>
+          <div id="discussionMessage" class="discussion-message" role="status" aria-live="polite"></div>
+          <div id="discussionReplies" class="discussion-replies"></div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <footer class="nl-footer"><div class="nl-shell nl-footer-inner"><a class="nl-brand nl-footer-brand" href="/"><img src="/brand/team-logo.webp" alt="" width="34" height="34"><span>НекромантЛиб</span></a><nav aria-label="Ссылки в подвале"><a href="/catalog/">Каталог</a><a href="/collections/">Коллекции</a><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Дом Некроманта</a></nav><small>© 2026 НекромантЛиб</small></div></footer>
+</body>
+</html>
