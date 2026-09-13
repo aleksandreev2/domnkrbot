@@ -2,9 +2,11 @@
 .nl-header .nl-brand{height:50px;gap:0;width:max-content;display:flex;align-items:center;text-decoration:none;font-size:0}
 .nl-header .nl-brand img{display:none}
 .nl-header .nl-brand>span{display:none}
-.nl-header .nl-brand:before{content:"Некромант";font-size:20px;line-height:1;font-weight:800;letter-spacing:-.6px;color:var(--nl-text)}
-.nl-header .nl-brand:after{content:"Либ";font-size:20px;line-height:1;font-weight:800;letter-spacing:-.6px;color:var(--nl-accent)}
+.nl-header .nl-brand:before{content:"Некромант";font-size:20px;font-weight:800;letter-spacing:-.6px;color:var(--nl-text)}
+.nl-header .nl-brand:after{content:"Либ";font-size:20px;font-weight:800;letter-spacing:-.6px;color:var(--nl-accent)}
+.nl-header .nl-brand:before,.nl-header .nl-brand:after{display:inline-flex;align-items:center;height:32px;line-height:32px}
 
+.home-cover-card .home-cover-media{width:135px;height:189px;aspect-ratio:5/7;padding-top:0}
 .home-cover-badge{top:auto!important;right:auto!important;bottom:6px;left:6px;padding:3px 6px;border-radius:4px;background:rgba(0,0,0,.7);color:#fff;font-size:12px;font-weight:500;line-height:16px}
 
 .home-continue:has(#continueReadingRail>.home-compact-empty){display:none}
