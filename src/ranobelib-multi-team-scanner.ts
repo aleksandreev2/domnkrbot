@@ -32,6 +32,8 @@ export type MultiTeamScanOptions = {
   mode: MultiTeamScanMode;
   scanClass?: MultiTeamScanClass;
   client?: Pick<RanobeLibClient, 'getChapterBranches'>;
+  /** A due set captured earlier, e.g. before a shadow-mode legacy scan reschedules the same titles. */
+  works?: readonly DueWork[];
 };
 
 export type MultiTeamScanResult = {
@@ -40,12 +42,15 @@ export type MultiTeamScanResult = {
   detectedReleases: number;
   persistedReleases: number;
   ambiguousBranches: number;
+  snapshotBranchWrites: number;
+  snapshotMappingInserts: number;
+  snapshotMappingDeletes: number;
   errors: string[];
 };
 
 type MultiTeamScannerEnv = { DB: D1DatabaseLike; RANOBELIB_TOKEN_ENCRYPTION_KEY?: string };
 
-type DueWork = {
+export type DueWork = {
   book_ref: string;
   ranobelib_id: number | string | null;
   slug: string | null;
@@ -132,7 +137,9 @@ export async function scanDueMultiTeamWorks(
 ): Promise<MultiTeamScanResult> {
   const limit = clampInt(options.limit ?? DEFAULT_LIMIT, 1, DEFAULT_LIMIT);
   const scanClass = options.scanClass ?? 'all';
-  const selected = await selectDueMultiTeamWorks(env, limit, scanClass);
+  const selected = options.works
+    ? options.works.slice(0, limit)
+    : await selectDueMultiTeamWorks(env, limit, scanClass);
   if (selected.length === 0) return emptyResult(0);
 
   const client = options.client ?? createRanobeLibClient(env);
@@ -145,10 +152,7 @@ export async function scanDueMultiTeamWorks(
     } catch (error) {
       await scheduleWorkFailure(env.DB, work.book_ref, error);
       return {
-        fetchedWorks: 0,
-        detectedReleases: 0,
-        persistedReleases: 0,
-        ambiguousBranches: 0,
+        ...emptyWorkOutcome(),
         error: `${work.book_ref}: ${compactError(error)}`,
       };
     }
@@ -160,6 +164,9 @@ export async function scanDueMultiTeamWorks(
     result.detectedReleases += outcome.detectedReleases;
     result.persistedReleases += outcome.persistedReleases;
     result.ambiguousBranches += outcome.ambiguousBranches;
+    result.snapshotBranchWrites += outcome.snapshotBranchWrites;
+    result.snapshotMappingInserts += outcome.snapshotMappingInserts;
+    result.snapshotMappingDeletes += outcome.snapshotMappingDeletes;
     if (outcome.error) result.errors.push(outcome.error);
   }
   return result;
@@ -174,8 +181,17 @@ export async function selectDueMultiTeamWorks(
 
   const safeLimit = clampInt(limit, 1, DEFAULT_LIMIT);
   // Every automatic scan class is demand-gated. `all` is used by direct callers/tests and must
-  // not become a back door that resumes polling zero-subscriber works.
-  const classPredicate = 'COALESCE(t.notification_subscriber_count, 0) > 0';
+  // not become a back door that resumes polling zero-subscriber works. The only exception is a
+  // pending team completion: its final chapter poll is mandatory even when nobody follows the work.
+  const classPredicate = `COALESCE(t.notification_subscriber_count, 0) > 0
+    OR EXISTS (
+      SELECT 1 FROM ranobelib_team_translations pending
+      JOIN ranobelib_teams pending_team ON pending_team.id = pending.team_id
+      WHERE pending.book_ref = t.book_ref
+        AND pending.presence_state = 'active'
+        AND pending_team.lifecycle_state IN ('hidden','published')
+        AND pending.completion_pending = 1
+    )`;
   const staleHotSchedulePredicate = scanClass === 'hot'
     ? `OR (COALESCE(t.notification_subscriber_count, 0) > 0
            AND t.next_check_at > datetime(CURRENT_TIMESTAMP, '+5 minutes'))`
@@ -235,17 +251,11 @@ async function scanOneMultiTeamWork(
   mode: MultiTeamScanMode,
   scanClass: MultiTeamScanClass,
   now: Date,
-): Promise<{
-  fetchedWorks: number;
-  detectedReleases: number;
-  persistedReleases: number;
-  ambiguousBranches: number;
-  error?: string;
-}> {
+): Promise<WorkScanOutcome> {
   const translations = await loadActionableTranslations(env.DB, work.book_ref);
   if (translations.length === 0) {
     await scheduleNextWorkCheck(env.DB, work, scanClass, false);
-    return { fetchedWorks: 0, detectedReleases: 0, persistedReleases: 0, ambiguousBranches: 0 };
+    return emptyWorkOutcome();
   }
 
   const upstreamToInternal = new Map<number, number>();
@@ -271,7 +281,7 @@ async function scanOneMultiTeamWork(
   });
   if (attributionDisposition === 'awaiting-first-team-branch') {
     await recordAwaitingFirstTeamBranch(env.DB, work, scanClass);
-    return { fetchedWorks: 1, detectedReleases: 0, persistedReleases: 0, ambiguousBranches: 0 };
+    return { ...emptyWorkOutcome(), fetchedWorks: 1 };
   }
   if (attributionDisposition === 'error') {
     const expectedTeamIds = [...upstreamToInternal.keys()].sort((a, b) => a - b);
@@ -340,7 +350,7 @@ async function scanOneMultiTeamWork(
     }
   }
 
-  await persistBranchSnapshot(env.DB, work.book_ref, relevant);
+  const snapshotWrites = await persistBranchSnapshot(env.DB, work.book_ref, relevant);
   await markTranslationsBaselined(env.DB, work.book_ref, plan.teamIdsToBaseline);
   const completionInserted = await finalizeTeamCompletions(env, work, translations, completionPlan, mode);
   if (completionInserted) persistedReleases += 1;
@@ -354,6 +364,9 @@ async function scanOneMultiTeamWork(
     detectedReleases: candidates.length + completionReleaseDetected,
     persistedReleases,
     ambiguousBranches,
+    snapshotBranchWrites: snapshotWrites.branchWrites,
+    snapshotMappingInserts: snapshotWrites.mappingInserts,
+    snapshotMappingDeletes: snapshotWrites.mappingDeletes,
   };
 }
 
@@ -572,13 +585,20 @@ function compactError(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 300);
 }
 
-function emptyResult(selectedWorks: number): MultiTeamScanResult {
+type WorkScanOutcome = Omit<MultiTeamScanResult, 'selectedWorks' | 'errors'> & { error?: string };
+
+function emptyWorkOutcome(): WorkScanOutcome {
   return {
-    selectedWorks,
     fetchedWorks: 0,
     detectedReleases: 0,
     persistedReleases: 0,
     ambiguousBranches: 0,
-    errors: [],
+    snapshotBranchWrites: 0,
+    snapshotMappingInserts: 0,
+    snapshotMappingDeletes: 0,
   };
+}
+
+function emptyResult(selectedWorks: number): MultiTeamScanResult {
+  return { selectedWorks, ...emptyWorkOutcome(), errors: [] };
 }

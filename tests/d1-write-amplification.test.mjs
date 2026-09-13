@@ -21,8 +21,10 @@ test('multi-team snapshot persistence no longer deletes and recreates mappings p
     source,
     /for \(const \{ branch, teamIds \} of values\)[\s\S]*DELETE FROM ranobelib_chapter_branch_teams[\s\S]*INSERT OR IGNORE INTO ranobelib_chapter_branch_teams/,
   );
-  assert.match(source, /INSERT OR IGNORE INTO ranobelib_chapter_branch_teams[\s\S]*SELECT \?, chapter_id, branch_key, team_id/i);
-  assert.match(source, /DELETE FROM ranobelib_chapter_branch_teams[\s\S]*NOT EXISTS/i);
+  assert.match(source, /INSERT OR IGNORE INTO ranobelib_chapter_branch_teams[\s\S]*FROM json_each\(\?\)/i);
+  assert.match(source, /DELETE FROM ranobelib_chapter_branch_teams[\s\S]*\(chapter_id, branch_key, team_id\) IN/i);
+  assert.doesNotMatch(source, /DELETE FROM ranobelib_chapter_branch_teams[\s\S]*NOT EXISTS/i,
+    'a correlated NOT EXISTS over json_each reads stored x incoming rows on every scan');
 });
 
 test('multi-team snapshot persistence only updates materially changed branch rows', async () => {
@@ -35,7 +37,8 @@ test('multi-team snapshot persistence only updates materially changed branch row
 test('mapping reconciliation preserves branches absent from the current upstream payload', async () => {
   const source = await persistenceSource();
 
-  assert.match(source, /EXISTS \([\s\S]*FROM incoming_branches incoming[\s\S]*incoming\.chapter_id = ranobelib_chapter_branch_teams\.chapter_id/i);
+  assert.match(source, /for \(const \[key, \{ branch, teamIds \}\] of incoming\)[\s\S]*storedTeamsByKey\.get\(key\)/,
+    'stale mappings are computed only for branches present in the incoming payload');
 });
 
 test('legacy idle scan does not select titles with zero notification subscribers', async () => {
@@ -67,6 +70,10 @@ class SqliteD1Statement {
 
   async first() {
     return this.statement.get(...this.values) ?? null;
+  }
+
+  async all() {
+    return { results: this.statement.all(...this.values) };
   }
 }
 

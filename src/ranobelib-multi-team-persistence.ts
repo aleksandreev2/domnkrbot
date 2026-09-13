@@ -173,13 +173,153 @@ async function persistTeamCompletionRelease(
   return inserted;
 }
 
+export type BranchSnapshotWriteStats = {
+  branchWrites: number;
+  mappingInserts: number;
+  mappingDeletes: number;
+};
+
+type StoredSnapshotBranchRow = {
+  chapter_id: number | string;
+  branch_key: string;
+  native_branch_id: number | string | null;
+  identity_confidence: string;
+  volume: string;
+  number: string;
+  name: string | null;
+  released_at: string | null;
+};
+
+type StoredSnapshotMappingRow = {
+  chapter_id: number | string;
+  branch_key: string;
+  team_id: number | string;
+};
+
+/**
+ * Persists a fetched branch snapshot by diffing it against the stored state in the Worker.
+ *
+ * An identical snapshot sends no mutation statement to D1, and a real delta sends only the changed
+ * branch rows and mapping tuples. Mappings are reconciled only for branches present in the payload,
+ * so a branch omitted by an incomplete upstream response keeps its history.
+ */
 export async function persistBranchSnapshot(
   db: D1DatabaseLike,
   bookRef: string,
   values: Array<{ branch: RanobeLibChapterBranch; teamIds: number[] }>,
-): Promise<void> {
-  if (values.length === 0) return;
-  const payload = JSON.stringify(values.map(({ branch, teamIds }) => ({
+): Promise<BranchSnapshotWriteStats> {
+  const stats: BranchSnapshotWriteStats = { branchWrites: 0, mappingInserts: 0, mappingDeletes: 0 };
+  if (values.length === 0) return stats;
+
+  const incoming = new Map<string, { branch: RanobeLibChapterBranch; teamIds: Set<number> }>();
+  for (const { branch, teamIds } of values) {
+    incoming.set(snapshotKey(branch.chapterId, branch.branchKey), {
+      branch,
+      teamIds: new Set(teamIds.filter((id) => Number.isSafeInteger(id) && id > 0)),
+    });
+  }
+
+  const [{ results: storedBranches }, { results: storedMappings }] = await Promise.all([
+    db.prepare(`
+      SELECT chapter_id, branch_key, native_branch_id, identity_confidence,
+             volume, number, name, released_at
+      FROM ranobelib_chapter_branches
+      WHERE book_ref = ?
+    `).bind(bookRef).all<StoredSnapshotBranchRow>(),
+    db.prepare(`
+      SELECT chapter_id, branch_key, team_id
+      FROM ranobelib_chapter_branch_teams
+      WHERE book_ref = ?
+    `).bind(bookRef).all<StoredSnapshotMappingRow>(),
+  ]);
+
+  const storedBranchByKey = new Map(storedBranches.map((row) => [
+    snapshotKey(Number(row.chapter_id), row.branch_key),
+    row,
+  ]));
+  const storedTeamsByKey = new Map<string, Set<number>>();
+  for (const row of storedMappings) {
+    const key = snapshotKey(Number(row.chapter_id), row.branch_key);
+    const teams = storedTeamsByKey.get(key) ?? new Set<number>();
+    teams.add(Number(row.team_id));
+    storedTeamsByKey.set(key, teams);
+  }
+
+  const branchesToWrite: RanobeLibChapterBranch[] = [];
+  const mappingsToInsert: Array<[number, string, number]> = [];
+  const mappingsToDelete: Array<[number, string, number]> = [];
+  for (const [key, { branch, teamIds }] of incoming) {
+    const stored = storedBranchByKey.get(key);
+    if (!stored || branchMateriallyChanged(stored, branch)) branchesToWrite.push(branch);
+
+    const storedTeams = storedTeamsByKey.get(key) ?? new Set<number>();
+    for (const teamId of teamIds) {
+      if (!storedTeams.has(teamId)) mappingsToInsert.push([branch.chapterId, branch.branchKey, teamId]);
+    }
+    for (const teamId of storedTeams) {
+      if (!teamIds.has(teamId)) mappingsToDelete.push([branch.chapterId, branch.branchKey, teamId]);
+    }
+  }
+
+  const statements: D1PreparedStatementLike[] = [];
+  if (branchesToWrite.length > 0) statements.push(upsertSnapshotBranches(db, bookRef, branchesToWrite));
+  if (mappingsToInsert.length > 0) {
+    statements.push(db.prepare(`
+      INSERT OR IGNORE INTO ranobelib_chapter_branch_teams (
+        book_ref, chapter_id, branch_key, team_id
+      )
+      SELECT ?,
+        CAST(json_extract(j.value, '$[0]') AS INTEGER),
+        CAST(json_extract(j.value, '$[1]') AS TEXT),
+        CAST(json_extract(j.value, '$[2]') AS INTEGER)
+      FROM json_each(?) AS j
+    `).bind(bookRef, JSON.stringify(mappingsToInsert)));
+  }
+  if (mappingsToDelete.length > 0) {
+    statements.push(db.prepare(`
+      DELETE FROM ranobelib_chapter_branch_teams
+      WHERE book_ref = ?
+        AND (chapter_id, branch_key, team_id) IN (
+          SELECT
+            CAST(json_extract(j.value, '$[0]') AS INTEGER),
+            CAST(json_extract(j.value, '$[1]') AS TEXT),
+            CAST(json_extract(j.value, '$[2]') AS INTEGER)
+          FROM json_each(?) AS j
+        )
+    `).bind(bookRef, JSON.stringify(mappingsToDelete)));
+  }
+
+  await runStatements(db, statements);
+  stats.branchWrites = branchesToWrite.length;
+  stats.mappingInserts = mappingsToInsert.length;
+  stats.mappingDeletes = mappingsToDelete.length;
+  return stats;
+}
+
+function snapshotKey(chapterId: number, branchKey: string): string {
+  return `${chapterId}\u0000${branchKey}`;
+}
+
+/** Mirrors the COALESCE semantics of the branch upsert so unchanged rows are never sent to D1. */
+function branchMateriallyChanged(stored: StoredSnapshotBranchRow, branch: RanobeLibChapterBranch): boolean {
+  return sqlText(branch.nativeBranchId ?? stored.native_branch_id) !== sqlText(stored.native_branch_id)
+    || sqlText(branch.identityConfidence) !== sqlText(stored.identity_confidence)
+    || sqlText(branch.volume) !== sqlText(stored.volume)
+    || sqlText(branch.number) !== sqlText(stored.number)
+    || sqlText(branch.name ?? stored.name) !== sqlText(stored.name)
+    || sqlText(branch.releasedAt ?? stored.released_at) !== sqlText(stored.released_at);
+}
+
+function sqlText(value: unknown): string | null {
+  return value === null || value === undefined ? null : String(value);
+}
+
+function upsertSnapshotBranches(
+  db: D1DatabaseLike,
+  bookRef: string,
+  branches: RanobeLibChapterBranch[],
+): D1PreparedStatementLike {
+  const payload = JSON.stringify(branches.map((branch) => ({
     chapterId: branch.chapterId,
     branchKey: branch.branchKey,
     nativeBranchId: branch.nativeBranchId,
@@ -188,10 +328,9 @@ export async function persistBranchSnapshot(
     number: branch.number,
     name: branch.name,
     releasedAt: branch.releasedAt,
-    teamIds,
   })));
 
-  const upsertBranches = db.prepare(`
+  return db.prepare(`
     WITH incoming AS (
       SELECT
         CAST(json_extract(j.value, '$.chapterId') AS INTEGER) AS chapter_id,
@@ -230,60 +369,6 @@ export async function persistBranchSnapshot(
        OR COALESCE(excluded.released_at, ranobelib_chapter_branches.released_at)
             IS NOT ranobelib_chapter_branches.released_at
   `).bind(payload, bookRef);
-
-  const insertMappings = db.prepare(`
-    WITH incoming AS (
-      SELECT
-        CAST(json_extract(branch.value, '$.chapterId') AS INTEGER) AS chapter_id,
-        CAST(json_extract(branch.value, '$.branchKey') AS TEXT) AS branch_key,
-        CAST(team.value AS INTEGER) AS team_id
-      FROM json_each(?) AS branch,
-           json_each(json_extract(branch.value, '$.teamIds')) AS team
-    )
-    INSERT OR IGNORE INTO ranobelib_chapter_branch_teams (
-      book_ref, chapter_id, branch_key, team_id
-    )
-    SELECT ?, chapter_id, branch_key, team_id
-    FROM incoming
-  `).bind(payload, bookRef);
-
-  const deleteStaleMappings = db.prepare(`
-    WITH incoming_branches AS (
-      SELECT
-        CAST(json_extract(j.value, '$.chapterId') AS INTEGER) AS chapter_id,
-        CAST(json_extract(j.value, '$.branchKey') AS TEXT) AS branch_key
-      FROM json_each(?) AS j
-    ),
-    incoming_teams AS (
-      SELECT
-        CAST(json_extract(branch.value, '$.chapterId') AS INTEGER) AS chapter_id,
-        CAST(json_extract(branch.value, '$.branchKey') AS TEXT) AS branch_key,
-        CAST(team.value AS INTEGER) AS team_id
-      FROM json_each(?) AS branch,
-           json_each(json_extract(branch.value, '$.teamIds')) AS team
-    )
-    DELETE FROM ranobelib_chapter_branch_teams
-    WHERE book_ref = ?
-      AND EXISTS (
-        SELECT 1 FROM incoming_branches incoming
-        WHERE incoming.chapter_id = ranobelib_chapter_branch_teams.chapter_id
-          AND incoming.branch_key = ranobelib_chapter_branch_teams.branch_key
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM incoming_teams incoming
-        WHERE incoming.chapter_id = ranobelib_chapter_branch_teams.chapter_id
-          AND incoming.branch_key = ranobelib_chapter_branch_teams.branch_key
-          AND incoming.team_id = ranobelib_chapter_branch_teams.team_id
-      )
-  `).bind(payload, payload, bookRef);
-
-  if (db.batch) {
-    await db.batch([upsertBranches, insertMappings, deleteStaleMappings]);
-    return;
-  }
-  await upsertBranches.run();
-  await insertMappings.run();
-  await deleteStaleMappings.run();
 }
 
 export async function markTranslationsBaselined(

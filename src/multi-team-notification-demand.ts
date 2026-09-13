@@ -52,9 +52,12 @@ export async function refreshWorkNotificationDemand(
       notification_subscriber_count = (SELECT demand_count FROM demand),
       subscriber_count_updated_at = CURRENT_TIMESTAMP
     WHERE book_ref = ?
+      AND notification_subscriber_count IS NOT (SELECT demand_count FROM demand)
     RETURNING notification_subscriber_count
   `).bind(ref, ref, ref).first<DemandRow>();
-  return safeCount(row?.notification_subscriber_count);
+  // Unchanged demand is not rewritten; report the authoritative count without another write.
+  if (row) return safeCount(row.notification_subscriber_count);
+  return countWorkNotificationDemand(env, ref);
 }
 
 export async function refreshAllWorkNotificationDemand(
@@ -132,6 +135,10 @@ export async function refreshAllWorkNotificationDemand(
       ),
       subscriber_count_updated_at = CURRENT_TIMESTAMP
     WHERE book_ref IN (SELECT book_ref FROM candidate_works)
+      AND notification_subscriber_count IS NOT COALESCE(
+        (SELECT demand_count FROM demand WHERE demand.book_ref = ranobelib_titles.book_ref),
+        0
+      )
   `).run();
 }
 

@@ -60,7 +60,7 @@ test('selectDueTitles uses one demand-aware query for subscribed active or compl
   assert.equal(calls.length, 1);
   assert.match(calls[0].query, /notification_subscriber_count\s*>\s*0/i);
   assert.match(calls[0].query, /is_active\s*=\s*1/i);
-  assert.match(calls[0].query, /translation_completion_pending\s*=\s*1\s+OR\s+is_active\s*=\s*1/i);
+  assert.match(calls[0].query, /translation_completion_pending\s*=\s*1\s+OR\s*\(\s*notification_subscriber_count\s*>\s*0\s+AND\s+is_active\s*=\s*1\s*\)/i);
   assert.match(calls[0].query, /next_check_at\s+IS\s+NULL[\s\S]*next_check_at\s*<=\s*CURRENT_TIMESTAMP/i);
   assert.match(calls[0].query, /ORDER BY[\s\S]*COALESCE\s*\(\s*next_check_at[\s\S]*notification_subscriber_count\s+DESC[\s\S]*scan_priority\s+DESC/i);
   assert.match(calls[0].query, /LIMIT\s*\?/i);

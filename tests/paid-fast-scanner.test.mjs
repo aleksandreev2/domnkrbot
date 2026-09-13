@@ -33,7 +33,7 @@ test('paid hot scanner raises the bounded batch to 24 and concurrency to 4', asy
   assert.match(source, /mapWithConcurrency\s*\(\s*selected\s*,\s*FAST_SCAN_CONCURRENCY/i);
 });
 
-test('fast selection requires real subscriber demand, including bootstrap and completion work', async () => {
+test('fast selection requires real subscriber demand, except mandatory completion final scans', async () => {
   const scanner = await loadScanner();
   const calls = [];
   const rows = Array.from({ length: 30 }, (_, index) => dueTitle(index, 1, index === 0 ? 0 : 1));
@@ -54,7 +54,7 @@ test('fast selection requires real subscriber demand, including bootstrap and co
   assert.equal(result.length, 24);
   assert.equal(calls[0].values.at(-1), 24);
   assert.match(calls[0].query, /notification_subscriber_count\s*>\s*0/i);
-  assert.match(calls[0].query, /translation_completion_pending\s*=\s*1\s+OR\s+is_active\s*=\s*1/i);
+  assert.match(calls[0].query, /translation_completion_pending\s*=\s*1\s+OR\s*\(\s*notification_subscriber_count\s*>\s*0\s+AND\s+is_active\s*=\s*1\s*\)/i);
   assert.match(calls[0].query, /AND\s*\(\s*next_check_at\s+IS\s+NULL\s+OR\s+next_check_at\s*<=\s*CURRENT_TIMESTAMP\s*\)/i);
   assert.doesNotMatch(calls[0].query, /snapshot_ready\s*=\s*0\s+OR\s+notification_subscriber_count/i);
   assert.match(calls[0].query, /ORDER BY[\s\S]*COALESCE\s*\(\s*next_check_at[\s\S]*notification_subscriber_count\s+DESC[\s\S]*scan_priority\s+DESC/i);

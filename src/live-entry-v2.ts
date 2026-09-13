@@ -11,7 +11,7 @@ import {
   type ChannelMembershipEnv,
 } from './channel-membership-access.js';
 import { discoverRegisteredRanobeLibTeams } from './ranobelib-multi-team-discovery.js';
-import { scanDueMultiTeamWorks } from './ranobelib-multi-team-scanner.js';
+import { scanDueMultiTeamWorks, selectDueMultiTeamWorks } from './ranobelib-multi-team-scanner.js';
 import { getMultiTeamRollout, multiTeamScannerMode } from './multi-team-rollout.js';
 import {
   handlePublicationCommentGateRequest,
@@ -227,11 +227,15 @@ export default {
       }
 
       if (mode === 'shadow') {
+        // Both scanners schedule through ranobelib_titles.next_check_at. Capture the shadow due set
+        // first so the legacy scan cannot reschedule those works out of shadow coverage.
+        const shadowWorks = await selectDueMultiTeamWorks(env, FAST_SCAN_LIMIT, 'hot');
         const legacy = await scanDueRanobeLibTitles(env, { limit: FAST_SCAN_LIMIT });
         const shadow = await scanDueMultiTeamWorks(env, {
           limit: FAST_SCAN_LIMIT,
           mode: 'shadow',
           scanClass: 'hot',
+          works: shadowWorks,
         });
         if (legacy.newReleases > 0) await queueNotificationWakeup(env);
         console.log('RanobeLib fast scan complete', {
