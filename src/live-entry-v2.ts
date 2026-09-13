@@ -57,6 +57,12 @@ import {
   classifyTelegramWebhookUpdate,
   type TelegramWebhookRoute,
 } from './telegram-webhook-routing.js';
+import { handleWebCollectionsApi, type WebCollectionsEnv } from './web-collections.js';
+import { handleWebReaderCommentsApi, type WebReaderCommentsEnv } from './web-reader-comments.js';
+import { handleWebReaderReactionsApi, type WebReaderReactionsEnv } from './web-reader-reactions.js';
+import { handleWebTitleCommentsApi, type WebTitleCommentsEnv } from './web-title-comments.js';
+import { handleWebTitleReviewsApi, type WebTitleReviewsEnv } from './web-title-reviews.js';
+import { handleWebTitleStateApi, type WebTitleStateEnv } from './web-title-state.js';
 
 interface ScheduledControllerLike { scheduledTime: number; cron: string }
 
@@ -86,6 +92,12 @@ type Env = PublicationCommentGateEnv
   & ChannelMembershipEnv
   & NotificationDeliveryEnv
   & RanobeLibAuthAdminEnv
+  & WebCollectionsEnv
+  & WebReaderCommentsEnv
+  & WebReaderReactionsEnv
+  & WebTitleCommentsEnv
+  & WebTitleReviewsEnv
+  & WebTitleStateEnv
   & {
     RANOBELIB_TEAM_REF?: string;
     NOTIFICATION_QUEUE?: QueueProducerLike;
@@ -172,6 +184,24 @@ export default {
     if (request.method === 'GET' && url.pathname === '/api/ranobelib') {
       return json(await getRanobeLibHome(env));
     }
+
+    const readerCommentsResponse = await handleWebReaderCommentsApi(request, env);
+    if (readerCommentsResponse) return readerCommentsResponse;
+
+    const readerReactionsResponse = await handleWebReaderReactionsApi(request, env);
+    if (readerReactionsResponse) return readerReactionsResponse;
+
+    const titleReviewsResponse = await handleWebTitleReviewsApi(request, env);
+    if (titleReviewsResponse) return titleReviewsResponse;
+
+    const titleCommentsResponse = await handleWebTitleCommentsApi(request, env);
+    if (titleCommentsResponse) return titleCommentsResponse;
+
+    const titleStateResponse = await handleWebTitleStateApi(request, env);
+    if (titleStateResponse) return titleStateResponse;
+
+    const collectionsResponse = await handleWebCollectionsApi(request, env);
+    if (collectionsResponse) return collectionsResponse;
 
     const membershipAppealWebhook = await handleChannelMembershipAppealWebhook(request, env, ctx);
     if (membershipAppealWebhook) return membershipAppealWebhook;
@@ -307,8 +337,6 @@ export default {
         return;
       }
 
-      // Until live delivery cutover, preserve the legacy primary-team discovery as authority while
-      // also refreshing the registered-team model for baseline/shadow verification.
       const legacy = rollout.delivery ? null : await discoverRanobeLibTeam(env);
       const multiTeam = await discoverRegisteredRanobeLibTeams(env);
       console.log('RanobeLib team discovery complete', {

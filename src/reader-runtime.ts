@@ -25,9 +25,14 @@ async function getCatalog(env: ReaderEnv): Promise<Response> {
 }
 
 async function getTitle(env: ReaderEnv, ref: string): Promise<Response> {
-  const title = await env.DB.prepare(`SELECT book_ref,url,title,summary,cover_url,chapter_count,latest_chapter_id,
-    latest_volume,latest_number,latest_name,last_synced_at,last_release_at
-    FROM ranobelib_titles WHERE book_ref=? AND is_active=1 LIMIT 1`).bind(ref).first<Record<string, unknown>>();
+  const title = await env.DB.prepare(`SELECT t.book_ref,t.url,t.title,t.summary,t.cover_url,t.chapter_count,t.latest_chapter_id,
+    t.latest_volume,t.latest_number,t.latest_name,t.last_synced_at,t.last_release_at,
+    tt.semantic_status AS translation_semantic_status,t.translation_status_label
+    FROM ranobelib_titles t
+    LEFT JOIN ranobelib_teams team ON team.is_primary=1
+    LEFT JOIN ranobelib_team_translations tt
+      ON tt.team_id=team.id AND tt.book_ref=t.book_ref AND tt.presence_state='active'
+    WHERE t.book_ref=? AND (t.is_active=1 OR tt.book_ref IS NOT NULL) LIMIT 1`).bind(ref).first<Record<string, unknown>>();
   if (!title) return json({ error: 'Тайтл не найден.' }, 404);
   const { results: chapters } = await env.DB.prepare(`SELECT chapter_id,volume,number,name,first_seen_at
     FROM ranobelib_chapters WHERE book_ref=? ORDER BY CAST(volume AS REAL) DESC,CAST(number AS REAL) DESC,chapter_id DESC LIMIT 2000`)
@@ -40,8 +45,12 @@ async function getTitle(env: ReaderEnv, ref: string): Promise<Response> {
 
 async function getChapter(env: ReaderEnv, ref: string, id: number): Promise<Response> {
   const [title, chapter, content] = await Promise.all([
-    env.DB.prepare(`SELECT book_ref,url,title,summary,cover_url,chapter_count,latest_chapter_id,latest_volume,latest_number,latest_name
-      FROM ranobelib_titles WHERE book_ref=? AND is_active=1 LIMIT 1`).bind(ref).first<Record<string, unknown>>(),
+    env.DB.prepare(`SELECT t.book_ref,t.url,t.title,t.summary,t.cover_url,t.chapter_count,t.latest_chapter_id,t.latest_volume,t.latest_number,t.latest_name
+      FROM ranobelib_titles t
+      LEFT JOIN ranobelib_teams team ON team.is_primary=1
+      LEFT JOIN ranobelib_team_translations tt
+        ON tt.team_id=team.id AND tt.book_ref=t.book_ref AND tt.presence_state='active'
+      WHERE t.book_ref=? AND (t.is_active=1 OR tt.book_ref IS NOT NULL) LIMIT 1`).bind(ref).first<Record<string, unknown>>(),
     env.DB.prepare('SELECT chapter_id,volume,number,name,first_seen_at FROM ranobelib_chapters WHERE book_ref=? AND chapter_id=?')
       .bind(ref, id).first<Record<string, unknown>>(),
     env.DB.prepare('SELECT content_json,updated_at FROM reader_chapter_content WHERE book_ref=? AND chapter_id=?')
