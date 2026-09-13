@@ -3,7 +3,11 @@
   const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
   const LIST_LABELS={reading:'Читаю',planned:'В планах',dropped:'Брошено',completed:'Прочитано',favorite:'Любимые',other:'Другое'};
-  const state={session:null,data:null,sort:'new',activeTab:'chapters',titleState:null,titleStateLoaded:false,titleStateBusy:false};
+  const SECTION_BY_TAB={comments:'comments',discussions:'discussions',reviews:'review'};
+  const TAB_BY_SECTION=Object.fromEntries(Object.entries(SECTION_BY_TAB).map(([tab,section])=>[section,tab]));
+  const PANEL_BY_TAB={about:'titleAboutPanel',chapters:'titleChaptersPanel',comments:'titleCommentsPanel',discussions:'titleDiscussionsPanel',reviews:'titleReviewsPanel'};
+  const initialSection=new URLSearchParams(location.search).get('section')||'';
+  const state={session:null,data:null,sort:'new',activeTab:TAB_BY_SECTION[initialSection]||'chapters',titleState:null,titleStateLoaded:false,titleStateBusy:false};
   const ref=new URLSearchParams(location.search).get('ref')||'';
 
   async function api(path,options={}){const response=await fetch(path,{credentials:'same-origin',...options});const body=await response.json().catch(()=>null);if(!response.ok)throw new Error(body?.error||`HTTP ${response.status}`);return body;}
@@ -25,7 +29,8 @@
     $('#chapterSearch')?.addEventListener('input',renderChapters);
     $('#sortNew')?.addEventListener('click',()=>{state.sort='new';setSortButtons();closeSortMenu();renderChapters();});
     $('#sortOld')?.addEventListener('click',()=>{state.sort='old';setSortButtons();closeSortMenu();renderChapters();});
-    document.querySelectorAll('[data-title-tab]').forEach((button)=>button.addEventListener('click',()=>{if(!button.disabled)setTitleTab(button.dataset.titleTab||'');}));
+    document.querySelectorAll('[data-title-tab]').forEach((button)=>button.addEventListener('click',()=>{if(!button.disabled)setTitleTab(button.dataset.titleTab||'',{push:true});}));
+    window.addEventListener('popstate',()=>setTitleTab(tabFromLocation(),{push:false}));
     $('#titlePlanButton')?.addEventListener('click',togglePlanMenu);
     $('#titleMyRatingButton')?.addEventListener('click',toggleRatingPicker);
     document.querySelectorAll('[data-list-status]').forEach((button)=>button.addEventListener('click',()=>void mutateTitleList(button.dataset.listStatus||null)));
@@ -39,12 +44,23 @@
   function closeTitleStateMenus(){closePlanMenu();closeRatingPicker();}
   function togglePlanMenu(){const button=$('#titlePlanButton'),menu=$('#titlePlanMenu');if(!button||button.disabled||!menu)return;const opening=menu.classList.contains('hidden');closeRatingPicker();menu.classList.toggle('hidden',!opening);button.setAttribute('aria-expanded',String(opening));}
   function toggleRatingPicker(){const button=$('#titleMyRatingButton'),picker=$('#titleRatingPicker');if(!button||button.disabled||!picker)return;const opening=picker.classList.contains('hidden');closePlanMenu();picker.classList.toggle('hidden',!opening);button.setAttribute('aria-expanded',String(opening));}
-  function setTitleTab(tab){
-    if(tab!=='about'&&tab!=='chapters')return;
+  function tabFromLocation(){const section=new URLSearchParams(location.search).get('section')||'';return TAB_BY_SECTION[section]||'chapters';}
+  function syncTitleSection(tab){
+    const params=new URLSearchParams(location.search);
+    const section=SECTION_BY_TAB[tab]||'';
+    if(section)params.set('section',section);else params.delete('section');
+    const query=params.toString();
+    const next=`${location.pathname}${query?`?${query}`:''}${location.hash}`;
+    const current=`${location.pathname}${location.search}${location.hash}`;
+    if(next!==current)history.pushState(history.state,'',next);
+  }
+  function setTitleTab(tab,{push=false}={}){
+    if(!Object.hasOwn(PANEL_BY_TAB,tab))return;
     state.activeTab=tab;
     document.querySelectorAll('[data-title-tab]').forEach((button)=>{const active=button.dataset.titleTab===tab;button.classList.toggle('active',active);if(!button.disabled)button.setAttribute('aria-selected',String(active));});
-    $('#titleAboutPanel')?.classList.toggle('hidden',tab!=='about');
-    $('#titleChaptersPanel')?.classList.toggle('hidden',tab!=='chapters');
+    document.querySelectorAll('.title-tab-panel').forEach((panel)=>panel.classList.toggle('hidden',panel.id!==PANEL_BY_TAB[tab]));
+    if(push)syncTitleSection(tab);
+    document.dispatchEvent(new CustomEvent('title-tab-change',{detail:{tab}}));
   }
   function renderSession(){const user=state.session?.user;$('#adminLink')?.classList.toggle('hidden',!Boolean(state.session?.isAdmin));$('#logoutButton')?.classList.toggle('hidden',!user);const account=$('#accountName');const panel=$('#loginPanel');if(user){account.textContent=user.username?`@${user.username}`:user.firstName;panel.innerHTML='<span class="login-ready">Telegram-сессия активна</span>';}else{account.textContent='Войти';mountLogin();}refreshIcons();}
   function mountLogin(){const host=$('#telegramLogin');if(!host||host.dataset.ready==='1')return;const bot=state.session?.botUsername;if(!bot){host.textContent='BOT_USERNAME не настроен.';return;}host.dataset.ready='1';const script=document.createElement('script');script.async=true;script.src='https://telegram.org/js/telegram-widget.js?22';script.dataset.telegramLogin=bot;script.dataset.size='large';script.dataset.userpic='false';script.dataset.authUrl=`${location.origin}/auth/telegram/callback`;script.dataset.requestAccess='write';host.append(script);}
