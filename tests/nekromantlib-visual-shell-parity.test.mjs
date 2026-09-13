@@ -19,14 +19,21 @@ test('shared NekromantLib shell uses captured RanobeLib desktop tokens', async (
   assert.match(css, /--nl-shell:1200px/);
 });
 
-test('desktop header reproduces the captured 56px shell with 50px navigation and soft 32px actions', async () => {
+test('desktop header keeps captured geometry with the lighter live RanobeLib chrome', async () => {
   const css = await readSharedCss();
 
-  assert.match(css, /\.nl-header\.site-header\{[^}]*min-height:56px[^}]*height:56px[^}]*background:#e0f2ff[^}]*box-shadow:0 1px 3px rgba\(0,0,0,\.12\)/s);
+  assert.match(css, /\.nl-header\.site-header\{[^}]*min-height:56px[^}]*height:56px[^}]*background:#fff[^}]*border-bottom:1px solid var\(--nl-border\)[^}]*box-shadow:0 1px 2px rgba\(0,0,0,\.04\)/s);
   assert.match(css, /\.nl-header-inner\{[^}]*height:56px[^}]*display:grid[^}]*grid-template-columns:252px 1fr 252px/s);
   assert.match(css, /\.nl-nav\.primary-nav\{[^}]*height:50px[^}]*gap:6px/s);
   assert.match(css, /\.nl-nav\.primary-nav a,\.nl-nav-button\{[^}]*min-height:32px[^}]*border-radius:6px[^}]*padding:0 12px/s);
-  assert.match(css, /\.nl-nav\.primary-nav a:hover,\.nl-nav-button:hover[^}]*background:rgba\(33,150,243,\.2\)/s);
+  assert.match(css, /\.nl-nav\.primary-nav a:hover,\.nl-nav-button:hover[^}]*background:rgba\(33,150,243,\.1\)/s);
+});
+
+test('shared footer follows the light current RanobeLib footer instead of a heavy dark slab', async () => {
+  const css = await readSharedCss();
+  assert.match(css, /\.nl-footer\{[^}]*background:#e9ecef[^}]*color:#333/s);
+  assert.match(css, /\.nl-footer nav a\{[^}]*color:#555/s);
+  assert.match(css, /\.nl-footer small\{[^}]*color:#777/s);
 });
 
 test('home page exposes the captured RanobeLib block hierarchy', async () => {
