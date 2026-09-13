@@ -36,16 +36,16 @@ test('title discussions API lists by updates and creates native threads and repl
   assert.match(source, /THREAD_BODY_MAX\s*=\s*6000/);
 });
 
-test('live entry routes title discussions before title state and legacy handlers', async () => {
-  const source = await read('../src/live-entry-v2.ts');
+test('production entry routes title discussions before the v2 worker', async () => {
+  const source = await read('../src/live-entry-v3.ts');
 
   assert.match(source, /import \{ handleWebTitleDiscussionsApi, type WebTitleDiscussionsEnv \} from '\.\/web-title-discussions\.js'/);
   assert.match(source, /& WebTitleDiscussionsEnv/);
   assert.match(source, /const titleDiscussionsResponse = await handleWebTitleDiscussionsApi\(request, env\)/);
   assert.match(source, /if \(titleDiscussionsResponse\) return titleDiscussionsResponse/);
   assert.ok(
-    source.indexOf('handleWebTitleDiscussionsApi(request, env)') < source.indexOf('handleWebTitleStateApi(request, env)'),
-    'title discussions API should run before title state and the legacy handler',
+    source.indexOf('handleWebTitleDiscussionsApi(request, env)') < source.indexOf('previous.fetch(request, env, ctx)'),
+    'title discussions API should run before the v2 worker',
   );
 });
 
