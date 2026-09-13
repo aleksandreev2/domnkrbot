@@ -169,7 +169,7 @@
 
   function renderForum(items){
     const host=$('#forumRail');if(!host)return;
-    host.innerHTML=items.length?items.map((item)=>`<a class="home-forum-row" href="${titleUrl(item.bookRef)}#discussions"><span class="home-forum-title">${esc(item.title||item.bookTitle||'Обсуждение')}</span><span class="home-forum-meta" title="Ответы"><i data-lucide="messages-square"></i>${Number(item.replyCount||0)}</span></a>`).join(''):empty('Тем пока нет');
+    host.innerHTML=items.length?items.map((item)=>`<a class="home-forum-row" href="${sectionUrl(item.bookRef,'discussions')}"><span class="home-forum-title">${esc(item.title||item.bookTitle||'Обсуждение')}</span><span class="home-forum-meta" title="Ответы"><i data-lucide="messages-square"></i>${Number(item.replyCount||0)}</span></a>`).join(''):empty('Тем пока нет');
   }
 
   function renderReviews(items){
@@ -179,7 +179,7 @@
       const sentiment=score>0?'positive':score<0?'negative':'neutral';
       const reviewKind=esc(item.kind||'Отзыв');
       const scoreIcon=score<0?'thumbs-down':'thumbs-up';
-      return `<a class="home-review-card" href="${titleUrl(item.bookRef)}#reviews"><span class="home-review-sentiment ${sentiment}" aria-hidden="true"></span><span class="home-review-head"><img class="home-review-cover" loading="lazy" src="${esc(item.coverUrl||'/brand/team-logo.webp')}" alt=""><span class="home-review-head-copy"><span class="home-review-kind">${reviewKind}</span><strong>${esc(item.bookTitle||'Тайтл')}</strong><small>${esc(item.author||'Читатель')}</small></span></span><span class="home-review-body">${esc(item.body||'')}</span><span class="home-review-foot"><span>${esc(dateRelative(item.updatedAt)||'')}</span><span class="home-review-score ${sentiment}"><i data-lucide="${scoreIcon}"></i>${score}</span></span></a>`;
+      return `<a class="home-review-card" href="${sectionUrl(item.bookRef,'review')}"><span class="home-review-sentiment ${sentiment}" aria-hidden="true"></span><span class="home-review-head"><img class="home-review-cover" loading="lazy" src="${esc(item.coverUrl||'/brand/team-logo.webp')}" alt=""><span class="home-review-head-copy"><span class="home-review-kind">${reviewKind}</span><strong>${esc(item.bookTitle||'Тайтл')}</strong><small>${esc(item.author||'Читатель')}</small></span></span><span class="home-review-body">${esc(item.body||'')}</span><span class="home-review-foot"><span>${esc(dateRelative(item.updatedAt)||'')}</span><span class="home-review-score ${sentiment}"><i data-lucide="${scoreIcon}"></i>${score}</span></span></a>`;
     }).join(''):empty('Отзывов пока нет');
   }
 
@@ -254,6 +254,7 @@
   function readSet(ref){try{return new Set(JSON.parse(localStorage.getItem(`domnkr:reader:${ref}:read`)||'[]').map(String));}catch{return new Set();}}
   function metaLabel(item){const value=String(item.country||item.origin_country||item.original_language||'').trim();return value||'Новелла';}
   function titleUrl(ref){return`/title/?ref=${encodeURIComponent(ref||'')}`;}
+  function sectionUrl(ref,section){return`/title/?ref=${encodeURIComponent(ref||'')}&section=${encodeURIComponent(section||'')}`;}
   function readerUrl(ref,chapter){return`/reader/?ref=${encodeURIComponent(ref||'')}&chapter=${encodeURIComponent(chapter||'')}`;}
   function chapterLabel(item){const volume=item.last_volume||item.latest_volume||item.volume;const number=item.last_number||item.latest_number||item.number||item.chapter_id;return[volume?`Том ${volume}`:'',number?`Глава ${number}`:''].filter(Boolean).join(' · ')||'Главы доступны';}
   function empty(message){return`<div class="home-compact-empty">${esc(message)}</div>`;}
