@@ -30,7 +30,7 @@ test('desktop header reproduces the captured 56px three-column shell', async () 
 
 test('home page exposes the captured RanobeLib block hierarchy', async () => {
   const html = await read('../public/index.html');
-  for (const id of ['popularUpdates','topViewsNew','topViewsRising','topViewsPopular','releaseFeed','proposalRail','newestRail']) {
+  for (const id of ['popularUpdates','continueReadingRail','topViewsNew','topViewsRising','topViewsPopular','releaseFeed','forumRail','reviewsRail','collectionsRail','topUsersRail','newestRail']) {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /class="[^"]*home-reference-grid/);
@@ -38,12 +38,14 @@ test('home page exposes the captured RanobeLib block hierarchy', async () => {
   assert.match(html, />Набирающее популярность</);
   assert.match(html, />Последние обновления</);
   assert.doesNotMatch(html, /class="[^"]*team-card/);
+  assert.doesNotMatch(html, /id="proposalRail"/);
 });
 
 test('home desktop composition follows the captured full-width then 1fr 540px grid', async () => {
   const css = await read('../public/home-parity.css');
-  assert.match(css, /\.home-reference-grid\{[^}]*grid-template-columns:minmax\(0,1fr\) 540px[^}]*grid-template-areas:"popular popular" "top top" "latest telegram" "latest proposals" "latest newest" "latest \\."/s);
+  assert.match(css, /\.home-reference-grid\{[^}]*grid-template-columns:minmax\(0,1fr\) 540px[^}]*grid-template-areas:"popular popular" "continue continue" "top top" "latest telegram" "latest forum" "latest reviews" "latest collections" "latest topusers" "latest newest" "latest \\."/s);
   assert.match(css, /\.home-popular\{[^}]*grid-area:popular/s);
+  assert.match(css, /\.home-continue\{[^}]*grid-area:continue/s);
   assert.match(css, /\.home-top-views\{[^}]*grid-area:top/s);
   assert.match(css, /\.home-latest-updates\{[^}]*grid-area:latest/s);
 });
