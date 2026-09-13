@@ -54,7 +54,7 @@ test('home page exposes the captured RanobeLib block hierarchy', async () => {
 
 test('home desktop composition follows the captured full-width then 1fr 540px grid', async () => {
   const css = await read('../public/home-parity.css');
-  assert.match(css, /\.home-reference-grid\{[^}]*grid-template-columns:minmax\(0,1fr\) 540px[^}]*grid-template-areas:"popular popular" "continue continue" "top top" "latest telegram" "latest forum" "latest reviews" "latest collections" "latest topusers" "latest newest" "latest \\."/s);
+  assert.match(css, /\.home-reference-grid\{[^}]*grid-template-columns:minmax\(0,1fr\) 540px[^}]*grid-template-areas:"popular popular" "continue continue" "top top" "latest telegram" "latest forum" "latest reviews" "latest collections" "latest topusers" "latest newest" "latest \."/s);
   assert.match(css, /\.home-popular\{[^}]*grid-area:popular/s);
   assert.match(css, /\.home-continue\{[^}]*grid-area:continue/s);
   assert.match(css, /\.home-top-views\{[^}]*grid-area:top/s);
