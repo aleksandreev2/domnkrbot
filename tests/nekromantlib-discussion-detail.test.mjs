@@ -49,7 +49,7 @@ test('discussion detail page renders thread relation, comments controls and repl
   assert.match(js, /discussion\.bookRef/);
   assert.match(js, /\/title\/\?ref=/);
 
-  assert.match(css, /\.discussion-thread-card\s*\{/);
+  assert.match(css, /\.discussion-thread-card(?:,|\s*\{)/);
   assert.match(css, /\.discussion-comments-toolbar\s*\{/);
   assert.match(css, /\.discussion-reply-card\s*\{/);
   assert.match(css, /@media\s*\(max-width:/);
