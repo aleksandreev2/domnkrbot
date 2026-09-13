@@ -1,6 +1,6 @@
 (() => {
   const $=(selector,root=document)=>root.querySelector(selector);
-  const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[char]));
+  const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
   const MAX_CONTINUE=8;
   let titleIndex=new Map();
