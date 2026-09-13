@@ -42,11 +42,13 @@ test('title tabs reproduce captured labels while implemented native title social
 
 test('title client switches only native panels and keeps synchronized title data', async () => {
   const js = await read('../public/title.js');
-  assert.match(js, /activeTab:'chapters'/);
+  assert.match(js, /activeTab:TAB_BY_SECTION\[initialSection\]\|\|'chapters'/);
   assert.match(js, /setTitleTab/);
   assert.match(js, /\[data-title-tab\]/);
-  assert.match(js, /#titleAboutPanel/);
-  assert.match(js, /#titleChaptersPanel/);
+  for (const panelId of ['titleAboutPanel','titleChaptersPanel','titleCommentsPanel','titleDiscussionsPanel','titleReviewsPanel']) {
+    assert.match(js, new RegExp(`${panelId}`));
+  }
+  assert.match(js, /\.title-tab-panel/);
   assert.match(js, /translation_status_label/);
   assert.match(js, /readerAvailable/);
   assert.match(js, /localStorage/);
