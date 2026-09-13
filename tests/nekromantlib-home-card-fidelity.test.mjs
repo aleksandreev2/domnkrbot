@@ -42,3 +42,15 @@ test('home header uses a horizontal NekromantLib wordmark footprint instead of a
   assert.match(css, /\.nl-header \.nl-brand:before\{[^}]*content:"Некромант"[^}]*font-size:20px/s);
   assert.match(css, /\.nl-header \.nl-brand:after\{[^}]*content:"Либ"[^}]*color:var\(--nl-accent\)/s);
 });
+
+test('empty continue-reading state collapses like the anonymous live RanobeLib home', async () => {
+  const css = await readHomeCss();
+  assert.match(css, /\.home-continue:has\(#continueReadingRail>\.home-compact-empty\)\{[^}]*display:none/s);
+});
+
+test('latest update rows keep captured cover-left and stacked metadata flow', async () => {
+  const css = await readHomeCss();
+  assert.match(css, /\.home-latest-updates \.release-row\{[^}]*grid-template-columns:80px minmax\(0,1fr\)[^}]*grid-template-rows:auto auto/s);
+  assert.match(css, /\.home-latest-updates \.release-cover\{[^}]*grid-row:1\/3/s);
+  assert.match(css, /\.home-latest-updates \.release-time\{[^}]*grid-column:2[^}]*padding-left:0[^}]*margin-top:8px/s);
+});
