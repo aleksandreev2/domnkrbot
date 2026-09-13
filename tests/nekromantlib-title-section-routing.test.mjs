@@ -4,13 +4,24 @@ import test from 'node:test';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
-test('title shell owns section routing for native social tabs', async () => {
+test('title shell owns the exact live RanobeLib section mapping', async () => {
   const source = await read('../public/title.js');
+  assert.match(source, /chapters\s*:\s*['"]chapters['"]/);
   assert.match(source, /comments\s*:\s*['"]comments['"]/);
   assert.match(source, /discussions\s*:\s*['"]discussions['"]/);
   assert.match(source, /reviews\s*:\s*['"]review['"]/);
+  assert.match(source, /activeTab:TAB_BY_SECTION\[initialSection\]\|\|'about'/);
+  assert.match(source, /TAB_BY_SECTION\[section\]\|\|'about'/);
   assert.match(source, /history\.pushState\(/);
   assert.match(source, /addEventListener\(['"]popstate['"]/);
+});
+
+test('clean title URL starts on About while Chapters uses section=chapters', async () => {
+  const html = await read('../public/title/index.html');
+  assert.match(html, /data-title-tab="about"[^>]*class="active"[^>]*aria-selected="true"/);
+  assert.match(html, /data-title-tab="chapters"(?![^>]*class="active")[^>]*aria-selected="false"/);
+  assert.doesNotMatch(html, /id="titleAboutPanel"[^>]*class="[^"]*hidden/);
+  assert.match(html, /id="titleChaptersPanel"[^>]*class="[^"]*hidden/);
 });
 
 test('title shell applies one active panel and broadcasts tab changes', async () => {
