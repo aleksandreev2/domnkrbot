@@ -10,9 +10,9 @@ test('home exposes captured continue/forum/reviews/collections/top/newest areas'
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, />Продолжить читать</);
-  assert.match(html, />Последние темы форума</);
-  assert.match(html, />Последние отзывы</);
-  assert.match(html, />Последние коллекции</);
+  assert.match(html, />Последние темы форума\s*<i\s+data-lucide="arrow-right"/);
+  assert.match(html, />Последние отзывы\s*<i\s+data-lucide="arrow-right"/);
+  assert.match(html, />Последние коллекции\s*<i\s+data-lucide="arrow-right"/);
   assert.match(html, />Топ чтения за неделю</);
   assert.doesNotMatch(html, /id="proposalRail"/);
 });
