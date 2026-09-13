@@ -32,8 +32,8 @@ test('title tabs reproduce captured labels while implemented native title social
     assert.ok(next > cursor, `${label} must appear in captured order`);
     cursor = next;
   }
-  assert.match(html, /data-title-tab="about"/);
-  assert.match(html, /data-title-tab="chapters"[^>]*aria-selected="true"/);
+  assert.match(html, /data-title-tab="about"[^>]*aria-selected="true"/);
+  assert.match(html, /data-title-tab="chapters"[^>]*aria-selected="false"/);
   assert.match(html, /data-title-tab="comments"(?![^>]*disabled)/);
   assert.match(html, /data-title-tab="discussions"(?![^>]*disabled)/);
   assert.match(html, /data-title-tab="reviews"(?![^>]*disabled)/);
@@ -42,7 +42,7 @@ test('title tabs reproduce captured labels while implemented native title social
 
 test('title client switches only native panels and keeps synchronized title data', async () => {
   const js = await read('../public/title.js');
-  assert.match(js, /activeTab:TAB_BY_SECTION\[initialSection\]\|\|'chapters'/);
+  assert.match(js, /activeTab:TAB_BY_SECTION\[initialSection\]\|\|'about'/);
   assert.match(js, /setTitleTab/);
   assert.match(js, /\[data-title-tab\]/);
   for (const panelId of ['titleAboutPanel','titleChaptersPanel','titleCommentsPanel','titleDiscussionsPanel','titleReviewsPanel']) {
