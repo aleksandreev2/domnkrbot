@@ -21,18 +21,16 @@ test('title shell applies one active panel and broadcasts tab changes', async ()
   assert.match(source, /dispatchEvent\(/);
 });
 
-test('initial deep links and browser history replay the existing social lazy loaders', async () => {
-  const source = await read('../public/title.js');
-  const comments = await read('../public/title-comments.js');
-  const discussions = await read('../public/title-discussions.js');
-  const reviews = await read('../public/title-reviews.js');
+test('deep links and browser history replay existing social lazy loaders through the bridge', async () => {
+  const html = await read('../public/title/index.html');
+  const bridge = await read('../public/title-routing-bridge.js');
 
-  assert.match(source, /replayTabActivation/);
-  assert.match(source, /setTitleTab\(tabFromLocation\(\),\{push:false,replay:true\}\)/);
-  assert.match(source, /setTitleTab\(state\.activeTab,\{replay:true\}\)/);
-  assert.match(source, /\.click\(\)/);
-
-  assert.match(comments, /loadTitleComments/);
-  assert.match(discussions, /loadTitleDiscussions/);
-  assert.match(reviews, /loadTitleReviews/);
+  assert.match(html, /\/title-routing-bridge\.js\?/);
+  assert.match(bridge, /DOMContentLoaded/);
+  assert.match(bridge, /addEventListener\(['"]popstate['"]/);
+  assert.match(bridge, /comments/);
+  assert.match(bridge, /discussions/);
+  assert.match(bridge, /review/);
+  assert.match(bridge, /\[data-title-tab=/);
+  assert.match(bridge, /\.click\(\)/);
 });
