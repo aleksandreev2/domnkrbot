@@ -13,12 +13,15 @@ test('anonymous home hides empty social rail sections instead of rendering large
 });
 
 test('Telegram login widget is mounted lazily only after the account menu is opened', async () => {
-  const js = await read('../public/home-parity.js');
-  assert.match(js, /\.nl-account/);
-  assert.match(js, /addEventListener\(['"]toggle['"]/);
-  assert.match(js, /accountMenu\.open/);
-  assert.match(js, /mountTelegramLogin\(\)/);
+  const html = await read('../public/index.html');
+  const lazy = await read('../public/home-login-lazy.js');
 
-  const renderSession = js.slice(js.indexOf('function renderSession()'), js.indexOf('function renderSessionError()'));
-  assert.doesNotMatch(renderSession, /mountTelegramLogin\(\)/);
+  assert.match(html, /home-parity\.js[^>]*>[\s\S]*home-login-lazy\.js/);
+  assert.match(lazy, /\.nl-account/);
+  assert.match(lazy, /addEventListener\(['"]toggle['"]/);
+  assert.match(lazy, /accountMenu\.open/);
+  assert.match(lazy, /placeholder\.id=['"]telegramLoginLazy['"]/);
+  assert.match(lazy, /\/api\/bootstrap/);
+  assert.match(lazy, /telegram-widget\.js/);
+  assert.match(lazy, /void mountTelegramLogin\(\)/);
 });
