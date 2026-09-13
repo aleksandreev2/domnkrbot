@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const read = (path) => readFile(new URL(path, import.meta.url), 'utf8');
-const css = async () => `${await read('../public/catalog.css')}\n${await read('../public/ranobelib-parity.css')}`;
+const css = async () => `${await read('../public/catalog.css')}\n${await read('../public/ranobelib-parity.css')}\n${await read('../public/catalog-parity.css')}`;
 
 test('catalog desktop puts media body left and 330px filter paper right', async () => {
   const source = await css();
