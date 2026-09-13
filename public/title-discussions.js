@@ -3,7 +3,6 @@
   const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
   const ref=new URLSearchParams(location.search).get('ref')||'';
-  const DISCUSSION_SECTION_QUERY='section=discussions';
   const state={session:null,discussions:[],loaded:false,busy:false};
 
   async function api(path,options={}){
@@ -22,7 +21,7 @@
 
   function ensureDiscussionSurface(){
     const tab=$('[data-title-tab="discussions"]');
-    if(tab){tab.disabled=false;tab.removeAttribute('disabled');tab.removeAttribute('aria-disabled');tab.removeAttribute('title');tab.setAttribute('aria-selected','false');tab.setAttribute('aria-controls','titleDiscussionsPanel');}
+    if(tab){tab.disabled=false;tab.removeAttribute('disabled');tab.removeAttribute('aria-disabled');tab.removeAttribute('title');tab.setAttribute('aria-controls','titleDiscussionsPanel');}
     if($('#titleDiscussionsPanel'))return;
     const reviews=$('#titleReviewsPanel');
     const comments=$('#titleCommentsPanel');
@@ -46,59 +45,15 @@
   }
 
   async function boot(){
-    ensureStyles();ensureDiscussionSurface();bindTabs();bindComposer();
+    ensureStyles();ensureDiscussionSurface();bindComposer();
+    document.addEventListener('title-tab-change',handleTitleTabChange);
     try{state.session=await api('/api/auth/session');}catch{state.session=null;}
     renderComposer();
-    if(new URLSearchParams(location.search).get('section')==='discussions')activateInitialDiscussionWhenReady();
+    if(new URLSearchParams(location.search).get('section')==='discussions')void loadTitleDiscussions();
   }
 
-  function activateInitialDiscussionWhenReady(attempt=0){
-    if(new URLSearchParams(location.search).get('section')!=='discussions')return;
-    const app=$('#titleApp');
-    if(app&&!app.classList.contains('hidden')){
-      activateDiscussionsTab();
-      if(!state.loaded)void loadTitleDiscussions();
-      return;
-    }
-    if(attempt<100)setTimeout(()=>activateInitialDiscussionWhenReady(attempt+1),50);
-  }
-
-  function bindTabs(){
-    document.querySelectorAll('[data-title-tab]').forEach((button)=>{
-      button.addEventListener('click',()=>{
-        const tab=button.dataset.titleTab||'';
-        if(tab==='discussions'){
-          activateDiscussionsTab();syncDiscussionSection(true);
-          if(!state.loaded)void loadTitleDiscussions();
-        }else{
-          $('#titleDiscussionsPanel')?.classList.add('hidden');
-          const discussionsTab=$('[data-title-tab="discussions"]');
-          discussionsTab?.classList.remove('active');discussionsTab?.setAttribute('aria-selected','false');
-          syncDiscussionSection(false);
-        }
-      });
-    });
-  }
-
-  function syncDiscussionSection(active){
-    const params=new URLSearchParams(location.search);
-    const [key,value]=DISCUSSION_SECTION_QUERY.split('=');
-    if(active)params.set(key,value);else if(params.get(key)===value)params.delete(key);
-    const query=params.toString();
-    history.replaceState(history.state,'',`${location.pathname}${query?`?${query}`:''}${location.hash}`);
-  }
-
-  function activateDiscussionsTab(){
-    document.querySelectorAll('[data-title-tab]').forEach((button)=>{
-      const active=button.dataset.titleTab==='discussions';
-      button.classList.toggle('active',active);
-      if(!button.disabled)button.setAttribute('aria-selected',String(active));
-    });
-    $('#titleAboutPanel')?.classList.add('hidden');
-    $('#titleChaptersPanel')?.classList.add('hidden');
-    $('#titleCommentsPanel')?.classList.add('hidden');
-    $('#titleReviewsPanel')?.classList.add('hidden');
-    $('#titleDiscussionsPanel')?.classList.remove('hidden');
+  function handleTitleTabChange(event){
+    if(event?.detail?.tab==='discussions'&&!state.loaded)void loadTitleDiscussions();
   }
 
   function bindComposer(){
