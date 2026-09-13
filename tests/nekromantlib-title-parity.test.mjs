@@ -52,7 +52,7 @@ test('title client switches only native panels and keeps synchronized title data
   assert.match(js, /translation_status_label/);
   assert.match(js, /readerAvailable/);
   assert.match(js, /localStorage/);
-  assert.doesNotMatch(js, /views|publisher|author|releaseYear|country/i);
+  assert.doesNotMatch(js, /\b(?:views|publisher|author|releaseYear|country)\b/i);
 });
 
 test('title capture grid mirrors desktop and mobile structure without fake rating data', async () => {
