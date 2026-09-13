@@ -35,7 +35,7 @@ test('title tabs reproduce captured labels while implemented native title social
   assert.match(html, /data-title-tab="about"/);
   assert.match(html, /data-title-tab="chapters"[^>]*aria-selected="true"/);
   assert.match(html, /data-title-tab="comments"(?![^>]*disabled)/);
-  assert.match(html, /data-title-tab="discussions"[^>]*disabled/);
+  assert.match(html, /data-title-tab="discussions"(?![^>]*disabled)/);
   assert.match(html, /data-title-tab="reviews"(?![^>]*disabled)/);
   assert.doesNotMatch(html, />Скачать</);
 });
