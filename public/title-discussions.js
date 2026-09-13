@@ -16,7 +16,7 @@
   function ensureStyles(){
     if(document.querySelector('link[data-title-discussions-style]'))return;
     const link=document.createElement('link');
-    link.rel='stylesheet';link.href='/title-discussions.css?v=20260913-discussions1';link.dataset.titleDiscussionsStyle='1';
+    link.rel='stylesheet';link.href='/title-discussions.css?v=20260913-discussions2';link.dataset.titleDiscussionsStyle='1';
     document.head.append(link);
   }
 
@@ -150,13 +150,17 @@
     finally{state.busy=false;renderComposer();}
   }
 
+  function discussionUrl(discussion){
+    return `/discussion/?id=${encodeURIComponent(discussion?.id||'')}`;
+  }
+
   function renderTitleDiscussions(){
     const host=$('#titleDiscussionList');if(!host)return;
     if(!state.discussions.length){host.innerHTML='<div class="title-discussion-empty"><strong>Обсуждений пока нет</strong><span>Создайте первую тему об этом тайтле.</span></div>';return;}
     host.innerHTML=state.discussions.map((discussion)=>{
       const author=discussion.author?.username?`@${discussion.author.username}`:(discussion.author?.firstName||'Читатель');
       const replyCount=Math.max(0,Number(discussion.replyCount)||0);
-      return `<article class="title-discussion-card"><div class="title-discussion-copy"><h3>${esc(discussion.title)}</h3><div class="title-discussion-meta"><strong>${esc(author)}</strong><time>${esc(formatTime(discussion.updatedAt||discussion.createdAt))}</time><span class="title-discussion-category">${esc(discussion.category||'Обсуждение тайтла')}</span></div><p class="title-discussion-preview">${esc(discussion.body)}</p></div><div class="title-discussion-metrics" title="Ответов"><i data-lucide="message-square"></i><span>${replyCount}</span></div></article>`;
+      return `<article class="title-discussion-card"><a class="title-discussion-card-link" href="${esc(discussionUrl(discussion))}"><div class="title-discussion-copy"><h3>${esc(discussion.title)}</h3><div class="title-discussion-meta"><strong>${esc(author)}</strong><time>${esc(formatTime(discussion.updatedAt||discussion.createdAt))}</time><span class="title-discussion-category">${esc(discussion.category||'Обсуждение тайтла')}</span></div><p class="title-discussion-preview">${esc(discussion.body)}</p></div><div class="title-discussion-metrics" title="Ответов"><i data-lucide="message-square"></i><span>${replyCount}</span></div></a></article>`;
     }).join('');refreshIcons();
   }
 
