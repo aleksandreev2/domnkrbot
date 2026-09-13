@@ -10,11 +10,13 @@
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
   <link rel="stylesheet" href="/title.css?v=20260913-title5">
   <link rel="stylesheet" href="/title-comments.css?v=20260913-comments1">
+  <link rel="stylesheet" href="/title-discussions.css?v=20260913-discussions1">
   <link rel="stylesheet" href="/title-reviews.css?v=20260913-reviews1">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
   <script defer src="/title.js?v=20260913-title5"></script>
   <script defer src="/title-comments.js?v=20260913-comments1"></script>
+  <script defer src="/title-discussions.js?v=20260913-discussions1"></script>
   <script defer src="/title-reviews.js?v=20260913-reviews1"></script>
 </head>
 <body class="nl-body title-detail-body">
@@ -101,7 +103,7 @@
               <button type="button" role="tab" data-title-tab="about" aria-selected="false" aria-controls="titleAboutPanel">О тайтле</button>
               <button type="button" role="tab" data-title-tab="chapters" class="active" aria-selected="true" aria-controls="titleChaptersPanel">Главы</button>
               <button type="button" role="tab" data-title-tab="comments" aria-selected="false" aria-controls="titleCommentsPanel">Комментарии</button>
-              <button type="button" role="tab" data-title-tab="discussions" disabled aria-disabled="true" title="Обсуждения пока не подключены">Обсуждения</button>
+              <button type="button" role="tab" data-title-tab="discussions" aria-selected="false" aria-controls="titleDiscussionsPanel">Обсуждения</button>
               <button type="button" role="tab" data-title-tab="reviews" aria-selected="false" aria-controls="titleReviewsPanel">Отзывы</button>
             </nav>
 
@@ -165,6 +167,23 @@
               </form>
               <div id="titleCommentsMessage" class="title-comments-message" role="status" aria-live="polite"></div>
               <div id="titleCommentsList" class="title-comments-list"></div>
+            </section>
+
+            <section id="titleDiscussionsPanel" class="title-tab-panel title-discussions-shell hidden" role="tabpanel" aria-label="Обсуждения тайтла">
+              <div class="title-discussion-toolbar">
+                <select id="titleDiscussionSort" class="title-discussion-sort" aria-label="Сортировка обсуждений"><option value="updates">Обновления</option></select>
+                <button id="titleDiscussionNew" class="title-discussion-new" type="button">Новая тема</button>
+              </div>
+              <form id="titleDiscussionComposer" class="title-discussion-composer hidden">
+                <input id="titleDiscussionTitle" maxlength="140" autocomplete="off" placeholder="Заголовок темы" aria-label="Заголовок темы">
+                <textarea id="titleDiscussionBody" rows="5" maxlength="6000" placeholder="О чём хотите поговорить?" aria-label="Текст темы"></textarea>
+                <div class="title-discussion-composer-actions">
+                  <span id="titleDiscussionLoginHint">Войдите через Telegram, чтобы создать тему.</span>
+                  <div><button id="titleDiscussionCancel" type="button">Отмена</button><button type="submit">Создать тему</button></div>
+                </div>
+              </form>
+              <div id="titleDiscussionMessage" class="title-discussion-message" role="status" aria-live="polite"></div>
+              <div id="titleDiscussionList" class="title-discussion-list"></div>
             </section>
 
             <section id="titleReviewsPanel" class="title-tab-panel title-reviews-shell hidden" role="tabpanel" aria-label="Отзывы о тайтле">
