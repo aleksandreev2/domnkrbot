@@ -5,10 +5,11 @@ import { checkRanobeLibAuthAdminAlert } from './ranobelib-auth-alerts.js';
 import { DELIVERY_BATCH_LIMIT } from './telegram-notification-delivery.js';
 import { drainMultiTeamNotificationOutbox } from './telegram-multi-team-delivery.js';
 import { handleTelegramMultiTeamGateway, type TelegramMultiTeamGatewayEnv } from './telegram-multi-team-gateway.js';
+import { handleWebHomeSocialApi, type WebHomeSocialEnv } from './web-home-social.js';
 import { handleWebTitleDiscussionsApi, type WebTitleDiscussionsEnv } from './web-title-discussions.js';
 
 type PreviousEnv = Parameters<typeof previous.fetch>[1];
-type Env = PreviousEnv & TelegramMultiTeamGatewayEnv & WebTitleDiscussionsEnv;
+type Env = PreviousEnv & TelegramMultiTeamGatewayEnv & WebTitleDiscussionsEnv & WebHomeSocialEnv;
 type FetchContext = Parameters<typeof previous.fetch>[2];
 type ScheduledController = Parameters<typeof previous.scheduled>[0];
 type QueueBatch = Parameters<typeof previous.queue>[0];
@@ -22,6 +23,9 @@ export default {
   async fetch(request: Request, env: Env, ctx: FetchContext): Promise<Response> {
     const intercepted = await handleTelegramMultiTeamGateway(request, env, ctx);
     if (intercepted) return intercepted;
+
+    const homeSocialResponse = await handleWebHomeSocialApi(request, env);
+    if (homeSocialResponse) return homeSocialResponse;
 
     const titleDiscussionsResponse = await handleWebTitleDiscussionsApi(request, env);
     if (titleDiscussionsResponse) return titleDiscussionsResponse;
