@@ -5,20 +5,20 @@ body.nl-body{background:var(--nl-bg);color:var(--nl-text);font:14px/1.45 var(--n
 .nl-header-inner{height:56px;display:grid;grid-template-columns:252px 1fr 252px;align-items:center;gap:0}
 .nl-brand{height:50px;display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;letter-spacing:0}
 .nl-brand img{width:34px;height:34px;border-radius:6px}
-.nl-nav.primary-nav{height:56px;display:flex;align-items:stretch;justify-content:center;gap:0}
-.nl-nav.primary-nav a,.nl-nav-button{height:56px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 10px;border:0;border-radius:0;background:transparent;color:var(--nl-text);font-size:14px;font-weight:600}
+.nl-nav.primary-nav{height:50px;display:flex;align-items:center;justify-content:center;gap:6px}
+.nl-nav.primary-nav a,.nl-nav-button{min-height:32px;height:32px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:var(--nl-text);font-size:14px;font-weight:600;transition:background-color .18s ease,color .18s ease}
 .nl-nav.primary-nav a:after,.nl-nav-button:after{display:none}
-.nl-nav.primary-nav a:hover,.nl-nav-button:hover,.nl-nav.primary-nav a.active{background:rgba(255,255,255,.28);color:var(--nl-text)}
-.nl-header-actions{margin-left:0;display:flex;align-items:center;justify-content:flex-end;gap:2px;min-width:0;height:56px}
-.nl-header-action,.admin-entry{width:40px;height:56px;padding:0;display:grid;place-items:center;border-radius:0;color:var(--nl-text)}
+.nl-nav.primary-nav a:hover,.nl-nav-button:hover,.nl-nav.primary-nav a.active{background:rgba(33,150,243,.2);color:var(--nl-text)}
+.nl-header-actions{margin-left:0;display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0;height:56px}
+.nl-header-action,.admin-entry{width:32px;height:32px;padding:0;display:grid;place-items:center;border-radius:6px;color:var(--nl-text);transition:background-color .18s ease}
 .nl-header-action span,.admin-entry span{display:none}
-.nl-header-action:hover,.admin-entry:hover{background:rgba(255,255,255,.28)}
-.nl-header-action svg,.admin-entry svg{width:18px;height:18px}
-.nl-account.account-menu summary{width:auto;min-width:40px;height:56px;padding:0 8px;border:0;border-radius:0;background:transparent;color:var(--nl-text);font-size:13px}
-.nl-account.account-menu summary:hover{background:rgba(255,255,255,.28)}
+.nl-header-action:hover,.admin-entry:hover{background:rgba(33,150,243,.2)}
+.nl-header-action svg,.admin-entry svg{width:16px;height:16px}
+.nl-account.account-menu summary{width:auto;min-width:32px;height:32px;padding:0 9px;border:0;border-radius:6px;background:transparent;color:var(--nl-text);font-size:13px;transition:background-color .18s ease}
+.nl-account.account-menu summary:hover{background:rgba(33,150,243,.2)}
 .nl-account .nl-chevron{display:none}
-.nl-icon-button,.mobile-menu-button.nl-icon-button{width:40px;height:56px;border:0;border-radius:0;background:transparent;color:var(--nl-text)}
-.nl-icon-button:hover{background:rgba(255,255,255,.28)}
+.nl-icon-button,.mobile-menu-button.nl-icon-button{width:32px;height:32px;border:0;border-radius:6px;background:transparent;color:var(--nl-text);transition:background-color .18s ease}
+.nl-icon-button:hover{background:rgba(33,150,243,.2)}
 .nl-search.search-wrap{display:none;position:fixed;z-index:120;top:64px;left:50%;width:min(620px,calc(100vw - 32px));transform:translateX(-50%)}
 .nl-search.search-wrap.mobile-open{display:block}
 .nl-search.search-wrap input{height:44px;padding-left:40px;border:1px solid var(--nl-border);border-radius:8px;background:#fff;font-size:14px;box-shadow:0 12px 30px rgba(0,0,0,.16)}
