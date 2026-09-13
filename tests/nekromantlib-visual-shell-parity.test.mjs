@@ -19,13 +19,14 @@ test('shared NekromantLib shell uses captured RanobeLib desktop tokens', async (
   assert.match(css, /--nl-shell:1200px/);
 });
 
-test('desktop header reproduces the captured 56px three-column shell', async () => {
+test('desktop header reproduces the captured 56px shell with 50px navigation and soft 32px actions', async () => {
   const css = await readSharedCss();
 
   assert.match(css, /\.nl-header\.site-header\{[^}]*min-height:56px[^}]*height:56px[^}]*background:#e0f2ff[^}]*box-shadow:0 1px 3px rgba\(0,0,0,\.12\)/s);
   assert.match(css, /\.nl-header-inner\{[^}]*height:56px[^}]*display:grid[^}]*grid-template-columns:252px 1fr 252px/s);
-  assert.match(css, /\.nl-nav\.primary-nav\{[^}]*height:56px/s);
-  assert.match(css, /\.nl-nav\.primary-nav a,\.nl-nav-button\{[^}]*height:56px/s);
+  assert.match(css, /\.nl-nav\.primary-nav\{[^}]*height:50px[^}]*gap:6px/s);
+  assert.match(css, /\.nl-nav\.primary-nav a,\.nl-nav-button\{[^}]*min-height:32px[^}]*border-radius:6px[^}]*padding:0 12px/s);
+  assert.match(css, /\.nl-nav\.primary-nav a:hover,\.nl-nav-button:hover[^}]*background:rgba\(33,150,243,\.2\)/s);
 });
 
 test('home page exposes the captured RanobeLib block hierarchy', async () => {
