@@ -24,6 +24,17 @@ type DiscussionRow = {
   reply_count: number | string | null;
 };
 
+type ReplyRow = {
+  id: string;
+  discussion_id: string;
+  author_telegram_id: string;
+  body: string;
+  created_at: string;
+  updated_at: string;
+  username: string | null;
+  first_name: string | null;
+};
+
 type DiscussionLocator = {
   id: string;
   book_ref: string;
@@ -38,6 +49,7 @@ type DiscussionBody = {
 
 type DiscussionRoute =
   | { kind: 'root' }
+  | { kind: 'detail'; discussionId: string }
   | { kind: 'replies'; discussionId: string };
 
 const JSON_HEADERS = {
@@ -75,8 +87,10 @@ function routeFor(pathname: string): DiscussionRoute | null {
   if (!pathname.startsWith(`${DISCUSSIONS_PATH}/`)) return null;
   const parts = pathname.slice(DISCUSSIONS_PATH.length + 1).split('/').filter(Boolean);
   const discussionId = cleanDiscussionId(parts[0]);
-  if (!discussionId || parts.length !== 2 || parts[1] !== 'replies') return null;
-  return { kind: 'replies', discussionId };
+  if (!discussionId) return null;
+  if (parts.length === 1) return { kind: 'detail', discussionId };
+  if (parts.length === 2 && parts[1] === 'replies') return { kind: 'replies', discussionId };
+  return null;
 }
 
 async function readBody(request: Request): Promise<DiscussionBody | Response> {
@@ -140,6 +154,20 @@ function publicDiscussion(row: DiscussionRow) {
   };
 }
 
+function publicReply(row: ReplyRow) {
+  return {
+    id: row.id,
+    discussionId: row.discussion_id,
+    body: row.body,
+    author: {
+      username: row.username || null,
+      firstName: row.first_name || '',
+    },
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 async function listDiscussions(
   request: Request,
   env: WebTitleDiscussionsEnv,
@@ -161,6 +189,41 @@ async function listDiscussions(
     LIMIT ${DISCUSSIONS_LIMIT}
   `).bind(bookRef).all<DiscussionRow>();
   return json({ sort: 'updates', discussions: results.map(publicDiscussion) });
+}
+
+async function getDiscussionDetail(
+  request: Request,
+  env: WebTitleDiscussionsEnv,
+  discussionId: string,
+): Promise<Response> {
+  await getSessionUser(request, env);
+  const discussion = await env.DB.prepare(`
+    SELECT d.id, d.book_ref, d.author_telegram_id, d.title, d.body, d.category,
+           d.created_at, d.updated_at, u.username, u.first_name,
+           COUNT(r.id) AS reply_count
+    FROM web_title_discussions d
+    LEFT JOIN users u ON u.telegram_id = d.author_telegram_id
+    LEFT JOIN web_title_discussion_replies r
+      ON r.discussion_id = d.id AND r.deleted_at IS NULL
+    WHERE d.id = ? AND d.deleted_at IS NULL
+    GROUP BY d.id
+    LIMIT 1
+  `).bind(discussionId).first<DiscussionRow>();
+  if (!discussion) return json({ error: 'Обсуждение не найдено.' }, 404);
+
+  const { results } = await env.DB.prepare(`
+    SELECT r.id, r.discussion_id, r.author_telegram_id, r.body,
+           r.created_at, r.updated_at, u.username, u.first_name
+    FROM web_title_discussion_replies r
+    LEFT JOIN users u ON u.telegram_id = r.author_telegram_id
+    WHERE r.discussion_id = ? AND r.deleted_at IS NULL
+    ORDER BY r.created_at DESC, r.id DESC
+  `).bind(discussionId).all<ReplyRow>();
+
+  return json({
+    discussion: publicDiscussion(discussion),
+    replies: results.map(publicReply),
+  });
 }
 
 async function createDiscussion(request: Request, env: WebTitleDiscussionsEnv): Promise<Response> {
@@ -224,7 +287,7 @@ async function createReply(
     SET updated_at = CURRENT_TIMESTAMP
     WHERE id = ? AND deleted_at IS NULL
   `).bind(discussionId).run();
-  return listDiscussions(request, env, discussion.book_ref);
+  return getDiscussionDetail(request, env, discussionId);
 }
 
 export async function handleWebTitleDiscussionsApi(
@@ -244,6 +307,9 @@ export async function handleWebTitleDiscussionsApi(
     return json({ error: 'Method not allowed' }, 405);
   }
 
+  if (route.kind === 'detail' && request.method === 'GET') {
+    return getDiscussionDetail(request, env, route.discussionId);
+  }
   if (route.kind === 'replies' && request.method === 'POST') {
     return createReply(request, env, route.discussionId);
   }
