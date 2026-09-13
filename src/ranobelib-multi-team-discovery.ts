@@ -40,6 +40,8 @@ export type MultiTeamDiscoveryOptions = {
 export type StoredRelationRow = {
   book_ref: string;
   presence_state: 'active' | 'dormant';
+  semantic_status?: string;
+  completion_pending?: number | string;
 };
 
 export type TeamDiscoveryReconciliation = {
@@ -141,7 +143,7 @@ export async function discoverOneRegisteredTeam(
   }
 
   const { results: existingRows } = await env.DB.prepare(`
-    SELECT book_ref, presence_state
+    SELECT book_ref, presence_state, semantic_status, completion_pending
     FROM ranobelib_team_translations
     WHERE team_id = ?
   `).bind(team.id).all<StoredRelationRow>();
@@ -154,9 +156,22 @@ export async function discoverOneRegisteredTeam(
     books.map((book) => book.ref),
     supplemented.preservedRefs,
   );
+  const existingByRef = new Map(existingRows.map((row) => [cleanRef(row.book_ref), row]));
+  const freshCompletionRefs = sortedUnique(books
+    .filter((book) => inferTeamCompletionState(book) === true)
+    .map((book) => cleanRef(book.ref))
+    .filter((ref) => {
+      const stored = existingByRef.get(ref);
+      return Boolean(
+        stored
+        && stored.presence_state === 'active'
+        && stored.semantic_status !== 'completed'
+        && Number(stored.completion_pending ?? 0) === 0
+      );
+    }));
 
   await upsertWorkRows(env.DB, books);
-  await upsertTeamTranslationRows(env.DB, team.id, books);
+  await upsertTeamTranslationRows(env.DB, team.id, books, freshCompletionRefs);
   if (reconciliation.makeDormant.length > 0) {
     await markTeamTranslationsDormant(env.DB, team.id, reconciliation.makeDormant);
   }
@@ -342,6 +357,7 @@ async function upsertTeamTranslationRows(
   db: D1DatabaseLike,
   teamId: number,
   books: RanobeLibTeamBookRef[],
+  freshCompletionRefs: readonly string[],
 ): Promise<void> {
   const payload = JSON.stringify(books.map((book) => ({
     ref: book.ref,
@@ -393,21 +409,17 @@ async function upsertTeamTranslationRows(
        OR (${NEXT_COMPLETION_REVISION}) IS NOT ranobelib_team_translations.completion_revision
   `).bind(payload, teamId).run();
 
-  // A team-scoped completion transition always receives a prompt final chapter poll even when the
-  // work currently has no subscriber demand or the team is hidden.
-  await db.prepare(`
-    UPDATE ranobelib_titles
-    SET next_check_at = CURRENT_TIMESTAMP,
-        scan_priority = MAX(scan_priority, 20)
-    WHERE book_ref IN (
-      SELECT tt.book_ref
-      FROM ranobelib_team_translations tt
-      WHERE tt.team_id = ?
-        AND tt.presence_state = 'active'
-        AND tt.completion_pending = 1
-    )
-      AND (next_check_at IS NULL OR next_check_at > CURRENT_TIMESTAMP OR scan_priority < 20)
-  `).bind(teamId).run();
+  if (freshCompletionRefs.length > 0) {
+    // Wake exactly once for a newly observed active -> completion-pending transition. Subsequent
+    // discovery heartbeats must preserve a retry schedule chosen by the scanner.
+    await db.prepare(`
+      UPDATE ranobelib_titles
+      SET next_check_at = CURRENT_TIMESTAMP,
+          scan_priority = MAX(scan_priority, 20)
+      WHERE book_ref IN (SELECT CAST(value AS TEXT) FROM json_each(?))
+        AND (next_check_at IS NULL OR next_check_at > CURRENT_TIMESTAMP OR scan_priority < 20)
+    `).bind(JSON.stringify(freshCompletionRefs)).run();
+  }
 }
 
 async function markTeamTranslationsDormant(

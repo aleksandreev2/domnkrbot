@@ -101,6 +101,16 @@ export function computeMultiTeamNextCheckDelayMinutes(input: {
   return misses <= 2 ? 2 : 5;
 }
 
+export function computePendingCompletionRetryDelayMinutes(attempt: number): number {
+  const normalized = Math.max(1, Math.floor(Number(attempt) || 1));
+  if (normalized === 1) return 1;
+  if (normalized === 2) return 2;
+  if (normalized === 3) return 5;
+  if (normalized === 4) return 10;
+  if (normalized === 5) return 30;
+  return 60;
+}
+
 export function classifyUnattributedTeamPayload(input: {
   fetchedBranchCount: number;
   relevantBranchCount: number;
@@ -150,7 +160,9 @@ export async function scanDueMultiTeamWorks(
         () => scanOneMultiTeamWork(env, client, work, options.mode, scanClass, now),
       );
     } catch (error) {
-      await scheduleWorkFailure(env.DB, work.book_ref, error);
+      if (options.mode !== 'shadow') {
+        await scheduleWorkFailure(env.DB, work.book_ref, error);
+      }
       return {
         ...emptyWorkOutcome(),
         error: `${work.book_ref}: ${compactError(error)}`,
@@ -217,15 +229,7 @@ export async function selectDueMultiTeamWorks(
     )
       AND (${classPredicate})
       AND (
-        EXISTS (
-          SELECT 1 FROM ranobelib_team_translations bootstrap
-          JOIN ranobelib_teams bootstrap_team ON bootstrap_team.id = bootstrap.team_id
-          WHERE bootstrap.book_ref = t.book_ref
-            AND bootstrap.presence_state = 'active'
-            AND bootstrap_team.lifecycle_state IN ('hidden','published')
-            AND bootstrap.completion_pending = 1
-        )
-        OR t.next_check_at IS NULL
+        t.next_check_at IS NULL
         OR t.next_check_at <= CURRENT_TIMESTAMP
         ${staleHotSchedulePredicate}
       )
@@ -254,7 +258,9 @@ async function scanOneMultiTeamWork(
 ): Promise<WorkScanOutcome> {
   const translations = await loadActionableTranslations(env.DB, work.book_ref);
   if (translations.length === 0) {
-    await scheduleNextWorkCheck(env.DB, work, scanClass, false);
+    if (mode !== 'shadow') {
+      await scheduleNextWorkCheck(env.DB, work, scanClass, false);
+    }
     return emptyWorkOutcome();
   }
 
@@ -280,7 +286,9 @@ async function scanOneMultiTeamWork(
     })),
   });
   if (attributionDisposition === 'awaiting-first-team-branch') {
-    await recordAwaitingFirstTeamBranch(env.DB, work, scanClass);
+    if (mode !== 'shadow') {
+      await recordAwaitingFirstTeamBranch(env.DB, work, scanClass);
+    }
     return { ...emptyWorkOutcome(), fetchedWorks: 1 };
   }
   if (attributionDisposition === 'error') {
@@ -332,6 +340,14 @@ async function scanOneMultiTeamWork(
       upstreamTeamIds: branch.teamIds,
     })),
   });
+  const pendingCompletionTeamIds = new Set(translations
+    .filter((row) => Number(row.completion_pending) === 1 && row.semantic_status !== 'completed')
+    .map((row) => Number(row.internal_team_id))
+    .filter((teamId) => Number.isSafeInteger(teamId) && teamId > 0));
+  const finalizedCompletionTeamIds = new Set(completionPlan.finalizations.map((row) => row.teamId));
+  const unresolvedCompletion = [...pendingCompletionTeamIds]
+    .some((teamId) => !finalizedCompletionTeamIds.has(teamId));
+
   const releasableTeams = new Map(plan.releasableBranches.map((branch) => [
     branchSnapshotKey(branch.chapterId, branch.branchKey),
     branch.teamIds,
@@ -357,7 +373,13 @@ async function scanOneMultiTeamWork(
 
   const completionReleaseDetected = mode === 'live' && completionPlan.notifyTeamIds.length > 0 ? 1 : 0;
   const changed = candidates.length > 0 || completionPlan.finalizations.length > 0;
-  await updateWorkAfterSuccessfulScan(env.DB, work, relevant.map(({ branch }) => branch), scanClass, changed, now);
+  if (mode !== 'shadow') {
+    if (unresolvedCompletion) {
+      await updateWorkAfterUnresolvedCompletion(env.DB, work, relevant.map(({ branch }) => branch));
+    } else {
+      await updateWorkAfterSuccessfulScan(env.DB, work, relevant.map(({ branch }) => branch), scanClass, changed, now);
+    }
+  }
 
   return {
     fetchedWorks: 1,
@@ -424,6 +446,49 @@ function groupReleaseCandidates(
   return [...groups.values()]
     .map((group) => ({ ...group, chapters: [...group.chapters].sort(compareBranchesByChapter) }))
     .sort((a, b) => compareBranchesByChapter(a.chapters[0]!, b.chapters[0]!));
+}
+
+async function updateWorkAfterUnresolvedCompletion(
+  db: D1DatabaseLike,
+  work: DueWork,
+  branches: RanobeLibChapterBranch[],
+): Promise<void> {
+  const uniqueChapters = new Map<number, RanobeLibChapterBranch>();
+  for (const branch of branches) uniqueChapters.set(branch.chapterId, branch);
+  const ordered = [...uniqueChapters.values()].sort(compareBranchesByChapter);
+  const latest = ordered[ordered.length - 1] ?? null;
+  const previousMisses = Math.max(0, Math.floor(Number(work.consecutive_no_change ?? 0)));
+  const attempt = Math.max(0, Math.floor(Number(work.consecutive_failures ?? 0))) + 1;
+  const delay = computePendingCompletionRetryDelayMinutes(attempt);
+  const error = `completion_pending: unresolved final branch (attempt ${attempt})`;
+
+  await db.prepare(`
+    UPDATE ranobelib_titles
+    SET chapter_count = ?,
+        latest_chapter_id = ?,
+        latest_volume = ?,
+        latest_number = ?,
+        latest_name = ?,
+        snapshot_ready = 1,
+        last_synced_at = CURRENT_TIMESTAMP,
+        consecutive_no_change = ?,
+        consecutive_failures = ?,
+        next_check_at = datetime(CURRENT_TIMESTAMP, '+' || ? || ' minutes'),
+        scan_priority = MAX(scan_priority - 1, 0),
+        sync_error = ?
+    WHERE book_ref = ?
+  `).bind(
+    ordered.length,
+    latest?.chapterId ?? null,
+    latest?.volume ?? null,
+    latest?.number ?? null,
+    latest?.name ?? null,
+    previousMisses + 1,
+    attempt,
+    delay,
+    error,
+    work.book_ref,
+  ).run();
 }
 
 async function updateWorkAfterSuccessfulScan(
