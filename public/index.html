@@ -9,16 +9,22 @@
   <link rel="stylesheet" href="/site.css?v=20260819-reader1">
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
   <link rel="stylesheet" href="/ranobelib-parity.css?v=20260913-parity1">
+  <link rel="stylesheet" href="/home-parity.css?v=20260913-home2">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/site.js?v=20260820-reader2"></script>
+  <script defer src="/site.js?v=20260913-home2"></script>
+  <script defer src="/home-parity.js?v=20260913-home2"></script>
 </head>
 <body class="nl-body">
   <header class="site-header nl-header">
     <div class="nl-shell nl-header-inner">
       <button class="mobile-menu-button nl-icon-button" id="mobileMenuButton" type="button" aria-label="Открыть меню"><i data-lucide="menu"></i></button>
       <a class="nl-brand" href="/" aria-label="НекромантЛиб — главная"><img src="/brand/team-logo.webp" alt="" width="40" height="40"><span>НекромантЛиб</span></a>
-      <nav class="primary-nav nl-nav" id="primaryNav" aria-label="Основная навигация"><a class="active" href="/catalog/"><i data-lucide="layers-3"></i><span>Каталог</span></a><button class="nl-nav-button" id="searchNavButton" type="button"><i data-lucide="search"></i><span>Поиск</span></button><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer"><i data-lucide="messages-square"></i><span>Форум</span></a></nav>
+      <nav class="primary-nav nl-nav" id="primaryNav" aria-label="Основная навигация">
+        <a class="active" href="/catalog/"><i data-lucide="layers-3"></i><span>Каталог</span></a>
+        <button class="nl-nav-button" id="searchNavButton" type="button"><i data-lucide="search"></i><span>Поиск</span></button>
+        <a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer"><i data-lucide="messages-square"></i><span>Форум</span></a>
+      </nav>
       <div class="header-actions nl-header-actions">
         <div class="search-wrap nl-search"><i data-lucide="search"></i><input id="titleSearch" type="search" autocomplete="off" placeholder="Найти тайтл" aria-label="Поиск по тайтлам"><div id="searchResults" class="search-results hidden"></div></div>
         <a class="nl-header-action" href="/propose/" aria-label="Предложить тайтл"><i data-lucide="plus"></i><span>Добавить</span></a>
@@ -30,21 +36,63 @@
   </header>
 
   <main class="nl-main">
-    <div class="nl-shell nl-home-grid">
-      <div class="nl-home-primary">
-        <section class="surface nl-section updates-panel" aria-labelledby="latestHeading"><div class="section-head nl-section-head"><div><h1 id="latestHeading">Последние обновления</h1><p>Свежие главы переводов «Дом Некроманта»</p></div><a href="/catalog/">Все обновления <i data-lucide="chevron-right"></i></a></div><div id="releaseFeed" class="release-feed" aria-live="polite"><div class="release-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div></div></section>
+    <div class="nl-shell nl-home-grid home-reference-grid">
+      <section class="surface nl-section home-popular" aria-label="Популярные обновления">
+        <div id="popularUpdates" class="home-cover-strip" aria-live="polite">
+          <div class="home-cover-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+        </div>
+      </section>
 
-        <section class="surface nl-section" id="catalog" aria-labelledby="catalogHeading"><div class="section-head nl-section-head"><div><h2 id="catalogHeading">Новинки</h2><p id="catalogCount">Каталог загружается</p></div><a href="/catalog/">Открыть каталог <i data-lucide="chevron-right"></i></a></div><div id="titleGrid" class="book-grid nl-book-grid"><div class="book-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span></div></div></section>
+      <section class="surface nl-section home-top-views" aria-labelledby="nowReadingHeading">
+        <div class="home-top-head">
+          <a id="nowReadingHeading" class="home-section-title" href="/catalog/">Сейчас читают <i data-lucide="arrow-right"></i></a>
+          <button class="home-period-button" type="button" aria-label="Период рейтинга" disabled><span>За день</span><i data-lucide="caret-down"></i></button>
+        </div>
+        <div class="home-top-grid">
+          <div class="home-top-column">
+            <a class="home-top-column-title" href="/catalog/?sort=updated">Новинки</a>
+            <div id="topViewsNew" class="home-top-list"></div>
+          </div>
+          <div class="home-top-column">
+            <a class="home-top-column-title" href="/catalog/?sort=updated">Набирающее популярность</a>
+            <div id="topViewsRising" class="home-top-list"></div>
+          </div>
+          <div class="home-top-column">
+            <a class="home-top-column-title" href="/catalog/?sort=chapters">Популярное</a>
+            <div id="topViewsPopular" class="home-top-list"></div>
+          </div>
+        </div>
+      </section>
 
-        <section class="surface nl-section" id="community" aria-labelledby="communityHeading"><div class="section-head nl-section-head"><div><h2 id="communityHeading">Предложения читателей</h2><p>Что перевести следующим</p></div><a href="/propose/">Предложить тайтл <i data-lucide="circle-plus"></i></a></div><div id="proposalGrid" class="proposal-grid nl-proposal-grid"><div class="proposal-loading" aria-hidden="true"><span></span><span></span><span></span></div></div></section>
-      </div>
+      <section class="home-latest-updates" aria-labelledby="latestHeading">
+        <div class="surface nl-section home-latest-paper">
+          <div class="section-head nl-section-head home-latest-head">
+            <h1 id="latestHeading">Последние обновления</h1>
+            <div class="home-tabs" role="tablist" aria-label="Обновления">
+              <button class="active" type="button" role="tab" aria-selected="true">Все обновления</button>
+              <button type="button" role="tab" aria-selected="false" disabled>Мои обновления</button>
+            </div>
+          </div>
+          <div id="releaseFeed" class="release-feed" aria-live="polite"><div class="release-skeleton" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span></div></div>
+          <div class="home-more-row"><a class="home-more-button" href="/catalog/">Показать ещё</a></div>
+        </div>
+      </section>
 
-      <aside class="home-rail" aria-label="Боковая панель">
-        <section class="surface rail-section"><div class="rail-tabs" aria-label="Активность"><strong>Сейчас обновляется</strong></div><div id="activeRail" class="rail-title-list"><div class="rail-skeleton"><span></span><span></span><span></span></div></div></section>
-        <a class="telegram-card" href="https://t.me/domnekromanta" target="_blank" rel="noreferrer"><span class="telegram-card-icon"><i data-lucide="send"></i></span><span><strong>Telegram-канал</strong><small>Новости переводов, релизы и общение</small></span><i data-lucide="chevron-right"></i></a>
-        <section class="surface rail-section"><div class="rail-tabs"><strong>Наши переводы</strong></div><div id="newRail" class="rail-title-list"><div class="rail-skeleton"><span></span><span></span><span></span></div></div></section>
-        <section class="surface rail-section team-card"><div class="team-card-head"><img src="/brand/team-logo.webp" alt="" width="42" height="42"><div><strong>Дом Некроманта</strong><small>Команда перевода</small></div></div><p>НекромантЛиб использует каталог и главы нашей команды. Авторизация и уведомления связаны с Telegram-ботом.</p><a href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">Открыть канал <i data-lucide="chevron-right"></i></a></section>
-      </aside>
+      <a class="telegram-card home-telegram" href="https://t.me/domnekromanta" target="_blank" rel="noreferrer">
+        <span class="telegram-card-icon"><i data-lucide="send"></i></span>
+        <span><strong>Telegram-канал «Дом Некроманта»</strong><small>Новости переводов, релизы и общение</small></span>
+        <i data-lucide="arrow-right"></i>
+      </a>
+
+      <section class="home-side-section home-proposals" aria-labelledby="proposalHeading">
+        <div class="home-side-heading"><a id="proposalHeading" href="/propose/">Предложения читателей <i data-lucide="arrow-right"></i></a></div>
+        <div class="surface home-side-paper"><div id="proposalRail" class="home-compact-list"><div class="rail-skeleton"><span></span><span></span><span></span></div></div></div>
+      </section>
+
+      <section class="home-side-section home-newest" aria-labelledby="newestHeading">
+        <div class="home-side-heading"><a id="newestHeading" href="/catalog/?sort=updated">Новинки <i data-lucide="arrow-right"></i></a></div>
+        <div class="surface home-side-paper home-newest-paper"><div id="newestRail" class="home-newest-strip"></div></div>
+      </section>
     </div>
   </main>
 
