@@ -23,6 +23,7 @@ jobs:
       - name: Check website JavaScript syntax
         run: |
           node --check public/site.js
+          node --check public/home-parity.js
           node --check public/propose.js
           node --check public/title.js
           node --check public/reader.js
@@ -53,7 +54,8 @@ jobs:
           grep -Fq 'id="readerSettings"' public/reader/index.html
           grep -Fq 'id="adminLink" class="admin-entry hidden"' public/index.html
           grep -Fq '/ui-icons.js?v=20260820-icons3' public/index.html
-          grep -Fq '/site.js?v=20260820-reader2' public/index.html
+          grep -Fq '/home-parity.js?v=20260913-home3' public/index.html
+          ! grep -Fq '/site.js?' public/index.html
           grep -Fq '/ui-icons.js?v=20260820-icons3' public/admin/index.html
           grep -Fq 'publishing-analytics.js?v=20260820-ops4' public/admin/index.html
           grep -Fq 'publishing-analytics.css?v=20260819-ops3' public/admin/index.html
