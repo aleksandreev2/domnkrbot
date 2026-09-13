@@ -160,8 +160,12 @@
     state.busy=true;renderComposer();setMessage('Сохраняем отзыв…');
     const editing=state.editingId;
     try{
-      const path=editing?`/api/title/reviews/${encodeURIComponent(editing)}`:'/api/title/reviews';
-      const payload=await api(path,{method:editing?'PATCH':'POST',headers:{'content-type':'application/json'},body:JSON.stringify({bookRef:ref,body,sort:state.sort})});
+      let payload;
+      if(editing){
+        payload=await api(`/api/title/reviews/${encodeURIComponent(editing)}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({body,sort:state.sort})});
+      }else{
+        payload=await api('/api/title/reviews',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({bookRef:ref,body,sort:state.sort})});
+      }
       applyPayload(payload);closeComposer();setMessage('');
     }catch(error){setMessage(error.message||'Не удалось сохранить отзыв.');}
     finally{state.busy=false;renderComposer();}
@@ -172,8 +176,8 @@
     if(!window.confirm('Удалить отзыв?'))return;
     state.busy=true;renderComposer();setMessage('Удаляем отзыв…');
     try{
-      await api(`/api/title/reviews/${encodeURIComponent(review.id)}`,{method:'DELETE'});
-      closeComposer();await loadTitleReviews(true);setMessage('');
+      const payload=await api(`/api/title/reviews/${encodeURIComponent(review.id)}`,{method:'DELETE'});
+      applyPayload(payload);closeComposer();setMessage('');
     }catch(error){setMessage(error.message||'Не удалось удалить отзыв.');}
     finally{state.busy=false;renderComposer();}
   }
