@@ -101,6 +101,16 @@ export function computeMultiTeamNextCheckDelayMinutes(input: {
   return misses <= 2 ? 2 : 5;
 }
 
+export function computePendingCompletionRetryDelayMinutes(attempt: number): number {
+  const normalized = Math.max(1, Math.floor(Number(attempt) || 1));
+  if (normalized === 1) return 1;
+  if (normalized === 2) return 2;
+  if (normalized === 3) return 5;
+  if (normalized === 4) return 10;
+  if (normalized === 5) return 30;
+  return 60;
+}
+
 export function classifyUnattributedTeamPayload(input: {
   fetchedBranchCount: number;
   relevantBranchCount: number;
@@ -219,15 +229,7 @@ export async function selectDueMultiTeamWorks(
     )
       AND (${classPredicate})
       AND (
-        EXISTS (
-          SELECT 1 FROM ranobelib_team_translations bootstrap
-          JOIN ranobelib_teams bootstrap_team ON bootstrap_team.id = bootstrap.team_id
-          WHERE bootstrap.book_ref = t.book_ref
-            AND bootstrap.presence_state = 'active'
-            AND bootstrap_team.lifecycle_state IN ('hidden','published')
-            AND bootstrap.completion_pending = 1
-        )
-        OR t.next_check_at IS NULL
+        t.next_check_at IS NULL
         OR t.next_check_at <= CURRENT_TIMESTAMP
         ${staleHotSchedulePredicate}
       )
