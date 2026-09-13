@@ -30,28 +30,28 @@ test('HOT multi-team works never sleep longer than five minutes', async () => {
   }), 180, 'zero-demand IDLE works should keep the three-hour cadence');
 });
 
-test('unbaselined works respect next_check_at after their first bootstrap attempt', async () => {
+test('bootstrap and completion work respect next_check_at after their immediate wake-up', async () => {
   const source = await readFile(new URL('../src/ranobelib-multi-team-scanner.ts', import.meta.url), 'utf8');
   const selectorStart = source.indexOf('export async function selectDueMultiTeamWorks');
   const selectorEnd = source.indexOf('async function scanOneMultiTeamWork', selectorStart);
   assert.ok(selectorStart >= 0 && selectorEnd > selectorStart, 'multi-team selector must remain inspectable');
   const selector = source.slice(selectorStart, selectorEnd);
-  const scheduleStart = selector.indexOf('AND (\n        EXISTS (');
+  const scheduleStart = selector.indexOf('      AND (\n        t.next_check_at IS NULL');
   const scheduleEnd = selector.indexOf('    ORDER BY', scheduleStart);
   assert.ok(scheduleStart >= 0 && scheduleEnd > scheduleStart, 'schedule gate must remain inspectable');
   const scheduleGate = selector.slice(scheduleStart, scheduleEnd);
 
-  assert.match(scheduleGate, /bootstrap\.completion_pending = 1/,
-    'completion final scans may bypass next_check_at because they are mandatory');
-  assert.doesNotMatch(scheduleGate, /bootstrap\.baseline_ready = 0\s+OR\s+bootstrap\.completion_pending = 1/,
+  assert.doesNotMatch(scheduleGate, /completion_pending\s*=\s*1/,
+    'pending completion must not bypass next_check_at after discovery wakes it once');
+  assert.doesNotMatch(scheduleGate, /baseline_ready\s*=\s*0/,
     'ordinary baseline bootstrap must respect next_check_at after the first attempt');
   assert.match(scheduleGate, /t\.next_check_at IS NULL/,
     'a newly discovered title with no schedule must still bootstrap immediately');
   assert.match(scheduleGate, /t\.next_check_at <= CURRENT_TIMESTAMP/,
-    'scheduled bootstrap scans must become due normally');
+    'scheduled bootstrap and completion retries must become due normally');
 });
 
-test('every automatic multi-team selector class requires subscriber demand', async () => {
+test('every automatic multi-team selector class demand-gates ordinary work while allowing pending completion', async () => {
   const { selectDueMultiTeamWorks } = await loadScanner();
   const queries = [];
   const env = {
@@ -74,5 +74,7 @@ test('every automatic multi-team selector class requires subscriber demand', asy
   assert.equal(queries.length, 2, 'idle must not query D1');
   for (const query of queries) {
     assert.match(query, /COALESCE\(t\.notification_subscriber_count, 0\) > 0/);
+    assert.match(query, /pending\.completion_pending = 1/,
+      'pending completion remains the only zero-demand automatic scan exception');
   }
 });
