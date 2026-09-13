@@ -22,10 +22,11 @@ test('notifications v2 migration rebuilds settings safely, adds exclusions, and 
 test('notification callbacks stay compact and use numeric RanobeLib ids', () => {
   assert.equal(typeof notifications.parseSubscriptionCallback, 'function');
   assert.deepEqual(notifications.parseSubscriptionCallback('subs:center'), { kind: 'center' });
+  assert.deepEqual(notifications.parseSubscriptionCallback('subs:test'), { kind: 'test' });
   assert.deepEqual(notifications.parseSubscriptionCallback('subs:notify:toggle:62387'), { kind: 'notify-toggle', titleId: 62387 });
   assert.deepEqual(notifications.parseSubscriptionCallback('subs:notify:settings:62387'), { kind: 'notify-settings', titleId: 62387 });
   assert.deepEqual(notifications.parseSubscriptionCallback('subs:notify:panel-toggle:62387'), { kind: 'notify-panel-toggle', titleId: 62387 });
-  for (const value of ['subs:center', 'subs:notify:toggle:62387', 'subs:notify:settings:62387', 'subs:notify:panel-toggle:62387']) {
+  for (const value of ['subs:center', 'subs:test', 'subs:notify:toggle:62387', 'subs:notify:settings:62387', 'subs:notify:panel-toggle:62387']) {
     assert.ok(Buffer.byteLength(value, 'utf8') <= 64);
   }
 });
@@ -66,7 +67,7 @@ test('release notification v2 has reading and direct subscription controls', () 
   assert.equal(off.reply_markup.inline_keyboard[1][0].text, '🔔 Подписаться');
 });
 
-test('notification center shows instant delivery as status, not a fake interactive mode control', () => {
+test('notification center shows instant delivery status and a real delivery self-test', () => {
   assert.equal(typeof notifications.buildNotificationCenter, 'function');
   const all = notifications.buildNotificationCenter({
     deliveryMode: 'instant',
@@ -79,6 +80,7 @@ test('notification center shows instant delivery as status, not a fake interacti
   assert.match(all.text, /Все переводы, кроме 2/);
   assert.deepEqual(all.reply_markup.inline_keyboard, [
     [{ text: '📚 Управлять тайтлами', callback_data: 'subs:list:0' }],
+    [{ text: '🧪 Проверить уведомления', callback_data: 'subs:test' }],
     [{ text: '🔕 Отключить все', callback_data: 'subs:all:clear' }],
   ]);
   assert.equal(
