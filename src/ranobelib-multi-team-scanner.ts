@@ -150,7 +150,9 @@ export async function scanDueMultiTeamWorks(
         () => scanOneMultiTeamWork(env, client, work, options.mode, scanClass, now),
       );
     } catch (error) {
-      await scheduleWorkFailure(env.DB, work.book_ref, error);
+      if (options.mode !== 'shadow') {
+        await scheduleWorkFailure(env.DB, work.book_ref, error);
+      }
       return {
         ...emptyWorkOutcome(),
         error: `${work.book_ref}: ${compactError(error)}`,
@@ -254,7 +256,9 @@ async function scanOneMultiTeamWork(
 ): Promise<WorkScanOutcome> {
   const translations = await loadActionableTranslations(env.DB, work.book_ref);
   if (translations.length === 0) {
-    await scheduleNextWorkCheck(env.DB, work, scanClass, false);
+    if (mode !== 'shadow') {
+      await scheduleNextWorkCheck(env.DB, work, scanClass, false);
+    }
     return emptyWorkOutcome();
   }
 
@@ -280,7 +284,9 @@ async function scanOneMultiTeamWork(
     })),
   });
   if (attributionDisposition === 'awaiting-first-team-branch') {
-    await recordAwaitingFirstTeamBranch(env.DB, work, scanClass);
+    if (mode !== 'shadow') {
+      await recordAwaitingFirstTeamBranch(env.DB, work, scanClass);
+    }
     return { ...emptyWorkOutcome(), fetchedWorks: 1 };
   }
   if (attributionDisposition === 'error') {
@@ -357,7 +363,9 @@ async function scanOneMultiTeamWork(
 
   const completionReleaseDetected = mode === 'live' && completionPlan.notifyTeamIds.length > 0 ? 1 : 0;
   const changed = candidates.length > 0 || completionPlan.finalizations.length > 0;
-  await updateWorkAfterSuccessfulScan(env.DB, work, relevant.map(({ branch }) => branch), scanClass, changed, now);
+  if (mode !== 'shadow') {
+    await updateWorkAfterSuccessfulScan(env.DB, work, relevant.map(({ branch }) => branch), scanClass, changed, now);
+  }
 
   return {
     fetchedWorks: 1,
