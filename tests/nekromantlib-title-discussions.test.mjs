@@ -49,7 +49,7 @@ test('production entry routes title discussions before the v2 worker', async () 
   );
 });
 
-test('title discussions tab is a real URL-backed native thread list', async () => {
+test('title discussions tab is a native thread list owned by the central title router', async () => {
   const html = await read('../public/title/index.html');
   const js = await read('../public/title-discussions.js');
   const css = await read('../public/title-discussions.css');
@@ -65,8 +65,8 @@ test('title discussions tab is a real URL-backed native thread list', async () =
   assert.match(html, /title-discussions\.css/);
 
   assert.match(js, /\/api\/title\/discussions\?ref=/);
-  assert.match(js, /section=discussions/);
-  assert.match(js, /history\.replaceState/);
+  assert.match(js, /title-tab-change/);
+  assert.doesNotMatch(js, /history\.(?:replaceState|pushState)/);
   assert.match(js, /renderTitleDiscussions/);
   assert.match(js, /createDiscussion/);
   assert.match(js, /replyCount/);
