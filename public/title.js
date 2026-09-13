@@ -3,11 +3,11 @@
   const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
   const LIST_LABELS={reading:'Читаю',planned:'В планах',dropped:'Брошено',completed:'Прочитано',favorite:'Любимые',other:'Другое'};
-  const SECTION_BY_TAB={comments:'comments',discussions:'discussions',reviews:'review'};
+  const SECTION_BY_TAB={chapters:'chapters',comments:'comments',discussions:'discussions',reviews:'review'};
   const TAB_BY_SECTION=Object.fromEntries(Object.entries(SECTION_BY_TAB).map(([tab,section])=>[section,tab]));
   const PANEL_BY_TAB={about:'titleAboutPanel',chapters:'titleChaptersPanel',comments:'titleCommentsPanel',discussions:'titleDiscussionsPanel',reviews:'titleReviewsPanel'};
   const initialSection=new URLSearchParams(location.search).get('section')||'';
-  const state={session:null,data:null,sort:'new',activeTab:TAB_BY_SECTION[initialSection]||'chapters',titleState:null,titleStateLoaded:false,titleStateBusy:false};
+  const state={session:null,data:null,sort:'new',activeTab:TAB_BY_SECTION[initialSection]||'about',titleState:null,titleStateLoaded:false,titleStateBusy:false};
   const ref=new URLSearchParams(location.search).get('ref')||'';
 
   async function api(path,options={}){const response=await fetch(path,{credentials:'same-origin',...options});const body=await response.json().catch(()=>null);if(!response.ok)throw new Error(body?.error||`HTTP ${response.status}`);return body;}
@@ -44,7 +44,7 @@
   function closeTitleStateMenus(){closePlanMenu();closeRatingPicker();}
   function togglePlanMenu(){const button=$('#titlePlanButton'),menu=$('#titlePlanMenu');if(!button||button.disabled||!menu)return;const opening=menu.classList.contains('hidden');closeRatingPicker();menu.classList.toggle('hidden',!opening);button.setAttribute('aria-expanded',String(opening));}
   function toggleRatingPicker(){const button=$('#titleMyRatingButton'),picker=$('#titleRatingPicker');if(!button||button.disabled||!picker)return;const opening=picker.classList.contains('hidden');closePlanMenu();picker.classList.toggle('hidden',!opening);button.setAttribute('aria-expanded',String(opening));}
-  function tabFromLocation(){const section=new URLSearchParams(location.search).get('section')||'';return TAB_BY_SECTION[section]||'chapters';}
+  function tabFromLocation(){const section=new URLSearchParams(location.search).get('section')||'';return TAB_BY_SECTION[section]||'about';}
   function syncTitleSection(tab){
     const params=new URLSearchParams(location.search);
     const section=SECTION_BY_TAB[tab]||'';
