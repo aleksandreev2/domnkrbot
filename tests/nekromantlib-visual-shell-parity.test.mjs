@@ -28,14 +28,33 @@ test('desktop header reproduces the captured 56px three-column shell', async () 
   assert.match(css, /\.nl-nav\.primary-nav a,\.nl-nav-button\{[^}]*height:56px/s);
 });
 
-test('home desktop composition follows the captured two-column RanobeLib grid', async () => {
-  const css = await readSharedCss();
+test('home page exposes the captured RanobeLib block hierarchy', async () => {
+  const html = await read('../public/index.html');
+  for (const id of ['popularUpdates','topViewsNew','topViewsRising','topViewsPopular','releaseFeed','proposalRail','newestRail']) {
+    assert.match(html, new RegExp(`id="${id}"`));
+  }
+  assert.match(html, /class="[^"]*home-reference-grid/);
+  assert.match(html, />Сейчас читают</);
+  assert.match(html, />Набирающее популярность</);
+  assert.match(html, />Последние обновления</);
+  assert.doesNotMatch(html, /class="[^"]*team-card/);
+});
 
-  assert.match(css, /\.nl-main\{[^}]*padding:16px 0/s);
-  assert.match(css, /\.nl-home-grid\{[^}]*grid-template-columns:minmax\(0,1fr\) 540px[^}]*gap:20px/s);
-  assert.match(css, /\.surface\{[^}]*background:var\(--nl-surface\)[^}]*border:0[^}]*border-radius:8px[^}]*box-shadow:none/s);
-  assert.match(css, /\.nl-section\{[^}]*padding:0[^}]*margin-bottom:20px/s);
-  assert.match(css, /\.nl-section-head\.section-head\{[^}]*padding:12px 16px/s);
+test('home desktop composition follows the captured full-width then 1fr 540px grid', async () => {
+  const css = await read('../public/home-parity.css');
+  assert.match(css, /\.home-reference-grid\{[^}]*grid-template-columns:minmax\(0,1fr\) 540px[^}]*grid-template-areas:"popular popular" "top top" "latest telegram" "latest proposals" "latest newest" "latest \\."/s);
+  assert.match(css, /\.home-popular\{[^}]*grid-area:popular/s);
+  assert.match(css, /\.home-top-views\{[^}]*grid-area:top/s);
+  assert.match(css, /\.home-latest-updates\{[^}]*grid-area:latest/s);
+});
+
+test('home cover strip and now-reading cards use captured RanobeLib dimensions', async () => {
+  const css = await read('../public/home-parity.css');
+  assert.match(css, /\.home-cover-strip\{[^}]*gap:16px[^}]*padding:12px 16px[^}]*min-height:273px/s);
+  assert.match(css, /\.home-cover-card\{[^}]*flex:0 0 135px[^}]*width:135px/s);
+  assert.match(css, /\.home-cover-media\{[^}]*padding-top:140%[^}]*border-radius:6px/s);
+  assert.match(css, /\.home-top-grid\{[^}]*grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/s);
+  assert.match(css, /\.home-top-item img\{[^}]*width:72px[^}]*height:72px[^}]*border-radius:6px/s);
 });
 
 test('latest updates use the captured RanobeLib row density', async () => {
