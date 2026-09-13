@@ -10,10 +10,12 @@
   <link rel="stylesheet" href="/nekromantlib.css?v=20260912-home1">
   <link rel="stylesheet" href="/title.css?v=20260913-title5">
   <link rel="stylesheet" href="/title-comments.css?v=20260913-comments1">
+  <link rel="stylesheet" href="/title-reviews.css?v=20260913-reviews1">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
   <script defer src="/title.js?v=20260913-title5"></script>
   <script defer src="/title-comments.js?v=20260913-comments1"></script>
+  <script defer src="/title-reviews.js?v=20260913-reviews1"></script>
 </head>
 <body class="nl-body title-detail-body">
   <header class="site-header nl-header">
@@ -100,7 +102,7 @@
               <button type="button" role="tab" data-title-tab="chapters" class="active" aria-selected="true" aria-controls="titleChaptersPanel">Главы</button>
               <button type="button" role="tab" data-title-tab="comments" aria-selected="false" aria-controls="titleCommentsPanel">Комментарии</button>
               <button type="button" role="tab" data-title-tab="discussions" disabled aria-disabled="true" title="Обсуждения пока не подключены">Обсуждения</button>
-              <button type="button" role="tab" data-title-tab="reviews" disabled aria-disabled="true" title="Отзывы пока не подключены">Отзывы</button>
+              <button type="button" role="tab" data-title-tab="reviews" aria-selected="false" aria-controls="titleReviewsPanel">Отзывы</button>
             </nav>
 
             <section id="titleAboutPanel" class="title-tab-panel hidden" role="tabpanel">
@@ -163,6 +165,26 @@
               </form>
               <div id="titleCommentsMessage" class="title-comments-message" role="status" aria-live="polite"></div>
               <div id="titleCommentsList" class="title-comments-list"></div>
+            </section>
+
+            <section id="titleReviewsPanel" class="title-tab-panel title-reviews-shell hidden" role="tabpanel" aria-label="Отзывы о тайтле">
+              <div class="title-reviews-toolbar">
+                <div class="title-reviews-sort" role="group" aria-label="Сортировка отзывов">
+                  <button id="titleReviewsNew" class="active" type="button">Новые</button>
+                  <button id="titleReviewsTop" type="button">Лучшие</button>
+                </div>
+                <button id="titleWriteReview" class="title-write-review" type="button">Написать отзыв</button>
+              </div>
+              <form id="titleReviewForm" class="title-review-composer hidden">
+                <textarea id="titleReviewText" rows="6" maxlength="6000" placeholder="Расскажите, что вы думаете о тайтле..." aria-label="Текст отзыва"></textarea>
+                <div class="title-review-composer-actions">
+                  <span id="titleReviewLoginHint">Войдите через Telegram, чтобы написать отзыв.</span>
+                  <button id="titleReviewCancel" type="button">Отмена</button>
+                  <button id="titleReviewSubmit" type="submit">Опубликовать</button>
+                </div>
+              </form>
+              <div id="titleReviewsMessage" class="title-reviews-message" role="status" aria-live="polite"></div>
+              <div id="titleReviewsList" class="title-reviews-list"></div>
             </section>
           </section>
         </div>
