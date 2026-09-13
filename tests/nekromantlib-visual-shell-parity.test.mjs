@@ -77,3 +77,18 @@ test('latest updates use the captured RanobeLib row density', async () => {
   assert.match(css, /\.release-cover\{[^}]*width:80px[^}]*height:112px/s);
   assert.match(css, /\.release-title\{[^}]*font-size:15px/s);
 });
+
+test('home social cards expose live RanobeLib review cues and weekly-reading progress', async () => {
+  const js = await read('../public/home-parity.js');
+  const css = await read('../public/home-parity.css');
+
+  assert.match(js, /home-review-kind/);
+  assert.match(js, /home-review-sentiment/);
+  assert.match(js, /home-user-progress/);
+  assert.match(js, /role="progressbar"/);
+  assert.match(js, /aria-valuenow=/);
+  assert.match(css, /\.home-review-kind\{/);
+  assert.match(css, /\.home-review-sentiment\{/);
+  assert.match(css, /\.home-user-progress\{/);
+  assert.match(css, /\.home-user-progress-fill\{/);
+});
