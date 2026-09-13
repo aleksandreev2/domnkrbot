@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="/title-reviews.css?v=20260913-reviews1">
   <script defer src="/vendor/lucide.min.js?v=1.27.0"></script>
   <script defer src="/ui-icons.js?v=20260820-icons3"></script>
-  <script defer src="/title.js?v=20260913-title6"></script>
+  <script defer src="/title.js?v=20260913-title7"></script>
   <script defer src="/title-routing-bridge.js?v=20260913-route1"></script>
   <script defer src="/title-comments.js?v=20260913-comments1"></script>
   <script defer src="/title-discussions.js?v=20260913-discussions1"></script>
@@ -101,14 +101,14 @@
 
           <section class="surface title-media-content">
             <nav class="title-tabs" role="tablist" aria-label="Разделы тайтла">
-              <button type="button" role="tab" data-title-tab="about" aria-selected="false" aria-controls="titleAboutPanel">О тайтле</button>
-              <button type="button" role="tab" data-title-tab="chapters" class="active" aria-selected="true" aria-controls="titleChaptersPanel">Главы</button>
+              <button type="button" role="tab" data-title-tab="about" class="active" aria-selected="true" aria-controls="titleAboutPanel">О тайтле</button>
+              <button type="button" role="tab" data-title-tab="chapters" aria-selected="false" aria-controls="titleChaptersPanel">Главы</button>
               <button type="button" role="tab" data-title-tab="comments" aria-selected="false" aria-controls="titleCommentsPanel">Комментарии</button>
               <button type="button" role="tab" data-title-tab="discussions" aria-selected="false" aria-controls="titleDiscussionsPanel">Обсуждения</button>
               <button type="button" role="tab" data-title-tab="reviews" aria-selected="false" aria-controls="titleReviewsPanel">Отзывы</button>
             </nav>
 
-            <section id="titleAboutPanel" class="title-tab-panel hidden" role="tabpanel">
+            <section id="titleAboutPanel" class="title-tab-panel" role="tabpanel">
               <div class="title-description-card">
                 <div class="title-section-heading"><div><h2>Описание</h2></div></div>
                 <div id="titleDescription" class="title-description">Описание пока отсутствует.</div>
@@ -130,7 +130,7 @@
               </section>
             </section>
 
-            <section id="titleChaptersPanel" class="title-tab-panel" role="tabpanel">
+            <section id="titleChaptersPanel" class="title-tab-panel hidden" role="tabpanel">
               <div id="chapters" class="title-chapters-section">
                 <div class="title-section-heading chapter-toolbar">
                   <label class="chapter-search"><i data-lucide="search"></i><input id="chapterSearch" type="search" placeholder="Номер или название главы" aria-label="Поиск главы"></label>
