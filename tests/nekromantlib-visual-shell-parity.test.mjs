@@ -28,7 +28,9 @@ test('desktop header keeps captured geometry with the lighter live RanobeLib chr
   assert.match(css, /\.nl-header\.site-header\{[^}]*box-shadow:0 1px 2px rgba\(0,0,0,\.04\)/s);
   assert.match(css, /\.nl-header-inner\{[^}]*height:56px[^}]*display:grid[^}]*grid-template-columns:252px 1fr 252px/s);
   assert.match(css, /\.nl-nav\.primary-nav\{[^}]*height:50px[^}]*gap:6px/s);
-  assert.match(css, /\.nl-nav\.primary-nav a,\.nl-nav-button\{[^}]*min-height:32px[^}]*border-radius:6px[^}]*padding:0 12px/s);
+  assert.match(css, /\.nl-nav\.primary-nav a,\.nl-nav-button\{[^}]*min-height:32px/s);
+  assert.match(css, /\.nl-nav\.primary-nav a,\.nl-nav-button\{[^}]*border-radius:6px/s);
+  assert.match(css, /\.nl-nav\.primary-nav a,\.nl-nav-button\{[^}]*padding:0 12px/s);
   assert.match(css, /\.nl-nav\.primary-nav a:hover,\.nl-nav-button:hover[^}]*background:rgba\(33,150,243,\.1\)/s);
 });
 
@@ -45,7 +47,7 @@ test('home page exposes the captured RanobeLib block hierarchy', async () => {
     assert.match(html, new RegExp(`id="${id}"`));
   }
   assert.match(html, /class="[^"]*home-reference-grid/);
-  assert.match(html, />Сейчас читают</);
+  assert.match(html, />Сейчас читают\s*<i\s+data-lucide="arrow-right"/);
   assert.match(html, />Набирающее популярность</);
   assert.match(html, />Последние обновления</);
   assert.doesNotMatch(html, /class="[^"]*team-card/);
