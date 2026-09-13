@@ -34,3 +34,11 @@ test('home newest rail uses captured desktop quarter-width cards', async () => {
   assert.match(css, /\.home-newest-card\{[^}]*width:25%/s);
   assert.match(css, /@media\s*\(max-width:1049px\)[\s\S]*\.home-newest-card\{[^}]*width:130px/s);
 });
+
+test('home header uses a horizontal NekromantLib wordmark footprint instead of avatar-plus-label chrome', async () => {
+  const css = await readHomeCss();
+  assert.match(css, /\.nl-header \.nl-brand img\{[^}]*display:none/s);
+  assert.match(css, /\.nl-header \.nl-brand\{[^}]*height:50px[^}]*gap:0/s);
+  assert.match(css, /\.nl-header \.nl-brand:before\{[^}]*content:"Некромант"[^}]*font-size:20px/s);
+  assert.match(css, /\.nl-header \.nl-brand:after\{[^}]*content:"Либ"[^}]*color:var\(--nl-accent\)/s);
+});
