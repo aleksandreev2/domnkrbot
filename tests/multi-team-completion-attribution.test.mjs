@@ -124,9 +124,10 @@ test('multi-team discovery stores team-scoped completion pending from catalog st
 
 test('multi-team scanner finalizes team completion only after final chapter snapshot', async () => {
   const scanner = await source('src/ranobelib-multi-team-scanner.ts');
+  const persistence = await source('src/ranobelib-multi-team-persistence.ts');
   assert.match(scanner, /computeTeamScopedCompletionPlan/);
   assert.match(scanner, /finalizeTeamCompletions/);
-  assert.match(scanner, /persistTeamCompletionRelease/);
+  assert.match(persistence, /persistTeamCompletionRelease/);
   assert.doesNotMatch(scanner, /getTranslationStatus/);
 
   const persistSnapshotAt = scanner.indexOf('await persistBranchSnapshot');
@@ -136,10 +137,10 @@ test('multi-team scanner finalizes team completion only after final chapter snap
 });
 
 test('team completion release is mapped to exact teams instead of copying completion by work', async () => {
-  const scanner = await source('src/ranobelib-multi-team-scanner.ts');
-  assert.match(scanner, /INSERT OR IGNORE INTO ranobelib_release_teams/);
-  assert.match(scanner, /release_kind[\s\S]*translation_completed/);
-  assert.match(scanner, /notifyTeamIds/);
-  assert.match(scanner, /completion_pending = 0/);
-  assert.doesNotMatch(scanner, /UPDATE ranobelib_team_translations[\s\S]{0,400}SET semantic_status = 'completed'[\s\S]{0,400}WHERE book_ref = \?\s*(?:;|`)/);
+  const persistence = await source('src/ranobelib-multi-team-persistence.ts');
+  assert.match(persistence, /INSERT OR IGNORE INTO ranobelib_release_teams/);
+  assert.match(persistence, /release_kind[\s\S]*translation_completed/);
+  assert.match(persistence, /notifyTeamIds/);
+  assert.match(persistence, /completion_pending = 0/);
+  assert.doesNotMatch(persistence, /UPDATE ranobelib_team_translations[\s\S]{0,400}SET semantic_status = 'completed'[\s\S]{0,400}WHERE book_ref = \?\s*(?:;|`)/);
 });
