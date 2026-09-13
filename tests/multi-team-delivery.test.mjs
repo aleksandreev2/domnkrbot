@@ -8,7 +8,10 @@ import { multiTeamDeliveryScopeKey } from '../dist-runtime/ranobelib-multi-team-
 const deliverySource = readFileSync(new URL('../src/telegram-multi-team-delivery.ts', import.meta.url), 'utf8');
 const entrySource = readFileSync(new URL('../src/live-entry-v3.ts', import.meta.url), 'utf8');
 const schedulerSource = readFileSync(new URL('../src/live-entry-v2.ts', import.meta.url), 'utf8');
-const scannerSource = readFileSync(new URL('../src/ranobelib-multi-team-scanner.ts', import.meta.url), 'utf8');
+const scannerSource = [
+  readFileSync(new URL('../src/ranobelib-multi-team-scanner.ts', import.meta.url), 'utf8'),
+  readFileSync(new URL('../src/ranobelib-multi-team-persistence.ts', import.meta.url), 'utf8'),
+].join('\n');
 const migration = readFileSync(new URL('../migrations/0026_multi_team_delivery_scope.sql', import.meta.url), 'utf8');
 
 function row(releaseId, scope, teams = ['Team A'], number = releaseId === 'a' ? '1' : '2') {

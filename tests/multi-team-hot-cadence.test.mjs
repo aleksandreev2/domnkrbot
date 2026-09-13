@@ -50,3 +50,29 @@ test('unbaselined works respect next_check_at after their first bootstrap attemp
   assert.match(scheduleGate, /t\.next_check_at <= CURRENT_TIMESTAMP/,
     'scheduled bootstrap scans must become due normally');
 });
+
+test('every automatic multi-team selector class requires subscriber demand', async () => {
+  const { selectDueMultiTeamWorks } = await loadScanner();
+  const queries = [];
+  const env = {
+    DB: {
+      prepare(query) {
+        queries.push(query.replace(/\s+/g, ' ').trim());
+        return {
+          bind() { return this; },
+          async all() { return { results: [] }; },
+        };
+      },
+    },
+  };
+
+  await selectDueMultiTeamWorks(env, 24, 'hot');
+  await selectDueMultiTeamWorks(env, 24, 'all');
+  const idle = await selectDueMultiTeamWorks(env, 24, 'idle');
+
+  assert.deepEqual(idle, []);
+  assert.equal(queries.length, 2, 'idle must not query D1');
+  for (const query of queries) {
+    assert.match(query, /COALESCE\(t\.notification_subscriber_count, 0\) > 0/);
+  }
+});

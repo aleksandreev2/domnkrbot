@@ -173,9 +173,9 @@ export async function selectDueMultiTeamWorks(
   if (scanClass === 'idle') return [];
 
   const safeLimit = clampInt(limit, 1, DEFAULT_LIMIT);
-  const classPredicate = scanClass === 'hot'
-    ? 'COALESCE(t.notification_subscriber_count, 0) > 0'
-    : '1 = 1';
+  // Every automatic scan class is demand-gated. `all` is used by direct callers/tests and must
+  // not become a back door that resumes polling zero-subscriber works.
+  const classPredicate = 'COALESCE(t.notification_subscriber_count, 0) > 0';
   const staleHotSchedulePredicate = scanClass === 'hot'
     ? `OR (COALESCE(t.notification_subscriber_count, 0) > 0
            AND t.next_check_at > datetime(CURRENT_TIMESTAMP, '+5 minutes'))`

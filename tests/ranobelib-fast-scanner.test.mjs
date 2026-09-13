@@ -23,7 +23,7 @@ test('paid scanner preserves the frozen 1/2/5/10/30 cadence and exponential fail
   assert.equal(scanner.computeNextCheckDelayMinutes({ changed: false, consecutiveNoChange: 0, consecutiveFailures: 9, failed: true, now }), 30);
 });
 
-test('selectDueTitles uses one demand-aware query for HOT titles and uninitialized bootstrap titles with a 24-title cap', async () => {
+test('selectDueTitles uses one demand-aware query for subscribed active or completion titles with a 24-title cap', async () => {
   const scanner = await loadScanner();
   const calls = [];
   const rows = Array.from({ length: 8 }, (_, index) => ({
@@ -39,7 +39,8 @@ test('selectDueTitles uses one demand-aware query for HOT titles and uninitializ
     last_change_at: null,
     next_check_at: index === 0 ? null : '2026-09-07 08:00:00',
     scan_priority: 0,
-    notification_subscriber_count: index === 0 ? 0 : 1,
+    notification_subscriber_count: 1,
+    translation_completion_pending: index === 0 ? 1 : 0,
   }));
   const env = {
     DB: {
@@ -57,8 +58,9 @@ test('selectDueTitles uses one demand-aware query for HOT titles and uninitializ
   const result = await scanner.selectDueTitles(env);
   assert.equal(result.length, 8);
   assert.equal(calls.length, 1);
+  assert.match(calls[0].query, /notification_subscriber_count\s*>\s*0/i);
   assert.match(calls[0].query, /is_active\s*=\s*1/i);
-  assert.match(calls[0].query, /snapshot_ready\s*=\s*0[\s\S]*notification_subscriber_count\s*>\s*0/i);
+  assert.match(calls[0].query, /translation_completion_pending\s*=\s*1\s+OR\s+is_active\s*=\s*1/i);
   assert.match(calls[0].query, /next_check_at\s+IS\s+NULL[\s\S]*next_check_at\s*<=\s*CURRENT_TIMESTAMP/i);
   assert.match(calls[0].query, /ORDER BY[\s\S]*COALESCE\s*\(\s*next_check_at[\s\S]*notification_subscriber_count\s+DESC[\s\S]*scan_priority\s+DESC/i);
   assert.match(calls[0].query, /LIMIT\s*\?/i);

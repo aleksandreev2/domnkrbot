@@ -210,15 +210,16 @@ test('team discovery treats current catalog membership as active while preservin
 
 test('scanner keeps baseline and shadow non-delivering and uses branch-aware team mappings', async () => {
   const source = await readFile(new URL('../src/ranobelib-multi-team-scanner.ts', import.meta.url), 'utf8');
+  const persistence = await readFile(new URL('../src/ranobelib-multi-team-persistence.ts', import.meta.url), 'utf8');
 
   assert.doesNotMatch(source, /const baselineNeeded = translations\.some/);
   assert.match(source, /computeTeamScopedScanPlan/);
   assert.match(source, /getChapterBranches\(work\.book_ref\)/);
-  assert.match(source, /INSERT OR IGNORE INTO ranobelib_release_teams/);
-  assert.match(source, /reconcileReleaseOutboxRecipients\(env, releaseId\)/);
+  assert.match(persistence, /INSERT OR IGNORE INTO ranobelib_release_teams/);
+  assert.match(persistence, /reconcileReleaseOutboxRecipients\(env, releaseId\)/);
   assert.match(source, /if \(mode === 'live'\)[\s\S]*persistBranchRelease\(env, work, candidate\)/);
   assert.match(
-    source,
+    persistence,
     /FROM incoming\s+WHERE 1 = 1\s+ON CONFLICT\(book_ref, chapter_id, branch_key\) DO UPDATE SET/i,
   );
 });
