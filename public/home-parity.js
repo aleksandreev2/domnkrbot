@@ -1,6 +1,6 @@
 (() => {
   const $=(selector,root=document)=>root.querySelector(selector);
-  const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+  const esc=(value='')=>String(value).replace(/[&<>"']/g,(char)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[char]));
   const refreshIcons=()=>window.DomNkrIcons?.refresh?.();
   const MAX_CONTINUE=8;
   let titleIndex=new Map();
@@ -174,7 +174,13 @@
 
   function renderReviews(items){
     const host=$('#reviewsRail');if(!host)return;
-    host.innerHTML=items.length?items.slice(0,4).map((item)=>`<a class="home-review-card" href="${titleUrl(item.bookRef)}#reviews"><span class="home-review-head"><img class="home-review-cover" loading="lazy" src="${esc(item.coverUrl||'/brand/team-logo.webp')}" alt=""><span class="home-review-head-copy"><strong>${esc(item.bookTitle||'Тайтл')}</strong><small>${esc(item.author||'Читатель')}</small></span></span><span class="home-review-body">${esc(item.body||'')}</span><span class="home-review-foot"><span>${esc(dateRelative(item.updatedAt)||'')}</span><span class="home-review-score"><i data-lucide="thumbs-up"></i>${Number(item.score||0)}</span></span></a>`).join(''):empty('Отзывов пока нет');
+    host.innerHTML=items.length?items.slice(0,4).map((item)=>{
+      const score=Number(item.score||0);
+      const sentiment=score>0?'positive':score<0?'negative':'neutral';
+      const reviewKind=esc(item.kind||'Отзыв');
+      const scoreIcon=score<0?'thumbs-down':'thumbs-up';
+      return `<a class="home-review-card" href="${titleUrl(item.bookRef)}#reviews"><span class="home-review-sentiment ${sentiment}" aria-hidden="true"></span><span class="home-review-head"><img class="home-review-cover" loading="lazy" src="${esc(item.coverUrl||'/brand/team-logo.webp')}" alt=""><span class="home-review-head-copy"><span class="home-review-kind">${reviewKind}</span><strong>${esc(item.bookTitle||'Тайтл')}</strong><small>${esc(item.author||'Читатель')}</small></span></span><span class="home-review-body">${esc(item.body||'')}</span><span class="home-review-foot"><span>${esc(dateRelative(item.updatedAt)||'')}</span><span class="home-review-score ${sentiment}"><i data-lucide="${scoreIcon}"></i>${score}</span></span></a>`;
+    }).join(''):empty('Отзывов пока нет');
   }
 
   function renderCollections(items){
@@ -190,7 +196,16 @@
 
   function renderTopUsers(items){
     const host=$('#topUsersRail');if(!host)return;
-    host.innerHTML=items.length?items.slice(0,10).map((item)=>{const name=String(item.name||'Читатель');const initial=esc((name.replace(/^@/,'').trim()[0]||'?').toUpperCase());return`<div class="home-user-card"><span class="home-user-avatar">${initial}</span><span class="home-user-name">${esc(name)}</span><span class="home-user-stat">${Number(item.activityCount||0)} чтений за неделю</span><span class="home-user-rank">#${Number(item.rank||0)||'—'}</span></div>`;}).join(''):empty('Статистика чтения ещё собирается');
+    const leaders=items.slice(0,10);
+    const maxActivity=Math.max(1,...leaders.map((item)=>Math.max(0,Number(item.activityCount)||0)));
+    host.innerHTML=leaders.length?leaders.map((item)=>{
+      const name=String(item.name||'Читатель');
+      const initial=esc((name.replace(/^@/,'').trim()[0]||'?').toUpperCase());
+      const activity=Math.max(0,Number(item.activityCount)||0);
+      const percent=Math.max(0,Math.min(100,Math.round(activity/maxActivity*100)));
+      const rank=Number(item.rank||0)||'—';
+      return `<div class="home-user-card"><span class="home-user-avatar">${initial}</span><span class="home-user-head"><span class="home-user-name">${esc(name)}</span><span class="home-user-rank">#${rank}</span></span><span class="home-user-stat">${activity} чтений за неделю</span><span class="home-user-progress" role="progressbar" aria-label="Активность ${esc(name)}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><span class="home-user-progress-fill" style="width:${percent}%"></span></span></div>`;
+    }).join(''):empty('Статистика чтения ещё собирается');
   }
 
   function uniqueReleaseTitles(releases,titles){
